@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeccanicOS</title>
+<meta name="description" content="MeccanicOS: light, fast, secure, coherent and portable. A NixOS-based Linux for a USB stick: shell first, keyboard driven, encrypted, with sane custom tools.">
+<link rel="canonical" href="https://meccanicos.com/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://meccanicos.com/">
+<meta property="og:title" content="MeccanicOS">
+<meta property="og:description" content="MeccanicOS: light, fast, secure, coherent and portable. A NixOS-based Linux for a USB stick: shell first, keyboard driven, encrypted, with sane custom tools.">
+<meta property="og:image" content="https://meccanicos.com/screenshots/desktop.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Victor+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  /* The colours of MeccanicOS's prompt and full-screen tools (scripts/lib/mos_tui.py). */
+  :root {
+    --bg: #000;
+    --panel: #0d1112;
+    --line: #1f2a2c;
+    --text: #e4e4e4;
+    --dim: #9aa3a5;
+    --teal: #005f5f;
+    --teal-hi: #2b8a8a;
+    --orange: #ffaf00;
+    --sand: #d7af87;
+    --mono: "Victor Mono", ui-monospace, monospace;
+    --sans: Inter, system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); }
+  a { color: var(--orange); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+
+  header.hero { padding: 88px 0 56px; text-align: center; border-bottom: 1px solid var(--line); }
+  h1 { font-size: clamp(48px, 9vw, 88px); line-height: 1; margin: 0 0 18px; font-weight: 800; letter-spacing: -0.03em; }
+  h1 em { font-style: normal; color: var(--orange); }
+  .table { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { color: var(--sand); font-weight: 600; }
+  tbody th { font-weight: 600; color: var(--text); }
+  td.yes { color: #7fd1a6; }
+  td.no { color: var(--orange); }
+  figure.tutorial video { display: block; width: 100%; height: auto; border-radius: 12px; background: #000; }
+  h1 .logo { display: block; margin: 0 auto; width: clamp(200px, 40vw, 320px); height: auto; } /* branding/MeccanicOS.png, resized */
+  .more { margin: 22px 0 0; color: var(--dim); font-size: 15px; }
+  .tagline { font-size: clamp(18px, 2.4vw, 22px); color: var(--dim); max-width: 720px; margin: 0 auto 44px; }
+
+  .buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; max-width: 840px; margin: 0 auto; }
+  .big {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    padding: 26px 16px; border-radius: 14px; text-decoration: none;
+    background: var(--panel); border: 2px solid var(--teal-hi); color: var(--text);
+    transition: transform .12s, background .12s, border-color .12s;
+  }
+  .big:hover, .big:focus-visible { transform: translateY(-3px); border-color: var(--orange); outline: none; }
+  .big.main { background: var(--orange); border-color: var(--orange); color: #1c1c1c; }
+  .big svg { width: 38px; height: 38px; }
+  .big b { font-size: 24px; font-weight: 800; }
+  .big small { font-size: 14px; opacity: .8; }
+
+  figure.desktop { margin: 56px auto 0; max-width: 1120px; }
+  figure.desktop figcaption { color: var(--dim); font-size: 14px; margin-top: 12px; }
+
+  section { padding: 64px 0 24px; }
+  h2 { font-size: 32px; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2::before { content: "▍"; color: var(--orange); margin-right: 6px; }
+  .lead { color: var(--dim); margin: 0 0 32px; max-width: 760px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+  /* min-width: 0 lets a card be narrower than its widest line (the commands
+     scroll inside their box instead of widening the page on a phone). */
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; min-width: 0; }
+  .card h3 { margin: 0 0 6px; font-size: 18px; color: var(--sand); }
+  .usb pre { margin: 8px 0 0; max-width: 100%; overflow-x: auto; background: #000; border-radius: 8px; padding: 10px 12px; }
+  .usb pre code { font: 12.5px/1.5 var(--mono); color: var(--sand); white-space: pre; }
+  .usb .get { font-weight: 600; color: var(--orange); }
+  .usb .card.yours { border-color: var(--orange); order: -1; }
+  .usb .card.yours h3::after { content: " — this computer"; color: var(--dim); font-weight: 400; font-size: 14px; }
+  .more-ways { color: var(--dim); margin-top: 20px; }
+  .card p { margin: 0; color: var(--dim); }
+
+  .tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px; }
+  .tool { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .tool button.shot { all: unset; cursor: zoom-in; display: block; background: #15191a; aspect-ratio: 1123 / 1012; } /* every screenshot is this size (tests/default.nix) */
+  .tool button.shot:focus-visible { outline: 2px solid var(--orange); }
+  .tool img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .tool .body { padding: 14px 18px 18px; }
+  .tool h3 { margin: 0 0 4px; font: 600 17px var(--mono); color: var(--orange); }
+  .tool p { margin: 0 0 8px; color: var(--dim); }
+  .tool code { font: 13px var(--mono); color: var(--sand); background: #000; padding: 2px 8px; border-radius: 6px; display: inline-block; }
+  .group-title { font: 600 14px var(--sans); color: var(--dim); text-transform: uppercase; letter-spacing: .08em; margin: 34px 0 14px; }
+
+  .packages { columns: 3 260px; column-gap: 28px; }
+  .pkg { break-inside: avoid; margin: 0 0 22px; }
+  .pkg h3 { font-size: 15px; color: var(--sand); margin: 0 0 6px; }
+  .pkg ul { margin: 0; padding: 0; list-style: none; }
+  .pkg li { font: 14px var(--mono); padding: 2px 0; color: var(--text); }
+  .pkg li span { color: var(--dim); font-family: var(--sans); font-size: 13px; }
+  .pkg li a { color: inherit; text-decoration: none; }
+  .pkg li a:hover, .pkg li a:focus-visible { color: var(--orange); }
+
+  footer { border-top: 1px solid var(--line); margin-top: 56px; padding: 28px 0 48px; color: var(--dim); font-size: 14px; text-align: center; }
+
+  dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 94vh; }
+  dialog::backdrop { background: rgba(0, 0, 0, .88); }
+  dialog img { max-width: 96vw; max-height: 88vh; display: block; border-radius: 8px; }
+  dialog p { color: var(--text); text-align: center; font: 15px var(--mono); margin: 10px 0 0; }
+
+  @media (max-width: 640px) {
+    header.hero { padding: 56px 0 40px; }
+    .buttons { grid-template-columns: 1fr; }
+    .tools, .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1><img class="logo" src="MeccanicOS.png" width="320" height="320" alt="MeccanicOS"></h1>
+    <p class="tagline">Light, fast, secure, coherent and portable.
+      Based on NixOS, shell first, keyboard driven, encrypted filesystem, sane custom tools.</p>
+    <nav class="buttons" aria-label="Get MeccanicOS">
+      <a class="big" href="https://github.com/unofficialtools/meccanicos">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        <b>Source</b><small>on GitHub</small>
+      </a>
+      <a class="big main" href="#usb">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="9" width="10" height="13" rx="1.5"/><path d="M9 9V3h6v6"/><line x1="11" y1="5" x2="11" y2="6.5"/><line x1="13" y1="5" x2="13" y2="6.5"/></svg>
+        <b>Make a USB drive</b><small>Windows · macOS · Linux</small>
+      </a>
+      <a class="big" href="https://github.com/unofficialtools/meccanicos/releases/tag/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <b>Download</b><small>just the ISO</small>
+      </a>
+    </nav>
+    <p class="more"><a href="https://github.com/unofficialtools/meccanicos#readme">Read the manual</a></p>
+    <figure class="desktop tutorial">
+      <video src="tutorial.mp4" poster="screenshots/desktop.png" controls playsinline preload="metadata"
+        aria-label="The MeccanicOS tutorial, with subtitles"></video>
+      <figcaption>The tutorial (7 minutes, with subtitles): the ideas behind MeccanicOS, then a tour of the desktop, the terminal and its tools, the persistent home and the installer.</figcaption>
+    </figure>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section id="usb">
+  <h2>Make a USB drive</h2>
+  <p class="lead">One small program does it all: it downloads the latest MeccanicOS and checks it,
+    tells you to insert a USB drive (16 GB or larger), makes it bootable with
+    <a href="https://www.ventoy.net">Ventoy</a> and copies MeccanicOS onto it, then explains how to start a computer from it.
+    It asks no questions; before erasing a drive it names it and gives you 10 seconds to pull it out.
+    A drive that already has Ventoy keeps its other files. (On macOS, where Ventoy does not run, it writes MeccanicOS directly to the drive.)</p>
+  <div class="grid usb">
+    <div class="card" data-os="windows"><h3>Windows</h3>
+      <p><a class="get" href="https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-windows.exe">Download mos-usb-windows.exe</a></p>
+      <p>Double-click it and allow it to make changes. If Windows warns about an unknown publisher: <i>More info</i> → <i>Run anyway</i>.</p></div>
+    <div class="card" data-os="mac"><h3>macOS</h3>
+      <p>In Terminal (Apple silicon; on an Intel Mac use <code>mos-usb-macos-x86_64</code>):</p>
+      <pre><code>curl -fLO https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-macos-arm64
+chmod +x mos-usb-macos-arm64
+./mos-usb-macos-arm64</code></pre></div>
+    <div class="card" data-os="linux"><h3>Linux</h3>
+      <p>In a terminal (on ARM use <code>mos-usb-linux-arm64</code>):</p>
+      <pre><code>curl -fLO https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-linux-x86_64
+chmod +x mos-usb-linux-x86_64
+./mos-usb-linux-x86_64</code></pre></div>
+  </div>
+  <p class="more-ways">Prefer to do it by hand? <a href="https://github.com/unofficialtools/meccanicos/releases/tag/latest">Download the ISO</a> and follow
+    <a href="https://github.com/unofficialtools/meccanicos#2-write-it-to-a-usb-stick">Write it to a USB stick</a>.</p>
+</section>
+
+<section id="principles">
+  <h2>Principles</h2>
+  <p class="lead">MeccanicOS is designed to be light, fast, secure and coherent. <span id="measured"></span></p>
+  <div class="grid">
+    <div class="card"><h3>Keyboard first</h3><p>No start menu. Super+Space opens one command bar for apps, commands, websites, folders and questions.</p></div>
+    <div class="card"><h3>Works offline</h3><p>The desktop, the included apps and the drivers are on the stick, and installing needs no network. More apps and local AI models are downloaded once, when you ask for them.</p></div>
+    <div class="card"><h3>Secure, with stated trade-offs</h3><p>Installed: the whole disk encrypted (LUKS2). Live: the session stays in memory, and your vaults and persistent home are encrypted. A hardened kernel, a firewall, login alerts. For convenience <code>sudo</code> asks no password, and an installed system runs SSH with keys only; both can be changed.</p></div>
+    <div class="card"><h3>Coherent</h3><p>One way to open any file, one look for every tool, apps named by what they do: "Web Browser (Brave)".</p></div>
+    <div class="card"><h3>Reproducible</h3><p>The whole system is one Nix flake. Upgrades are atomic: a failed one changes nothing, and you can roll back.</p></div>
+    <div class="card"><h3>Hardware first</h3><p>The firmware and drivers of EndeavourOS's live ISO, except firmware that may not be redistributed: Mesa and Vulkan, video acceleration, PipeWire, Bluetooth, printers and scanners, NVIDIA's driver picked by itself. Hardening never gets in a driver's way.</p></div>
+    <div class="card"><h3>Free to share</h3><p>Only freely redistributable software, so you may share any ISO you build.</p></div>
+  </div>
+</section>
+
+<section id="features">
+  <h2>Features</h2>
+  <p class="lead">What you get on the stick.</p>
+  <div class="grid">
+    <div class="card"><h3>Command bar</h3><p>Type part of an app name, a website, a command, a path (<code>~/Documents</code> opens it in yazi) or <code>!command</code> to run it in a new shell. <code>?question</code> asks the AI.</p></div>
+    <div class="card"><h3>Live, persistent or installed</h3><p>Run from USB with nothing kept, keep your home encrypted on the stick, or install to the disk from one page. <a href="https://github.com/unofficialtools/meccanicos#what-survives-a-restart">What survives a restart</a>.</p></div>
+    <div class="card"><h3>Encrypted vaults</h3><p>LUKS2 vaults in the stick's free space, and on Ventoy sticks as files next to the ISO.</p></div>
+    <div class="card"><h3>Open anything</h3><p><code>open FILE</code> works like on a Mac, and the same rules apply in the shell, yazi, mc, fzf and on a double-click.</p></div>
+    <div class="card"><h3>Apps on demand</h3><p>With a network: search nixpkgs' 120,000 packages, try an app without installing it, or give one folder its own tools with direnv.</p></div>
+    <div class="card"><h3>AI chat, your choice</h3><p>Local AI after a one-time model download (Qwen3 through Ollama, ~2.5 GB; then offline, and nothing leaves the computer), or Claude, ChatGPT or Grok with your API key (your questions go to that company).</p></div>
+    <div class="card"><h3>Read aloud</h3><p>Copy any text and an offline voice (Piper) reads it, sentence by sentence.</p></div>
+    <div class="card"><h3>Login alerts</h3><p>An alert on an SSH login from somewhere new or an SSH attack, never more than a few an hour. One key disconnects everything.</p></div>
+    <div class="card"><h3>Backups like Time Machine</h3><p>Encrypted, every night or when you plug in the disk, or to the cloud. Get back any earlier version of a file from a right-click.</p></div>
+    <div class="card"><h3>Settings and a doctor</h3><p>Common settings in one place, exported to another computer in one file; a doctor that finds problems and offers a fix.</p></div>
+    <div class="card"><h3>Scales to the screen</h3><p>Text grows with large and sharp screens by itself; icons keep their size.</p></div>
+    <div class="card"><h3>A terminal that helps</h3><p>VictorMono Nerd Font, Atuin history, fzf, zoxide, yazi with image previews and drag and drop.</p></div>
+    <div class="card"><h3>A guided tour, and Help</h3><p>A tutorial video with subtitles on every desktop, filmed in a VM from the same system; this page and the manual are on the stick too (Help in the command bar).</p></div>
+  </div>
+</section>
+
+<section id="tools">
+  <h2>MeccanicOS tools</h2>
+  <p class="lead">You meet them by name in the command bar (Super+Space); in a terminal, every <code>mos-*</code> command answers <code>--help</code> and <code>mos</code> lists them all. The full-screen ones look and work the same way: a teal title bar, the keys at the bottom, and whatever Enter acts on in orange. Click a screenshot to enlarge it.</p>
+  <div id="tool-groups"></div>
+</section>
+
+<section id="packages">
+  <h2>Pre-installed packages</h2>
+  <p class="lead">All on the stick, all working offline. More with <code>apps install NAME</code>.</p>
+  <div class="packages" id="package-list"></div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">MeccanicOS is built on <a href="https://nixos.org">NixOS</a> 26.05 with XFCE. Source and licence on <a href="https://github.com/unofficialtools/meccanicos">GitHub</a>.</div>
+</footer>
+
+<dialog id="zoom" aria-label="Screenshot">
+  <form method="dialog"><button style="all:unset;cursor:zoom-out;display:block"><img alt=""><p></p></button></form>
+</dialog>
+
+<script>
+// Each tool: [command, what it does, example, screenshot (screenshots/NAME.png)].
+const TOOLS = [
+  ["Everyday", [
+    ["mos-ask", "The command bar: apps, commands, websites, folders and questions.", "Super+Space", "Command bar"],
+    ["mos-keys", "Every keyboard shortcut.", "shortcuts", "Shortcuts"],
+    ["mos-apps", "Finds, tries, installs and removes apps, for you or for one folder.", "apps try shotcut", "Apps"],
+    ["mos-open", "Opens any file, folder or link with the right app, the same way everywhere.", "open report.pdf", "Open (open)"],
+    ["mos-print", "Prints a file, or saves it as PDF, from a menu.", "print notes.md", "Print (print)"],
+    ["mos-printers", "Finds and adds printers, picks the default, shows the queue and cancels jobs.", "mos-printers", "Printers"],
+    ["mos-screenshot", "The screen, a window or an area; saved and copied.", "Print key", "Screenshot (Print key)"],
+    ["mos-read", "Reads the copied text aloud with an offline voice; say speaks any text.", "say \"Hello\"", "Read aloud (mos-read, say)"],
+    ["mos-ai", "AI chat, or a question from the terminal, or a suggested command.", "mos-ai -e \"find big files\"", "AI chat (mos-ai)"],
+    ["mos-ai-setup", "Which AI is set up, whether your questions leave the computer, the local models and their size; add or remove one.", "mos-ai-setup status"],
+  ]],
+  ["Keep it working", [
+    ["mos-doctor", "Finds and fixes problems with Wi-Fi, Bluetooth, sound, the screen and disk space; asks before each fix. Shows which graphics driver is in use.", "mos-doctor"],
+    ["mos-config", "Common settings in one place, including Wi-Fi, network sign-in pages and VPNs; exports them to another computer.", "mos-config network"],
+    ["mos-updates", "Updates in one place: the system and your apps, what would change, and how to go back to the previous system.", "mos-updates"],
+    ["mos-about", "System Info: this computer and MeccanicOS: build, kernel, CPU, graphics driver, memory, disks.", "mos-about"],
+  ]],
+  ["Your data", [
+    ["mos-vault", "Encrypted vaults and a persistent home on the USB stick, and what survives a restart, with the space left.", "mos-vault"],
+    ["mos-backup", "Encrypted backups of your home, like Time Machine: nightly, when you plug in the disk, or to the cloud; earlier versions of any file (right-click in Files); every backup as a folder per date.", "mos-backup versions report.odt"],
+    ["mos-passwords", "Your passwords, encrypted with age (gopass).", "mos-passwords"],
+    ["mos-dropbox", "Cloud files: Dropbox in a folder, mounted or synced, without the Dropbox app (rclone, which also speaks Google Drive, S3 and more).", "mos-dropbox sync", "Cloud files (mos-dropbox)"],
+  ]],
+  ["Security and system", [
+    ["mos-logins", "Who logged in and who tried; alerts on a login from somewhere new; block an address, stop SSH, disconnect and reconnect.", "mos-logins", "Logins"],
+    ["mos-unlock", "Installed systems: unlock the disk with the TPM or a security key, make a recovery key, or unlock over SSH.", "mos-unlock status", "Disk unlock (mos-unlock)"],
+    ["mos-install", "Installs MeccanicOS on this computer from one page, encrypted, without a network.", "install", "Installer"],
+    ["mos", "Lists every mos-* command; mos help TOPIC opens this page's manual, offline (Help in the command bar).", "mos help backups"],
+  ]],
+];
+
+// [group, [[name, note], ...]]  (packages.nix and the modules)
+const PACKAGES = [
+  ["Desktop apps", [["Brave", "web browser"], ["OnlyOffice", "documents, spreadsheets, presentations, PDF forms"], ["VSCodium", "with direnv, Nix, Prettier, GitLens"], ["Evince", "PDF and e-books"], ["Eye of GNOME", "pictures"], ["mpv + Celluloid", "video and music"], ["Xfce Terminal", ""], ["Thunar", "files"], ["Xfce Screenshooter", ""], ["Xfce Task Manager", ""], ["Syncthing", "sync your own devices"]]],
+  ["AI and voice", [["Ollama", "local models"], ["aichat", "chat from the terminal"], ["Piper", "offline voice"]]],
+  ["Terminal and editors", [["bash", "with Atuin, fzf, zoxide"], ["tmux", ""], ["Jed", "default editor"], ["Vim", ""], ["mc", "Midnight Commander"], ["yazi", "file manager with previews"], ["eza, bat", ""], ["tealdeer", "tldr, offline"], ["dtach", ""], ["man", ""]]],
+  ["Version control", [["git", ""], ["git-lfs", ""], ["lazygit", ""], ["gh", "GitHub CLI"]]],
+  ["Network", [["curl, wget", ""], ["openssh", ""], ["rsync", ""], ["sshfs", ""], ["mosh", ""], ["rclone", "Dropbox, Google Drive, S3"]]],
+  ["Search and data", [["ripgrep", ""], ["fd", ""], ["fzf", ""], ["jq", ""], ["yq", ""], ["sqlite", ""], ["sed, awk", ""]]],
+  ["Build and run", [["Python 3.13", "with uv"], ["Node.js 24", ""], ["just", ""], ["make", ""], ["parallel", ""], ["entr", ""], ["Podman", "rootless, docker alias"], ["nix-ld", "programs built for other distros"], ["rigx", ""]]],
+  ["Documents and images", [["pandoc", ""], ["Typst", ""], ["ImageMagick", ""], ["poppler-utils", "merge, split, text from PDFs"]]],
+  ["System and debugging", [["btop", ""], ["ncdu", ""], ["duf", ""], ["nix-tree", ""], ["trash-cli", ""], ["lsof", ""], ["strace", ""], ["file", ""]]],
+  ["Network diagnostics", [["iproute2", "ss, ip"], ["dig", ""], ["netcat", ""], ["tcpdump", ""], ["nmap", ""], ["mtr", ""]]],
+  ["Archives", [["tar", ""], ["zip, unzip", ""], ["7-Zip", ""], ["gzip, pigz", ""], ["bzip2, xz", ""], ["zstd, lz4", ""], ["unrar", ""]]],
+  ["Encryption", [["age", ""], ["GnuPG", ""], ["gocryptfs", ""], ["gopass", ""], ["restic", "backups"]]],
+  ["Disks and recovery", [["fsarchiver", ""], ["ddrescue", ""], ["testdisk", ""], ["pv", ""]]],
+];
+
+// Each package links to its page on search.nixos.org; where the nixpkgs name
+// differs from the one shown, it is here. "gh:" links to GitHub, "option:"
+// to a NixOS option. Entries like "eza, bat" or "mpv + Celluloid" link each.
+const NIXPKGS = {
+  "OnlyOffice": "onlyoffice-desktopeditors", "Eye of GNOME": "eog", "Xfce Terminal": "xfce4-terminal",
+  "Thunar": "thunar", "Xfce Screenshooter": "xfce4-screenshooter", "Xfce Task Manager": "xfce4-taskmanager",
+  "Piper": "piper-tts", "man": "man-db", "yq": "yq-go", "sed": "gnused", "awk": "gawk",
+  "Python 3.13": "python313", "Node.js 24": "nodejs_24", "make": "gnumake",
+  "nix-ld": "option:programs.nix-ld.enable", "rigx": "gh:unofficialtools/rigx",
+  "ImageMagick": "imagemagick", "dig": "dnsutils", "netcat": "netcat-gnu", "tar": "gnutar",
+  "7-Zip": "_7zz", "GnuPG": "gnupg", "ddrescue": "ddrescue",
+};
+const nixpkgsLink = (name) => {
+  const attr = NIXPKGS[name] || name.toLowerCase();
+  const href = attr.startsWith("gh:") ? `https://github.com/${attr.slice(3)}`
+    : attr.startsWith("option:") ? `https://search.nixos.org/options?channel=26.05&show=${attr.slice(7)}&query=${attr.slice(7)}`
+    : `https://search.nixos.org/packages?channel=26.05&show=${encodeURIComponent(attr)}&query=${encodeURIComponent(attr)}`;
+  return el("a", { href }, name);
+};
+const packageName = (name) => name.split(/(, | \+ )/).map((part, i) => (i % 2 ? part : nixpkgsLink(part)));
+
+// The visitor's system first in "Make a USB drive".
+{
+  const ua = navigator.userAgent;
+  const os = /Windows/.test(ua) ? "windows" : /Mac OS X|Macintosh/.test(ua) ? "mac" : /Linux|X11/.test(ua) ? "linux" : "";
+  const card = os && document.querySelector(`.usb .card[data-os="${os}"]`);
+  if (card) card.classList.add("yours");
+}
+
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  for (const k of kids) e.append(k);
+  return e;
+};
+
+const zoom = document.getElementById("zoom");
+function enlarge(src, caption) {
+  zoom.querySelector("img").src = src;
+  zoom.querySelector("img").alt = caption;
+  zoom.querySelector("p").textContent = caption;
+  zoom.showModal();
+}
+
+const groups = document.getElementById("tool-groups");
+for (const [group, tools] of TOOLS) {
+  groups.append(el("h3", { class: "group-title" }, group));
+  const list = el("div", { class: "tools" });
+  for (const [shot, what, example, label] of tools) {
+    const name = label || shot;
+    const src = `screenshots/${shot}.png`;
+    const img = el("img", { src, alt: `${name} screenshot`, loading: "lazy" });
+    img.onerror = () => img.closest(".shot").remove();
+    const button = el("button", { class: "shot", type: "button", "aria-label": `Enlarge the ${name} screenshot` }, img);
+    button.onclick = () => enlarge(src, name);
+    list.append(el("article", { class: "tool" }, button,
+      el("div", { class: "body" }, el("h3", {}, name), el("p", {}, what), el("code", {}, example))));
+  }
+  groups.append(list);
+}
+
+const pk = document.getElementById("package-list");
+for (const [group, items] of PACKAGES) {
+  const ul = el("ul");
+  for (const [name, note] of items) ul.append(el("li", {}, ...packageName(name), note ? el("span", {}, " · " + note) : ""));
+  pk.append(el("div", { class: "pkg" }, el("h3", {}, group), ul));
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+result
+result-*
+iso
+test-*
+dist/
+*.img
+*.qcow2
+__pycache__/
+/remote-unlock-keys
+/meccanicos.toml
+private/

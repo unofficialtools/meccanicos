@@ -1,0 +1,24 @@
+/* The offline manual (modules/help.nix): the README in the web page's colours. */
+:root {
+  --bg: #000; --panel: #0d1112; --line: #1f2a2c; --text: #e4e4e4; --dim: #9aa3a5;
+  --teal: #005f5f; --orange: #ffaf00; --sand: #d7af87;
+  --mono: "Victor Mono", "VictorMono Nerd Font", ui-monospace, monospace;
+  --sans: Inter, system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0 auto; max-width: 920px; padding: 32px 16px 80px; background: var(--bg); color: var(--text); font: 16px/1.65 var(--sans); }
+a { color: var(--orange); }
+h1, h2, h3 { line-height: 1.25; }
+h1 { font-size: 40px; }
+h2 { font-size: 28px; margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--sand); }
+h3 { font-size: 20px; margin-top: 36px; }
+img { max-width: 100%; height: auto; }
+code { font: 0.92em var(--mono); background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; font-size: 15px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--sand); }
+blockquote { margin: 0; padding: 4px 16px; border-left: 3px solid var(--teal); color: var(--dim); }

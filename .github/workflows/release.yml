@@ -1,0 +1,102 @@
+name: Release
+# Push a tag like v2026-10-08 to build the ISO and publish it, under that tag
+# and as the "latest" release (the README and get-iso point there).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  iso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Already published? (a release made by hand, with its tag)
+        id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]] && gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Release $GITHUB_REF_NAME exists already: nothing to build."
+          fi
+      - uses: actions/checkout@v7
+        if: steps.published.outputs.skip != 'true'
+      - uses: ./.github/actions/setup-nix
+        if: steps.published.outputs.skip != 'true'
+        with:
+          cachix-name: ${{ vars.CACHIX_CACHE }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build the ISO
+        if: steps.published.outputs.skip != 'true'
+        # Today's date goes into the ISO's name and /etc/os-release, with the
+        # time into /etc/meccanicos/version (see flake.nix).
+        run: |
+          now=$(date -u +%Y%m%d%H%M)
+          MECCANICOS_BUILD_DATE=${now:0:8} MECCANICOS_BUILD_TIME=${now:8:4} nix build -L --impure .#iso --out-link iso
+      - name: Split into parts (GitHub release files must be under 2 GB)
+        if: steps.published.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          src=$(ls iso/iso/*.iso)
+          # Name it after its own hash: meccanicos-26.05-20261004-x86_64-linux-1a2b3c4d.iso
+          sum=$(sha256sum "$src" | cut -d' ' -f1)
+          name="$(basename "$src" .iso)-${sum:0:8}.iso"
+          mkdir -p dist
+          echo "$sum  $name" > dist/SHA256SUMS
+          split --bytes=1900M --numeric-suffixes=1 --suffix-length=2 "$src" "dist/$name.part"
+          ( cd dist && sha256sum "$name".part* >> SHA256SUMS )
+          echo "ISO_NAME=$name" >> "$GITHUB_ENV"
+          ls -lh dist
+      - uses: actions/setup-go@v6
+        if: steps.published.outputs.skip != 'true'
+        with:
+          go-version-file: tools/mos-usb/go.mod
+      - name: Build mos-usb (makes the USB drive; downloaded from the release, not on the ISO)
+        if: steps.published.outputs.skip != 'true'
+        working-directory: tools/mos-usb
+        run: |
+          set -euo pipefail
+          export CGO_ENABLED=0
+          for t in windows/amd64/windows.exe darwin/arm64/macos-arm64 darwin/amd64/macos-x86_64 \
+                   linux/amd64/linux-x86_64 linux/arm64/linux-arm64; do
+            IFS=/ read -r os arch name <<<"$t"
+            GOOS=$os GOARCH=$arch go build -trimpath -ldflags='-s -w' -o "../../dist/mos-usb-$name" .
+          done
+          cd ../../dist && sha256sum mos-usb-* >> SHA256SUMS
+      - name: Publish
+        if: steps.published.outputs.skip != 'true' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<NOTES
+          ## Download
+
+          **In one step** (downloads every part, resumes if interrupted, joins and checks them):
+
+          - **Linux / macOS:** \`curl -fsSL https://raw.githubusercontent.com/unofficialtools/meccanicos/main/scripts/get-iso.sh | sh\`
+          - **Windows (PowerShell):** \`irm https://raw.githubusercontent.com/unofficialtools/meccanicos/main/scripts/get-iso.ps1 | iex\`
+
+          **By hand:** the ISO is split into parts because GitHub limits release files to 2 GB.
+          Download **all** \`$ISO_NAME.partNN\` files and \`SHA256SUMS\`, then join them:
+
+          - **Linux / macOS:** \`cat $ISO_NAME.part* > $ISO_NAME\`
+          - **Windows (PowerShell):** \`cmd /c copy /b "$ISO_NAME.part*" "$ISO_NAME"\`
+
+          Check it: \`sha256sum -c SHA256SUMS --ignore-missing\` (macOS: \`shasum -a 256 -c SHA256SUMS --ignore-missing\`).
+          Then write it to a USB stick — see [Writing the USB stick](../../#2-write-it-to-a-usb-stick).
+
+          **Easiest:** \`mos-usb\` downloads the ISO, makes a USB drive bootable (with Ventoy) and copies
+          MeccanicOS onto it — see [Make a USB drive](https://github.com/unofficialtools/meccanicos#1-make-a-usb-drive).
+
+          More: [meccanicos.com](https://meccanicos.com).
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md --latest=false
+          # The same files again as "latest" (moved to this commit), which the
+          # README and get-iso download from.
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest dist/* --target "$GITHUB_SHA" \
+            --title "Latest: $GITHUB_REF_NAME" --notes-file notes.md --latest
