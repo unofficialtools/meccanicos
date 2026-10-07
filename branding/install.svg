@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- "Installer" desktop icon: an arrow going into a drive, on a steel plate. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#eef1f4"/>
+      <stop offset="0.45" stop-color="#b4bec8"/>
+      <stop offset="0.55" stop-color="#9aa5b1"/>
+      <stop offset="1" stop-color="#5f6874"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="drive" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a525d"/>
+      <stop offset="1" stop-color="#22262c"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a4049"/>
+      <stop offset="1" stop-color="#22262c"/>
+    </linearGradient>
+    <pattern id="brush" width="128" height="3" patternUnits="userSpaceOnUse">
+      <rect width="128" height="1" fill="#ffffff" opacity="0.10"/>
+    </pattern>
+  </defs>
+
+  <!-- steel plate -->
+  <rect x="6" y="6" width="116" height="116" rx="22" fill="#2b2f36"/>
+  <rect x="8" y="8" width="112" height="112" rx="20" fill="url(#plate)"/>
+  <rect x="8" y="8" width="112" height="112" rx="20" fill="url(#brush)"/>
+  <rect x="9" y="9" width="110" height="55" rx="19" fill="url(#rim)" opacity="0.35"/>
+
+  <!-- arrow into the drive -->
+  <path d="M55 22 h18 v30 h14 l-23 24 l-23 -24 h14 z" fill="url(#arrow)"/>
+  <path d="M56 23 h16 v1.5 h-16 z" fill="#ffffff" opacity="0.25"/>
+
+  <!-- drive -->
+  <rect x="24" y="80" width="80" height="26" rx="7" fill="url(#drive)"/>
+  <rect x="25" y="81" width="78" height="2" rx="1" fill="#ffffff" opacity="0.18"/>
+  <rect x="34" y="91" width="38" height="4" rx="2" fill="#8a96a3" opacity="0.6"/>
+  <circle cx="90" cy="93" r="4" fill="#9fb4c8"/>
+</svg>

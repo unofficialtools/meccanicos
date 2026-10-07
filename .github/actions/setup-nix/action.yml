@@ -1,0 +1,47 @@
+name: Set up Nix on a roomy disk
+description: Moves /nix to the runner's large scratch disk, enables KVM and installs Nix (+ optional Cachix).
+inputs:
+  cachix-name:
+    description: Cachix cache name (optional)
+    required: false
+    default: ""
+  cachix-token:
+    description: Cachix auth token (optional)
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Free disk space
+      shell: bash
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+        sudo docker image prune --all --force >/dev/null || true
+        df -h / /mnt
+    - name: Put /nix on the large /mnt disk
+      shell: bash
+      run: |
+        sudo mkdir -p /mnt/nix /nix
+        sudo mount --bind /mnt/nix /nix
+        sudo mkdir -p /nix/build && sudo chmod 1777 /nix/build
+    - name: Enable KVM (for the VM tests)
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+    - uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          system-features = nixos-test benchmark big-parallel kvm
+          build-dir = /nix/build
+          accept-flake-config = true
+    - uses: cachix/cachix-action@v17
+      if: inputs.cachix-name != ''
+      with:
+        name: ${{ inputs.cachix-name }}
+        authToken: ${{ inputs.cachix-token }}
+    - name: Lock file check
+      shell: bash
+      run: test -f flake.lock || echo "::warning::flake.lock is not committed; builds are not pinned. Run 'nix flake lock' and commit it."

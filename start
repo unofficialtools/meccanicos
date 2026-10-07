@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# start - everyday MeccanicOS tasks. Run from anywhere inside the repo.
+#
+#   ./start update              newer NixOS packages: refresh flake.lock, rebuild the ISO
+#   ./start iso                 build the ISO from flake.lock; copied to
+#                               dist/<name>-<build date>-…-<hash>.iso
+#   ./start vm [OPTIONS]        boot the ISO in QEMU, e.g. vm --cpus 4 --mem 8G
+#                               (all options: ./start vm --help)
+#   ./start tutorial-video      film the tutorial in a VM (KVM, internet; ~15 min)
+#                               -> tutorial/tutorial.mp4, shipped on the next ISO
+#   ./start burn /dev/sdX       write the ISO to a USB stick (erases it; asks first)
+#   ./start burn                list the USB disks it can see
+#   ./start ventoy /dev/sdX     copy the ISO onto a Ventoy stick (keeps everything
+#                               else on it); not a Ventoy stick yet: install
+#                               Ventoy first (erases it; asks first)
+#   ./start ventoy              list the USB disks, marking Ventoy sticks
+
+set -euo pipefail
+cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+
+nixpkgs_rev() {
+    nix eval --raw --impure --expr \
+        '(builtins.fromJSON (builtins.readFile ./flake.lock)).nodes.nixpkgs.locked.rev' | cut -c1-12
+}
+
+# Today's date goes into the ISO (file name, /etc/os-release) and, with the
+# time, into /etc/meccanicos/version; see flake.nix.
+now=$(date -u +%Y%m%d%H%M)
+export MECCANICOS_BUILD_DATE=${MECCANICOS_BUILD_DATE:-${now:0:8}}
+export MECCANICOS_BUILD_TIME=${MECCANICOS_BUILD_TIME:-${now:8:4}}
+
+# Build, then copy the ISO to dist/ with the first 8 hex digits of its own
+# SHA-256 in the name: meccanicos-26.05-20261004-x86_64-linux-1a2b3c4d.iso
+build_iso() {
+    local attr=$1 start src hash dest
+    start=$(date +%s)
+    nix build ".#$attr" -L --impure
+    echo "[iso] built in $((($(date +%s) - start) / 60)) min"
+    src=$(echo result/iso/*.iso)
+    echo "[iso] hashing $src"
+    hash=$(sha256sum "$src" | cut -c1-8)
+    dest="dist/$(basename "$src" .iso)-$hash.iso"
+    mkdir -p dist
+    if [[ ! -e $dest ]]; then
+        cp --reflink=auto "$src" "$dest.tmp"
+        chmod 644 "$dest.tmp"
+        mv "$dest.tmp" "$dest"
+    else
+        touch "$dest" # newest again, for burn
+    fi
+    ls -lh "$dest"
+}
+
+newest_iso() {
+    ls -t dist/*.iso 2>/dev/null | head -n1
+}
+
+# Move nixpkgs to the newest commit of the release branch pinned in flake.nix
+# (nixos-26.05: security and bug fixes, no version jumps), then rebuild.
+update() {
+    local before after
+    before=$(nixpkgs_rev)
+    nix flake update nixpkgs
+    after=$(nixpkgs_rev)
+    if [[ $before == "$after" ]]; then
+        echo "[update] nixpkgs is already the newest ($after); building anyway"
+    else
+        echo "[update] nixpkgs $before -> $after"
+    fi
+    build_iso iso
+    [[ $before == "$after" ]] || echo "[update] keep it: git commit flake.lock -m 'Update nixpkgs'"
+}
+
+iso() {
+    [[ $# -eq 0 ]] || { echo "usage: $0 iso" >&2; exit 2; }
+    build_iso iso
+}
+
+vm() {
+    exec nix run .#vm --impure -- "$@"
+}
+
+tutorial_video() {
+    nix run .#tutorial-video --impure -- "$@"
+    git add tutorial/tutorial.mp4  # the flake only sees files git tracks
+}
+
+usb_disks() {
+    lsblk -d -o NAME,SIZE,TRAN,RM,MODEL | awk 'NR == 1 || $3 == "usb" || $4 == "1"'
+}
+
+# The newest ISO in dist/, building one first if there is none.
+iso_or_build() {
+    local iso
+    iso=$(newest_iso)
+    if [[ -z $iso ]]; then
+        echo "[$1] no ISO in dist/ yet; building it first" >&2
+        build_iso iso >&2
+        iso=$(newest_iso)
+    fi
+    echo "$iso"
+}
+
+# Refuses anything that isn't a whole USB/removable disk, or holds the system.
+check_stick() {
+    local tag=$1 dev=$2
+    [[ -b $dev ]] || { echo "[$tag] $dev is not a block device" >&2; exit 1; }
+    [[ $(lsblk -dno TYPE "$dev") == disk ]] ||
+        { echo "[$tag] $dev is a partition; give the whole disk (e.g. /dev/sdb)" >&2; exit 1; }
+    if [[ $(lsblk -dno TRAN "$dev") != usb && $(lsblk -dno RM "$dev") != 1 ]]; then
+        echo "[$tag] $dev is not a USB or removable disk - refusing" >&2
+        exit 1
+    fi
+    if lsblk -nro MOUNTPOINT "$dev" | grep -qxE '/|/boot|/home|/nix|/nix/store'; then
+        echo "[$tag] $dev holds the running system - refusing" >&2
+        exit 1
+    fi
+}
+
+unmount_all() {
+    local part
+    for part in $(lsblk -nro NAME "$1" | tail -n +2); do
+        sudo umount "/dev/$part" 2>/dev/null || true
+    done
+}
+
+# Raw image ("DD mode"), which the encrypted storage on the stick needs.
+# Refuses anything that isn't a whole USB/removable disk, and asks first.
+burn() {
+    local dev=${1:-} iso isosize devsize answer
+    if [[ -z $dev ]]; then
+        echo "usage: $0 burn /dev/sdX"
+        echo
+        echo "USB / removable disks:"
+        usb_disks
+        exit 2
+    fi
+    iso=$(iso_or_build burn)
+    check_stick burn "$dev"
+    isosize=$(stat -Lc %s "$iso")
+    devsize=$(lsblk -bdno SIZE "$dev")
+    ((devsize >= isosize)) || { echo "[burn] $dev is smaller than the ISO" >&2; exit 1; }
+
+    echo "ISO:    $iso ($((isosize / 1000000)) MB)"
+    echo "Target: $dev"
+    lsblk -o NAME,SIZE,TRAN,MODEL,LABEL,MOUNTPOINT "$dev"
+    echo
+    read -r -p "Erase EVERYTHING on $dev and write the ISO? Type YES: " answer
+    [[ $answer == YES ]] || { echo "[burn] cancelled"; exit 1; }
+
+    unmount_all "$dev"
+    sudo dd if="$iso" of="$dev" bs=4M status=progress oflag=sync conv=fsync
+    sync
+    echo "[burn] done - you can unplug $dev"
+}
+
+# A Ventoy stick has Ventoy's EFI partition, labelled VTOYEFI.
+is_ventoy() { lsblk -nro LABEL "$1" 2>/dev/null | grep -qx VTOYEFI; }
+
+# Ventoy from the pinned nixpkgs. nixpkgs marks it unfree and insecure
+# (prebuilt binaries), so it is allowed here, for this command only.
+ventoy_bin() {
+    nix build --no-link --print-out-paths --impure --expr '
+      let
+        flake = builtins.getFlake (toString ./.);
+        pkgs = import flake.inputs.nixpkgs {
+          system = "x86_64-linux";
+          config = {
+            allowUnfree = true;
+            allowInsecurePredicate = p: (p.pname or "") == "ventoy";
+          };
+        };
+      in pkgs.ventoy' | tail -n1
+}
+
+# Put the ISO on a Ventoy stick; make it one first if needed (erases it).
+ventoy() {
+    local dev=${1:-} iso name answer part mnt v need have
+    local -a old=()
+    if [[ -z $dev ]]; then
+        echo "usage: $0 ventoy /dev/sdX"
+        echo
+        echo "USB / removable disks:"
+        usb_disks
+        for v in $(lsblk -dnro NAME,TRAN,RM | awk '$2 == "usb" || $3 == "1" {print $1}'); do
+            if is_ventoy "/dev/$v"; then echo "  /dev/$v is a Ventoy stick"; fi
+        done
+        exit 2
+    fi
+    iso=$(iso_or_build ventoy)
+    name=$(basename "$iso")
+    check_stick ventoy "$dev"
+
+    if ! is_ventoy "$dev"; then
+        echo "$dev is not a Ventoy stick yet:"
+        lsblk -o NAME,SIZE,TRAN,MODEL,LABEL,MOUNTPOINT "$dev"
+        echo
+        read -r -p "Install Ventoy on $dev, ERASING everything on it? Type YES: " answer
+        [[ $answer == YES ]] || { echo "[ventoy] cancelled"; exit 1; }
+        echo "[ventoy] getting Ventoy (from the pinned nixpkgs)"
+        v=$(ventoy_bin)
+        unmount_all "$dev"
+        # Ventoy asks twice more; we already have the YES.
+        { yes y || true; } | sudo "$v/bin/ventoy" -i "$dev"
+        sudo udevadm settle 2>/dev/null || true
+        sudo partprobe "$dev" 2>/dev/null || true
+        sleep 2
+        is_ventoy "$dev" || { echo "[ventoy] Ventoy did not install on $dev" >&2; exit 1; }
+    fi
+
+    # Partition 1 is Ventoy's data partition (exFAT by default): ISOs go there.
+    # Mounted like the desktop does (udisks, no sudo) when possible; files
+    # then belong to you, so plain cp/rm work. Otherwise sudo mount.
+    part=$(lsblk -nrpo NAME,TYPE "$dev" | awk '$2 == "part" {print $1; exit}')
+    local as=sudo
+    mnt=$(lsblk -nro MOUNTPOINTS "$part" | head -n1)
+    if [[ -n $mnt && -w $mnt ]]; then
+        as=""
+    elif command -v udisksctl >/dev/null && udisksctl mount -b "$part" >/dev/null 2>&1; then
+        mnt=$(lsblk -nro MOUNTPOINTS "$part" | head -n1)
+        as=""
+        # Values filled in now: the trap runs after this function's locals are gone.
+        # shellcheck disable=SC2064
+        trap "sync; udisksctl unmount -b $(printf %q "$part") >/dev/null 2>&1 || true" EXIT
+    else
+        mnt=$(mktemp -d)
+        unmount_all "$dev"
+        sudo mount "$part" "$mnt"
+        # shellcheck disable=SC2064
+        trap "sync; sudo umount $(printf %q "$mnt") 2>/dev/null || true; rmdir $(printf %q "$mnt") 2>/dev/null || true" EXIT
+    fi
+    for v in "$mnt"/mos-*.iso; do
+        [[ -e $v && ${v##*/} != "$name" ]] && old+=("${v##*/}")
+    done
+    need=$(stat -Lc %s "$iso")
+    have=$(df --output=avail -B1 "$mnt" | tail -n1)
+    [[ -e $mnt/$name ]] && have=$((have + need))
+    if ((${#old[@]})); then
+        ((need > have)) && echo "Not enough room for $name without removing older MeccanicOS ISOs."
+        read -r -p "Remove the older MeccanicOS ISO(s) from the stick (${old[*]})? [y/N] " answer
+        if [[ $answer == [yY]* ]]; then
+            for v in "${old[@]}"; do $as rm -f "$mnt/$v"; done
+            have=$(df --output=avail -B1 "$mnt" | tail -n1)
+        fi
+    fi
+    ((need <= have)) || { echo "[ventoy] not enough free space on the stick for $name" >&2; exit 1; }
+    echo "[ventoy] copying $name"
+    $as cp "$iso" "$mnt/$name.part"
+    $as mv "$mnt/$name.part" "$mnt/$name"
+    sync
+    echo "[ventoy] done: boot the stick and pick $name in Ventoy's menu."
+    echo "         Vaults and the persistent home go in meccanicos/ on this partition (usb-vault)."
+}
+
+cmd=${1:-}
+shift || true
+case $cmd in
+    update) update "$@" ;;
+    iso) iso "$@" ;;
+    vm) vm "$@" ;;
+    tutorial-video) tutorial_video "$@" ;;
+    burn) burn "$@" ;;
+    ventoy) ventoy "$@" ;;
+    *) sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 2 ;;
+esac

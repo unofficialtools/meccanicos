@@ -1,0 +1,65 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      vm-tests:
+        description: Run the (slow) VM tests
+        type: boolean
+        default: true
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: shellcheck -S warning scripts/*.sh
+      - name: pyflakes
+        run: |
+          python3 -m pip install --quiet pyflakes
+          python3 -m pyflakes scripts/*.py branding/generate.py
+
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: experimental-features = nix-command flakes
+      - name: Evaluate everything (no building)
+        run: |
+          nix flake check --no-build -L
+          nix eval --raw .#packages.x86_64-linux.iso.drvPath
+
+  vm-tests:
+    # Building the ISO and booting it takes a while: run on main and on demand.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.vm-tests)
+    needs: [lint, eval]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [live, install]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-name: ${{ vars.CACHIX_CACHE }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Run VM test ${{ matrix.test }}
+        run: nix build -L .#checks.x86_64-linux.${{ matrix.test }} --out-link test-${{ matrix.test }}
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots-${{ matrix.test }}
+          path: test-${{ matrix.test }}/*.png
+          if-no-files-found: ignore
