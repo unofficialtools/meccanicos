@@ -1,11 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+var stdin = bufio.NewReader(os.Stdin)
+
+// colors is false where the console cannot show them (old Windows consoles).
+var colors = true
 
 func title(s string)          { fmt.Printf("\n%s\n%s\n\n", s, strings.Repeat("=", len(s))) }
 func step(f string, a ...any) { fmt.Printf("> "+f+"\n", a...) }
@@ -13,6 +20,40 @@ func note(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }
 func warn(f string, a ...any) { fmt.Printf("! WARNING: "+f+"\n", a...) }
 func done(f string, a ...any) { fmt.Printf("\n* "+f+"\n", a...) }
 func fail(f string, a ...any) { fmt.Fprintf(os.Stderr, "\n! ERROR: "+f+"\n", a...) }
+
+// dangerBox prints lines in a big red box.
+func dangerBox(lines ...string) {
+	w := 0
+	for _, l := range lines {
+		w = max(w, utf8.RuneCountInString(l))
+	}
+	red, reset := "\x1b[1;31m", "\x1b[0m"
+	if !colors {
+		red, reset = "", ""
+	}
+	fmt.Println()
+	fmt.Println(red + "╔" + strings.Repeat("═", w+4) + "╗")
+	for _, l := range lines {
+		fmt.Println("║  " + l + strings.Repeat(" ", w-utf8.RuneCountInString(l)) + "  ║")
+	}
+	fmt.Println("╚" + strings.Repeat("═", w+4) + "╝" + reset)
+}
+
+// confirmErase shows the big red warning for d; true only if the user types
+// YES (any case).
+func confirmErase(d Disk) bool {
+	dangerBox(
+		"WARNING: EVERYTHING ON THIS USB DRIVE WILL BE ERASED",
+		"",
+		d.String(),
+		"All the files on it will be lost. This cannot be undone.",
+		"",
+		"Type YES and press Enter to erase it. Anything else cancels.",
+	)
+	fmt.Printf("\n  Erase %s? Type YES: ", d.Name())
+	answer, _ := stdin.ReadString('\n')
+	return strings.EqualFold(strings.TrimSpace(answer), "yes")
+}
 
 func human(n int64) string {
 	switch {

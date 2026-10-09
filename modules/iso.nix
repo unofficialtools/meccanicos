@@ -100,7 +100,7 @@
     uid = 1000;
   };
   users.users.root.initialHashedPassword = "";
-  # The lock screen (Super+L, idle, suspend) and the login screen accept the
+  # The lock screen (Ctrl+Alt+L, idle, suspend) and the login screen accept the
   # empty password; otherwise only "Switch user" got back in. A password set
   # with live.passwd= still works there.
   security.pam.services.xfce4-screensaver.allowNullPassword = true;

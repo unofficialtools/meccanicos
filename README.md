@@ -6,6 +6,8 @@
 <a href="#1-make-a-usb-drive">Make a USB drive</a> ·
 <a href="https://github.com/unofficialtools/meccanicos/releases/tag/latest">Latest release</a></p>
 
+<p align="center"><a href="https://github.com/unofficialtools/meccanicos/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/unofficialtools/meccanicos/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI on main: passing or failing"></a></p>
+
 **A keyboard-first Linux you carry on a USB stick** — built on NixOS 26.05 with
 XFCE, broad hardware support, AI chat, encrypted storage on the stick itself,
 and a one-page installer.
@@ -48,9 +50,9 @@ and a one-page installer.
 One small program, for Windows, macOS and Linux, does it all. It downloads the
 latest MeccanicOS (and checks it), tells you to insert a USB drive (16 GB or
 larger), makes the drive bootable with [Ventoy](https://www.ventoy.net) and copies
-MeccanicOS onto it, then explains how to start a computer from it. It asks no
-questions: before erasing a drive it names it and gives you 10 seconds to pull it
-out. A drive that already has Ventoy keeps its other files. On macOS, where
+MeccanicOS onto it, then explains how to start a computer from it. Before erasing
+a drive it shows a big red warning naming it (for example "USB DRIVE (/dev/sdb)"),
+and goes on only if you type `YES`. A drive that already has Ventoy keeps all its files, older MeccanicOS ISOs included. On macOS, where
 Ventoy does not run, it writes MeccanicOS directly to the drive (erasing it).
 
 | Your computer | Get it | Run it |
@@ -171,9 +173,9 @@ Copy the `.iso` file onto a [Ventoy](https://www.ventoy.net) stick and boot it f
 Ventoy's menu. Nothing else to configure (no `VTOY_LINUX_REMOUNT` needed).
 
 From a checkout of this repository, `./start ventoy /dev/sdX` does it for you: it copies
-the newest ISO from `dist/` onto a Ventoy stick (offering to remove older MeccanicOS ISOs, and
-leaving everything else alone), or, if the stick isn't a Ventoy stick yet, installs Ventoy
-first (this erases the stick; it asks you to type `YES`). `./start ventoy` alone lists the
+the newest ISO from `dist/` onto a Ventoy stick (deleting nothing on it, older MeccanicOS ISOs
+included), or, if the stick isn't a Ventoy stick yet, installs Ventoy
+first (this erases the stick: a big red warning, and you type `YES`; `./start burn` asks the same way). `./start ventoy` alone lists the
 USB disks and marks the Ventoy ones. Ventoy comes from the pinned nixpkgs, which labels it
 unfree and insecure (prebuilt binaries); it is allowed for this command only.
 
@@ -261,11 +263,12 @@ films it again in a VM (`modules/tutorial-recorder.nix`; KVM and internet).
 
 | Keys | Action |
 |---|---|
-| `Super+←/→` · `Super+↑` · `Super+↓` | snap left/right · maximize · minimize |
-| `Super+M` · `Super+R` | move · resize the window (arrow keys or mouse, then Enter) |
-| `Super+F` · `Super+Q` | fullscreen · close window |
-| `Super+1…4` · `Super+Shift+1…4` | go to / move window to workspace |
-| `Alt+Tab` · `Super+D` · `Super+L` · `Super+E` | switch window · desktop · lock · files |
+| `Super+←/→` · `Alt+F10` · `Alt+F9` | snap left/right · maximize · minimize |
+| `Alt+F7` · `Alt+F8` | move · resize the window (mouse or arrow keys, then click or Enter) |
+| `Alt+F11` · `Alt+F4` | fullscreen · close window |
+| `Ctrl+F1…F4` · `Super+Shift+1…4` | go to / move window to workspace |
+| `Alt+Tab` · `Super+Tab` | switch window (this workspace) · next window of the same app |
+| `Ctrl+Alt+D` · `Ctrl+Alt+L` · `Super+E` | desktop · lock · files |
 | `Super+V` · `Super+.` | clipboard history · emoji picker |
 | `Print` · `Alt+Print` · `Shift+Print` | screenshot screen · window · area (saved + copied) |
 | `Ctrl+Alt+T` · `Ctrl+Alt+Del` | terminal · log out / shut down |
@@ -576,7 +579,8 @@ One page, no wizard:
                        [  Install now  ]
 ```
 
-`↑↓` move, `Enter` edits (long lists filter as you type), **Install now**, type `YES`.
+`↑↓` move, `Enter` edits (long lists filter as you type), **Install now**; a big red warning
+names the disk (for example "HARD DRIVE (/dev/nvme0n1)"), and you type `YES` to erase it.
 It downloads nothing — the installed system is prebuilt inside the ISO.
 
 You get: GPT disk (1 GB EFI + LUKS2/ext4), systemd-boot,
@@ -761,6 +765,7 @@ VM tests boot the real ISO under QEMU (need KVM):
 ```bash
 nix build .#checks.x86_64-linux.live -L      # desktop, command bar, local AI, vault, persistent home across reboots
 nix build .#checks.x86_64-linux.install -L   # installer → reboot → LUKS password → user/sudo/SSH/locale checks
+nix build .#checks.x86_64-linux.ventoy -L    # the ISO as a file on a Ventoy stick: boot, vault, persistent home
 ```
 Screenshots land in `result/`.
 
@@ -780,9 +785,22 @@ The virtual USB stick is kept between runs (vaults and the persistent home survi
 [OBS Studio](https://obsproject.com) (*Window Capture*) or your desktop's recorder.
 Needs KVM (virtualization enabled in the BIOS; your user in the `kvm` group).
 
-GitHub Actions: [`CI`](.github/workflows/ci.yml) lints the scripts and evaluates everything
-on every push and pull request, and runs both VM tests on `main` (screenshots are kept as
-artifacts). [`Release`](.github/workflows/release.yml) builds the public ISO when you push a
+GitHub Actions: [`CI`](.github/workflows/ci.yml), on every push to any branch and every pull
+request, runs shellcheck (every severity) and pyflakes, checks that the tutorial's scenes match
+their narration (`python3 tests/tutorial_points.py`), checks and cross-builds `mos-usb`
+(gofmt, go vet for Linux/Windows/macOS, go test), and evaluates everything; on `main` it also
+runs the three VM tests (screenshots are kept as artifacts). The badge at the top shows `main`.
+For another branch, the same badge with `?branch=NAME`, or
+`https://github.com/unofficialtools/meccanicos/actions/workflows/ci.yml?query=branch%3ANAME`,
+shows whether its last push passed.
+
+[`Web page`](.github/workflows/pages.yml) publishes [meccanicos.com](https://meccanicos.com)
+with GitHub Pages: on every push to `main` that changes `www/` (the page, its screenshots in
+`www/screenshots/`) or the tutorial video. One-time setup: Settings → Pages → Source
+"GitHub Actions", custom domain `meccanicos.com`, "Enforce HTTPS"; in the domain's DNS, `A`
+records for `meccanicos.com` to 185.199.108.153, 185.199.109.153, 185.199.110.153 and
+185.199.111.153 (optionally `AAAA` to 2606:50c0:8000::153 … 2606:50c0:8003::153), and
+`www.meccanicos.com` as a `CNAME` to `unofficialtools.github.io`. [`Release`](.github/workflows/release.yml) builds the public ISO when you push a
 tag like `v2026-10-08` and publishes it (and again as `latest`), split into parts with `SHA256SUMS`. Builds use the
 runner's large scratch disk; add a free [Cachix](https://cachix.org) cache (repository
 variable `CACHIX_CACHE` + secret `CACHIX_AUTH_TOKEN`) to make them much faster.

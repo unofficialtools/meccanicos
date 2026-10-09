@@ -129,9 +129,10 @@ def shortcuts(t):
         return
     yield t.key("Return", "Enter")
     yield t.until(lambda: windows("rofi"), 5)
-    yield t.sleep(1)
-    yield t.point(1)
-    yield t.sleep(2)
+    # The cheat sheet stays up for 3 seconds in the video too.
+    shown = time.time()
+    yield t.sleep(3)
+    t.hold(shown, time.time())
     yield t.key("Escape", "Esc")
     yield t.sleep(1)
 
@@ -153,7 +154,7 @@ def command_bar(t):
     t.hold(shown, time.time())
     if t.last:
         brave = t.last
-        yield t.key("super+q", "Super + Q", brave)
+        close_window(brave)  # quietly: the tour shows no shortcut but Super + Space
         start = time.time() + 0.3
         yield t.until(lambda: brave not in windows("brave"), 20)
         t.cut(start, time.time() - 0.2)
@@ -414,7 +415,6 @@ def logins(t):
     yield t.sleep(2)
     yield t.point(1)
     yield t.point(2)
-    yield t.point(3)
     if demo:
         yield t.until(lambda: demo.poll() is not None, 20)
     yield t.sleep(1)
@@ -543,8 +543,6 @@ def steps():
         step("Login alerts", [
             f"{NAME} watches logins: an SSH login from somewhere new, or an attack, shows an alert like this one.",
             "Its buttons block the address, stop SSH, or disconnect the computer.",
-            ("Super + Shift + Esc disconnects at once: remote sessions end and every network goes off.",
-             "Super plus Shift plus Escape disconnects at once: remote sessions end and every network goes off."),
             "Logins, in the command bar, shows who is connected and who tried. Alerts never flood you.",
         ], logins),
         step("Managing apps", [
@@ -567,8 +565,6 @@ def steps():
         step("Keyboard shortcuts", [
             ("Super + Space, then shortcuts, lists every shortcut.",
              "Super plus Space, then type shortcuts, lists every shortcut."),
-            ("Super + M moves a window and Super + R resizes it: then the arrow keys, and Enter.",
-             "Super plus M moves a window, and Super plus R resizes it: then the arrow keys, and Enter."),
         ], shortcuts),
         step("That's it", [
             ("Super + Space starts everything.", "Super plus Space starts everything."),
@@ -1262,8 +1258,12 @@ def main(argv):
     # Closing the window (SIGHUP) or being stopped: silence, and close what
     # the tour opened.
     def stopped(signum, frame):
+        try:
+            curses.endwin()  # os._exit skips curses.wrapper's cleanup
+        except curses.error:
+            pass
         finish()
-        os._exit(0)
+        os._exit(130 if signum == signal.SIGINT else 0)
 
     for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, stopped)
@@ -1284,4 +1284,7 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:  # Ctrl+C: curses.wrapper has restored the terminal
+        sys.exit(130)

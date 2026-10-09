@@ -1,0 +1,36 @@
+name: Web page
+# meccanicos.com is served by GitHub Pages from www/: every push to main that
+# changes www/ or the tutorial video publishes it. One-time setup: Settings →
+# Pages → Source "GitHub Actions", custom domain meccanicos.com (DNS: see
+# README, "Tests and CI").
+on:
+  push:
+    branches: [main]
+    paths: ["www/**", "tutorial/tutorial.mp4", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      # www/tutorial.mp4 is a link to ../tutorial/tutorial.mp4: copy the file itself.
+      - name: Put the site together
+        run: cp -rL www _site
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v5

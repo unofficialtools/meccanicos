@@ -324,10 +324,30 @@ def list_disks():
         if size < 8 * 1024**3:
             continue
         model = (d.get("model") or "").strip() or "disk"
-        tran = d.get("tran") or ""
-        label = f"{d['name']}  {size / 1e9:6.1f} GB  {model}" + (f"  ({tran})" if tran else "")
+        label = f"{drive_name(d['path'], d.get('tran'))}  {size / 1e9:6.1f} GB  {model}"
         disks.append((label, d["path"], size))
     return disks
+
+
+def drive_name(path, tran=None):
+    """How a disk is always called, so nobody needs to know what /dev/sda
+    means: USB DRIVE (/dev/sdb), HARD DRIVE (/dev/nvme0n1)."""
+    if tran is None:
+        tran = subprocess.run(["lsblk", "-dno", "TRAN", path], capture_output=True, text=True).stdout.strip()
+    return f"{'USB DRIVE' if tran == 'usb' else 'HARD DRIVE'} ({path})"
+
+
+def erase_warning(path, details=""):
+    """The lines of the big red warning before a disk is erased."""
+    name = drive_name(path)
+    kind = name.split(" (")[0]
+    return [
+        f"WARNING: EVERYTHING ON THIS {kind} WILL BE ERASED",
+        "",
+        details or name,
+        "All its files, and any other system on it (Windows, Linux...), will be lost.",
+        "This cannot be undone.",
+    ]
 
 
 def list_timezones():
@@ -559,8 +579,9 @@ def popup_input(scr, title, value="", secret=False, hint=""):
         curses.curs_set(0)
 
 
-def popup_message(scr, title, text, confirm_word=None):
-    """Show text. If confirm_word, user must type it; returns True/False."""
+def popup_message(scr, title, text, confirm_word=None, danger=False):
+    """Show text. If confirm_word, user must type it (any case); returns
+    True/False. danger: all in red (before erasing a disk)."""
     h, w = scr.getmaxyx()
     lines = []
     pw = min(w - 4, 72)
@@ -576,11 +597,12 @@ def popup_message(scr, title, text, confirm_word=None):
     win.keypad(True)
     typed = ""
     while True:
-        ui.frame(win, title)
+        red = ui.attr(ui.ERR) if danger else None
+        ui.frame(win, title, red)
         for i, l in enumerate(lines):
-            ui.put(win, 1 + i, 2, l, ui.attr(ui.NORMAL))
+            ui.put(win, 1 + i, 2, l, red or ui.attr(ui.NORMAL))
         if confirm_word:
-            ui.put(win, ph - 3, 2, f"Type {confirm_word} to continue, Esc to go back:", ui.attr(ui.KEY))
+            ui.put(win, ph - 3, 2, f"Type {confirm_word} to continue, Esc to go back:", red or ui.attr(ui.KEY))
             ui.field(win, ph - 2, 2, pw - 4, typed, True)
         else:
             ui.button(win, ph - 2, pw - 9, "OK", True)
@@ -591,7 +613,7 @@ def popup_message(scr, title, text, confirm_word=None):
         if k == "\x1b":
             return False
         if k in ("\n", "\r", curses.KEY_ENTER):
-            if typed == confirm_word:
+            if typed.strip().casefold() == confirm_word.casefold():
                 return True
             typed = ""
         elif k in (curses.KEY_BACKSPACE, "\x7f", "\b"):
@@ -773,11 +795,13 @@ def tui(scr):
                 continue
             ok = popup_message(
                 scr,
-                "Erase disk?",
-                f"ALL DATA on {f.v['disk_label'].strip()} will be erased and {NAME} installed.\n\n"
+                f"Erase the {drive_name(f.v['disk']).split(' (')[0]}?",
+                "\n".join(erase_warning(f.v["disk"], " ".join(f.v["disk_label"].split())))
+                + f"\n\nThen {NAME} is installed on it, encrypted.\n"
                 f"User: {f.v['username']} (passwordless sudo)   Keyboard: {f.v['keyboard']}\n"
                 f"Language: {f.v['language']}   Time zone: {f.v['timezone']}",
                 confirm_word="YES",
+                danger=True,
             )
             if ok:
                 return f.v
@@ -997,7 +1021,7 @@ def create_user(v):
         f"chown {u}:users {ssh}/id_ed25519 {ssh}/id_ed25519.pub"
     )
     print(f"    {u}: member of wheel (passwordless sudo). Root login is disabled.")
-    print(f"    SSH key: ~/.ssh/id_ed25519.pub")
+    print("    SSH key: ~/.ssh/id_ed25519.pub")
 
 
 def nix_str(s):
@@ -1060,6 +1084,17 @@ def main():
         return 1
     if len(sys.argv) > 2 and sys.argv[1] == "--config":
         v = json.load(open(sys.argv[2]))
+        # No form here: the same big red warning, and YES typed (or piped) in.
+        lines = erase_warning(v["disk"]) + ["", "Type YES and press Enter to erase it. Anything else cancels."]
+        w = max(len(l) for l in lines)
+        print("\n\033[1;31m╔" + "═" * (w + 4) + "╗")
+        for l in lines:
+            print(f"║  {l.ljust(w)}  ║")
+        print("╚" + "═" * (w + 4) + "╝\033[0m\n")
+        print(f"Erase {drive_name(v['disk'])}? Type YES: ", end="", flush=True)
+        if sys.stdin.readline().strip().casefold() != "yes":
+            print("\nNothing was changed.")
+            return 1
     else:
         os.environ.setdefault("ESCDELAY", "25")
         v = curses.wrapper(tui)
@@ -1068,8 +1103,11 @@ def main():
             return 0
     try:
         install(v)
-    except Exception as e:  # noqa: BLE001
-        print(f"\n\033[1;31mInstallation failed:\033[0m {e}\nFull log: {LOG}")
+    except (Exception, KeyboardInterrupt) as e:  # noqa: BLE001
+        if isinstance(e, KeyboardInterrupt):
+            print(f"\n\033[1;31mInstallation cancelled.\033[0m The disk is incomplete. Full log: {LOG}")
+        else:
+            print(f"\n\033[1;31mInstallation failed:\033[0m {e}\nFull log: {LOG}")
         run(["umount", "-R", TARGET], check=False, quiet=True)
         run(["cryptsetup", "close", MAPPER], check=False, quiet=True)
         input("\nPress Enter to close.")
@@ -1084,4 +1122,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:  # Ctrl+C: curses.wrapper has restored the terminal
+        sys.exit(130)

@@ -278,7 +278,8 @@ in
               "luks_password": "luks-test-pass-sixteen", "disk": "/dev/vda", "disk_label": "vda test disk",
           }
           machine.succeed(f"echo {shlex.quote(json.dumps(answers))} > /tmp/answers.json")
-          machine.succeed("mos-install --config /tmp/answers.json < /dev/null", timeout=3600)
+          machine.fail("mos-install --config /tmp/answers.json < /dev/null")  # no YES: nothing erased
+          machine.succeed("echo yes | mos-install --config /tmp/answers.json", timeout=3600)
           machine.succeed("lsblk -o NAME,PARTLABEL,FSTYPE /dev/vda | tee /dev/stderr | grep >/dev/null crypto_LUKS")
       machine.shutdown()
 

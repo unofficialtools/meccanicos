@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 )
 
 // ps runs a PowerShell script and returns its output.
@@ -120,4 +122,36 @@ func tailLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// freeSpace is how many bytes can still be written in the folder dir.
+func freeSpace(dir string) (int64, error) {
+	path, err := syscall.UTF16PtrFromString(dir)
+	if err != nil {
+		return 0, err
+	}
+	var free uint64
+	proc := syscall.NewLazyDLL("kernel32.dll").NewProc("GetDiskFreeSpaceExW")
+	if r, _, err := proc.Call(uintptr(unsafe.Pointer(path)), uintptr(unsafe.Pointer(&free)), 0, 0); r == 0 {
+		return 0, err
+	}
+	return int64(free), nil
+}
+
+// deviceName is the drive as Windows' Disk Management numbers it.
+func deviceName(d Disk) string { return "Disk " + d.ID }
+
+// Colors in the console: on since Windows 10, but only when asked for.
+func init() {
+	h, err := syscall.GetStdHandle(syscall.STD_OUTPUT_HANDLE)
+	var mode uint32
+	if err != nil || syscall.GetConsoleMode(h, &mode) != nil {
+		colors = false
+		return
+	}
+	const enableVirtualTerminalProcessing = 0x0004
+	set := syscall.NewLazyDLL("kernel32.dll").NewProc("SetConsoleMode")
+	if r, _, _ := set.Call(uintptr(h), uintptr(mode|enableVirtualTerminalProcessing)); r == 0 {
+		colors = false
+	}
 }

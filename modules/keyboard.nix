@@ -97,40 +97,51 @@ let
     [ "Ctrl+Alt+T" "Terminal" ]
     [ "Super+E" "Files" ]
     [ "Super+← / →" "Snap window to the left / right half" ]
-    [ "Super+↑  ·  Super+↓" "Maximize / restore  ·  minimize" ]
-    [ "Super+M  ·  Super+R" "Move · resize the window: arrows (or mouse), Enter" ]
-    [ "Super+F" "Fullscreen" ]
-    [ "Super+Q" "Close window" ]
-    [ "Alt+Tab  ·  Super+Tab" "Switch window" ]
-    [ "Super+1 … 4" "Go to workspace 1–4" ]
+    [ "Alt+F10  ·  Alt+F9" "Maximize / restore  ·  minimize" ]
+    [ "Alt+F7  ·  Alt+F8" "Move · resize window: mouse or arrows, Enter" ]
+    [ "Alt+F11" "Fullscreen" ]
+    [ "Alt+F4" "Close window" ]
+    [ "Alt+Tab" "Switch window (this workspace)" ]
+    [ "Super+Tab" "Next window of the same app" ]
+    [ "Ctrl+F1 … F4" "Go to workspace 1–4" ]
     [ "Super+Shift+1 … 4" "Move window to workspace 1–4" ]
-    [ "Super+D" "Show desktop" ]
-    [ "Super+L" "Lock screen" ]
+    [ "Ctrl+Alt+D" "Show desktop" ]
+    [ "Ctrl+Alt+L" "Lock screen" ]
     [ "Super+P" "Displays" ]
     [ "Print  ·  Alt+Print  ·  Shift+Print" "Screenshot: screen · window · area (copied)" ]
     [ "Super+V" "Clipboard history" ]
     [ "Super+." "Emoji picker" ]
     [ "Ctrl+Alt+Del" "Log out, restart, shut down" ]
-    [ "Super+Shift+Esc" "Disconnect: remote sessions end, networks off (Reconnect)" ]
+    [ "Super+Shift+Esc" "Disconnect everything (undo: Reconnect)" ]
   ];
+  # The descriptions line up in one column, two spaces after the longest key.
+  # builtins.stringLength counts bytes: the keys' non-ASCII characters count
+  # as one each, and any other one fails the build (add it to the list).
+  keyWidth =
+    key:
+    let
+      ascii = builtins.replaceStrings [ "·" "←" "→" "…" "–" ] [ "." "<" ">" "." "-" ] key;
+    in
+    assert lib.assertMsg (builtins.match "[ -~]*" ascii != null) "cheat sheet: unknown character in ${key}";
+    builtins.stringLength ascii;
+  keyColumn = 2 + lib.foldl' lib.max 0 (map (k: keyWidth (builtins.elemAt k 0)) keys);
   cheatSheet = pkgs.writeText "mos-keys.txt" (
     lib.concatMapStringsSep "\n" (
       k:
       let
         key = builtins.elemAt k 0;
-        pad = 40 - builtins.stringLength key;
       in
-      key + lib.concatStrings (lib.genList (_: " ") (if pad > 1 then pad else 1)) + builtins.elemAt k 1
+      key + lib.fixedWidthString (keyColumn - keyWidth key) " " "" + builtins.elemAt k 1
     ) keys
   );
   keysTheme = pkgs.writeText "mos-keys.rasi" ''
     @import "${rofiTheme}"
     * { font: "JetBrainsMono Nerd Font,DejaVu Sans Mono,monospace 13"; }
-    window { width: 66%; }
+    window { width: 72%; }
     mainbox { children: [ inputbar, listview ]; }
     inputbar { children: [ prompt ]; }
     prompt { text-color: @ice; font: "Cantarell Bold 16"; }
-    listview { lines: 19; }
+    listview { lines: 21; }
     element { padding: 3px 12px; }
     element-text { font: "JetBrainsMono Nerd Font,DejaVu Sans Mono,monospace 12"; }
     element selected.normal { background-color: transparent; }
@@ -159,41 +170,40 @@ let
     (bind "<Alt>Print" "mos-screenshot window")
     (bind "<Shift>Print" "mos-screenshot area")
   ];
+  # xfwm4 keeps one key per action (the first it finds), so a second key for
+  # an action that already has a default one never works reliably. Ours are
+  # only for actions whose default needs a numeric keypad; those defaults are
+  # removed below.
   wmBinds = [
     (bind "<Super>Left" "tile_left_key")
     (bind "<Super>Right" "tile_right_key")
-    (bind "<Super>Up" "maximize_window_key")
-    (bind "<Super>Down" "hide_window_key")
-    (bind "<Super>f" "fullscreen_key")
-    (bind "<Super>q" "close_window_key")
-    # Then the arrow keys (or the mouse) move / resize it; Enter or a click ends.
-    (bind "<Super>m" "move_window_key")
-    (bind "<Super>r" "resize_window_key")
   ]
-  ++ lib.concatMap (n: [
-    (bind "<Super>${toString n}" "workspace_${toString n}_key")
-    (bind "<Super><Shift>${toString n}" "move_window_workspace_${toString n}_key")
-  ]) (lib.range 1 4);
+  ++ map (n: bind "<Super><Shift>${toString n}" "move_window_workspace_${toString n}_key") (lib.range 1 4);
   insertAfterFirstDefault = binds: ''
     0,/<property name="default" type="empty">/s||&\
     ${lib.removeSuffix "\\" (lib.concatStringsSep "\n" binds)}|'';
   shortcuts = pkgs.runCommand "xfce4-keyboard-shortcuts.xml" { } ''
     src=${pkgs.libxfce4ui}/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml
     # The app finder (Alt+F2, Alt+F3, Super+R) is not there: the command bar
-    # is Alt+F2, Super+R resizes the window.
+    # is Alt+F2. Nor are the keypad keys for the actions we bind (see wmBinds).
     sed -e '/name="&lt;Alt&gt;F2"/,/<\/property>/d' \
         -e '/name="&lt;Alt&gt;F3"/,/<\/property>/d' \
         -e '/name="&lt;Super&gt;r"/,/<\/property>/d' \
-        -e '/value="xfce4-screenshooter/d' "$src" > step1
+        -e '/value="xfce4-screenshooter/d' \
+        -e '/value="tile_left_key"/d' -e '/value="tile_right_key"/d' \
+        -e '/value="move_window_workspace_[1-4]_key"/d' "$src" > step1
     # Command shortcuts go into the first "default" block (commands) ...
     sed -e '${insertAfterFirstDefault commandBinds}' step1 > step2
     # ... window-manager shortcuts into the xfwm4 "default" block.
     sed -e '/<property name="xfwm4" type="empty">/,$ {
     ${insertAfterFirstDefault wmBinds}
     }' step2 > $out
-    for v in mos-ask resize_window_key tile_left_key move_window_workspace_4_key "mos-screenshot area"; do
+    for v in mos-ask tile_left_key move_window_workspace_4_key "mos-screenshot area"; do
       grep -q "value=\"$v\"" $out || { echo "missing $v"; exit 1; }
     done
+    # One key per window-manager action (see wmBinds).
+    dups=$(sed -n '/<property name="xfwm4"/,$ s/.* value="\([a-z0-9_]*_key\)".*/\1/p' $out | sort | uniq -d)
+    [ -z "$dups" ] || { echo "more than one key for: $dups"; exit 1; }
   '';
 
   # ---- Command bar entries for terminal tools ----------------------------
@@ -431,7 +441,7 @@ let
   # (click: btop) · window/workspace dropdown · tray · volume · battery · Log Out
   # (right). One panel: a clock in a separate panel on top of it got covered
   # whenever the bar took focus (e.g. opening the dropdown). No applications
-  # menu, task buttons or workspace pager (Super+1…4 switch workspaces; the
+  # menu, task buttons or workspace pager (Ctrl+F1…F4 switch workspaces; the
   # dropdown lists windows per workspace).
   # "MeccanicOS", the date and CPU % in one font (the desktop's), "MeccanicOS" in bold.
   barFont = "Cantarell 10";
@@ -503,7 +513,7 @@ let
         <property name="plugin-9" type="string" value="actions">
           <property name="appearance" type="uint" value="0"/>
           <!-- Only "Log Out…": its dialog also offers restart, shut down,
-               suspend and switch user. Super+L locks the screen. -->
+               suspend and switch user. Ctrl+Alt+L locks the screen. -->
           <property name="items" type="array">
             <value type="string" value="-lock-screen"/>
             <value type="string" value="-switch-user"/>

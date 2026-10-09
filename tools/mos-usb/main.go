@@ -3,9 +3,9 @@
 // It downloads the latest MeccanicOS ISO (checked against SHA256SUMS), waits
 // for a USB drive to be plugged in, and puts the ISO on it: with Ventoy when
 // the computer can run Ventoy (Linux, Windows), so the stick keeps room for
-// other ISOs and files; written directly otherwise (macOS). It asks nothing:
-// it says what to do (insert the drive, remove it) and gives 10 seconds to
-// pull the drive out before anything is erased.
+// other ISOs and files; written directly otherwise (macOS). Before erasing a
+// drive it shows a big red warning naming it, and goes on only if the user
+// types YES. A drive that already has Ventoy is not erased.
 //
 // Environment, for testing: MOS_USB_RELEASE (where SHA256SUMS and the parts
 // are; default the "latest" GitHub release), MOS_USB_CACHE (download folder).
@@ -21,7 +21,6 @@ import (
 
 const (
 	defaultRelease = "https://github.com/unofficialtools/meccanicos/releases/download/latest"
-	countdown      = 10 // seconds to pull the drive out before it is erased
 )
 
 func main() {
@@ -31,7 +30,7 @@ func main() {
 	}
 	if pauseAtEnd() {
 		fmt.Println("\nPress Enter to close this window.")
-		fmt.Scanln()
+		stdin.ReadString('\n')
 	}
 	if err != nil {
 		os.Exit(1)
@@ -73,8 +72,13 @@ func run() error {
 				return err
 			}
 		} else {
-			if !eraseCountdown(d) {
-				continue // pulled out: wait for another drive
+			if !confirmErase(d) {
+				note("Cancelled: nothing was written to %s.", d.Name())
+				note("To use another drive, insert it now; or close this window.")
+				continue // wait for another drive
+			}
+			if _, ok := find(d.ID); !ok {
+				return fmt.Errorf("%s was removed: nothing was written", d.Name())
 			}
 			if ventoy != "" {
 				err = installVentoy(ventoy, d)
@@ -145,22 +149,6 @@ func waitForDisk(need int64) (Disk, error) {
 			return d, nil
 		}
 	}
-}
-
-// eraseCountdown gives the user time to pull the drive out; false if they did.
-func eraseCountdown(d Disk) bool {
-	warn("EVERYTHING on %s will be erased in %d seconds. Remove it now to cancel.", d, countdown)
-	for i := countdown; i > 0; i-- {
-		fmt.Printf("\r  Erasing in %2d s... ", i)
-		time.Sleep(time.Second)
-		if _, ok := find(d.ID); !ok {
-			fmt.Println()
-			note("Cancelled: the drive was removed. Nothing was written.")
-			return false
-		}
-	}
-	fmt.Println("\r  Erasing now.        ")
-	return true
 }
 
 func find(id string) (Disk, bool) {

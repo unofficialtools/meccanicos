@@ -105,6 +105,7 @@ classify() {
     local t
     t=$(trim "$1")
     [[ -z $t ]] && { echo "none"; return; }
+    # shellcheck disable=SC2088 # a typed "~" is matched as text
     case $t in
         \?*) echo "ask	$(trim "${t#\?}")"; return ;;
         !*) echo "shell	$(trim "${t#!}")"; return ;;
@@ -226,9 +227,11 @@ act() {
         gui) setsid -f sh -c "$rest" >/dev/null 2>&1 ;;
         run) setsid -f "${TERMINAL_CMD[@]}" --title "$rest" -x bash -c "$RUN_IN_TERMINAL" run "$rest" >/dev/null 2>&1 ;;
         # "!command": in an interactive bash (your aliases), then Enter closes it.
-        shell) setsid -f "${TERMINAL_CMD[@]}" --title "$rest" -x bash -c \
-                   'bash -ic "$1"; s=$?; ((s)) && printf "\n(exit status %s)" "$s"; printf "\nPress Enter to close."; read -r' \
-                   shell "$rest" >/dev/null 2>&1 ;;
+        shell)
+            # shellcheck disable=SC2016 # $1 and $? belong to the inner bash
+            setsid -f "${TERMINAL_CMD[@]}" --title "$rest" -x bash -c \
+                'bash -ic "$1"; s=$?; ((s)) && printf "\n(exit status %s)" "$s"; printf "\nPress Enter to close."; read -r' \
+                shell "$rest" >/dev/null 2>&1 ;;
         # A folder opens in yazi; a file shows in yazi, in its folder.
         path) setsid -f "${TERMINAL_CMD[@]}" --title "$rest" -x yazi "$rest" >/dev/null 2>&1 ;;
         search) setsid -f brave "https://duckduckgo.com/?q=$(urlencode "$rest")" >/dev/null 2>&1 ;;

@@ -93,24 +93,25 @@ func installVentoy(dir string, d Disk) error {
 	return nil
 }
 
-// copyToVentoy puts the ISO on the drive's Ventoy partition, replacing older
-// MeccanicOS ISOs there; everything else on the drive stays.
+// copyToVentoy adds the ISO to the drive's Ventoy partition. Nothing already
+// on the drive is deleted, older MeccanicOS ISOs included; only a file with
+// this ISO's own name is replaced. If it does not fit, nothing is written.
 func copyToVentoy(iso ISO, d Disk) error {
 	mnt, release, err := dataMount(d)
 	if err != nil {
 		return fmt.Errorf("opening the Ventoy partition: %w", err)
 	}
 	defer release()
-	for _, pattern := range []string{"meccanicos-*.iso", "mynix-*.iso"} {
-		old, _ := filepath.Glob(filepath.Join(mnt, pattern))
-		for _, f := range old {
-			if filepath.Base(f) != iso.Name {
-				note("Removing the older %s from the drive.", filepath.Base(f))
-				os.Remove(f)
-			}
-		}
-	}
 	dest := filepath.Join(mnt, iso.Name)
+	need := iso.Size
+	if fi, err := os.Stat(dest); err == nil {
+		need -= fi.Size() // replaced: its space comes back
+	}
+	if free, err := freeSpace(mnt); err == nil && free < need {
+		return fmt.Errorf("not enough room on the USB drive for %s: it needs %s, %s is free. "+
+			"Nothing was changed: delete files you no longer need from the drive (older MeccanicOS ISOs, for example) and run mos-usb again",
+			iso.Name, human(need), human(free))
+	}
 	step("Copying %s to the USB drive.", iso.Name)
 	in, err := os.Open(iso.Path)
 	if err != nil {

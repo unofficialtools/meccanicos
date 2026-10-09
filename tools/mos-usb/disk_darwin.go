@@ -74,3 +74,5 @@ func flushDisk(f *os.File) error { return f.Sync() }
 func ventoyInstall(string, Disk) error       { return errUnsupported }
 func dataMount(Disk) (string, func(), error) { return "", nil, errUnsupported }
 func finish(d Disk)                          { exec.Command("diskutil", "eject", d.Path).Run() }
+func freeSpace(string) (int64, error)        { return 0, errUnsupported }
+func deviceName(d Disk) string               { return d.Path }

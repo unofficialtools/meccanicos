@@ -25,6 +25,7 @@ if ok "$iso"; then
     exit 0
 fi
 
+# shellcheck disable=SC2013 # part names come from SHA256SUMS: no spaces
 for part in $(awk '$2 ~ /\.iso\.part[0-9]+$/ { print $2 }' SHA256SUMS); do
     if ok "$part"; then
         echo "$part: already downloaded"

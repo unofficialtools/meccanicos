@@ -219,7 +219,7 @@ current_map() {
         s=$(sed -n 's/.*start= *\([0-9]*\).*/\1/p' <<<"$line")
         z=$(sed -n 's/.*size= *\([0-9]*\).*/\1/p' <<<"$line")
         t=$(sed -n 's/.*type= *\([0-9a-fA-F]*\).*/\1/p' <<<"$line")
-        [[ -n $s ]] && ((s >= isoend)) || continue
+        if [[ -z $s ]] || ((s < isoend)); then continue; fi
         dev=$(part_dev "$disk" "$n")
         label=$(blkid -p -o value -s LABEL "$dev" 2>/dev/null || true)
         echo "$s $z ${t:-83} ${label:--}"

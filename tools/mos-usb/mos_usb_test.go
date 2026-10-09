@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -125,4 +126,18 @@ func TestFetchVentoy(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("Ventoy2Disk in", dir)
+}
+
+// Erasing goes on only for a typed YES, in any case.
+func TestConfirmErase(t *testing.T) {
+	d := Disk{ID: "sdz", Path: "/dev/sdz", Model: "Test Stick", Size: 64e9}
+	for in, want := range map[string]bool{
+		"YES\n": true, "yes\n": true, " Yes \r\n": true, "YES": true,
+		"y\n": false, "\n": false, "no\n": false, "YESS\n": false, "": false,
+	} {
+		stdin = bufio.NewReader(strings.NewReader(in))
+		if got := confirmErase(d); got != want {
+			t.Errorf("answer %q: confirmErase = %v, want %v", in, got, want)
+		}
+	}
 }

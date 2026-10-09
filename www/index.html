@@ -158,20 +158,20 @@
   <p class="lead">One small program does it all: it downloads the latest MeccanicOS and checks it,
     tells you to insert a USB drive (16 GB or larger), makes it bootable with
     <a href="https://www.ventoy.net">Ventoy</a> and copies MeccanicOS onto it, then explains how to start a computer from it.
-    It asks no questions; before erasing a drive it names it and gives you 10 seconds to pull it out.
+    Before erasing a drive it shows a big red warning naming it, and goes on only if you type YES.
     A drive that already has Ventoy keeps its other files. (On macOS, where Ventoy does not run, it writes MeccanicOS directly to the drive.)</p>
   <div class="grid usb">
     <div class="card" data-os="windows"><h3>Windows</h3>
       <p><a class="get" href="https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-windows.exe">Download mos-usb-windows.exe</a></p>
       <p>Double-click it and allow it to make changes. If Windows warns about an unknown publisher: <i>More info</i> → <i>Run anyway</i>.</p></div>
     <div class="card" data-os="mac"><h3>macOS</h3>
-      <p>In Terminal (Apple silicon; on an Intel Mac use <code>mos-usb-macos-x86_64</code>):</p>
-      <pre><code>curl -fLO https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-macos-arm64
+      <p>In Terminal (Apple silicon; on an Intel Mac use <code translate="no">mos-usb-macos-x86_64</code>):</p>
+      <pre translate="no"><code translate="no">curl -fLO https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-macos-arm64
 chmod +x mos-usb-macos-arm64
 ./mos-usb-macos-arm64</code></pre></div>
     <div class="card" data-os="linux"><h3>Linux</h3>
-      <p>In a terminal (on ARM use <code>mos-usb-linux-arm64</code>):</p>
-      <pre><code>curl -fLO https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-linux-x86_64
+      <p>In a terminal (on ARM use <code translate="no">mos-usb-linux-arm64</code>):</p>
+      <pre translate="no"><code translate="no">curl -fLO https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-linux-x86_64
 chmod +x mos-usb-linux-x86_64
 ./mos-usb-linux-x86_64</code></pre></div>
   </div>
@@ -185,7 +185,7 @@ chmod +x mos-usb-linux-x86_64
   <div class="grid">
     <div class="card"><h3>Keyboard first</h3><p>No start menu. Super+Space opens one command bar for apps, commands, websites, folders and questions.</p></div>
     <div class="card"><h3>Works offline</h3><p>The desktop, the included apps and the drivers are on the stick, and installing needs no network. More apps and local AI models are downloaded once, when you ask for them.</p></div>
-    <div class="card"><h3>Secure, with stated trade-offs</h3><p>Installed: the whole disk encrypted (LUKS2). Live: the session stays in memory, and your vaults and persistent home are encrypted. A hardened kernel, a firewall, login alerts. For convenience <code>sudo</code> asks no password, and an installed system runs SSH with keys only; both can be changed.</p></div>
+    <div class="card"><h3>Secure, with stated trade-offs</h3><p>Installed: the whole disk encrypted (LUKS2). Live: the session stays in memory, and your vaults and persistent home are encrypted. A hardened kernel, a firewall, login alerts. For convenience <code translate="no">sudo</code> asks no password, and an installed system runs SSH with keys only; both can be changed.</p></div>
     <div class="card"><h3>Coherent</h3><p>One way to open any file, one look for every tool, apps named by what they do: "Web Browser (Brave)".</p></div>
     <div class="card"><h3>Reproducible</h3><p>The whole system is one Nix flake. Upgrades are atomic: a failed one changes nothing, and you can roll back.</p></div>
     <div class="card"><h3>Hardware first</h3><p>MeccanicOS comes with a large collection of drivers and firmware (all of it freely redistributable): Mesa and Vulkan, video acceleration, PipeWire, Bluetooth, printers and scanners, NVIDIA's driver picked by itself. Hardening never gets in a driver's way.</p></div>
@@ -197,10 +197,10 @@ chmod +x mos-usb-linux-x86_64
   <h2>Features</h2>
   <p class="lead">What you get on the stick.</p>
   <div class="grid">
-    <div class="card"><h3>Command bar</h3><p>Type part of an app name, a website, a command, a path (<code>~/Documents</code> opens it in yazi) or <code>!command</code> to run it in a new shell. <code>?question</code> asks the AI.</p></div>
+    <div class="card"><h3>Command bar</h3><p>Type part of an app name, a website, a command, a path (<code translate="no">~/Documents</code> opens it in yazi) or <code translate="no">!command</code> to run it in a new shell. <code translate="no">?question</code> asks the AI.</p></div>
     <div class="card"><h3>Live, persistent or installed</h3><p>Run from USB with nothing kept, keep your home encrypted on the stick, or install to the disk from one page. <a href="https://github.com/unofficialtools/meccanicos#what-survives-a-restart">What survives a restart</a>.</p></div>
     <div class="card"><h3>Encrypted vaults</h3><p>LUKS2 vaults in the stick's free space, and on Ventoy sticks as files next to the ISO.</p></div>
-    <div class="card"><h3>Open anything</h3><p><code>open FILE</code> works like on a Mac, and the same rules apply in the shell, yazi, mc, fzf and on a double-click.</p></div>
+    <div class="card"><h3>Open anything</h3><p><code translate="no">open FILE</code> works like on a Mac, and the same rules apply in the shell, yazi, mc, fzf and on a double-click.</p></div>
     <div class="card"><h3>Apps on demand</h3><p>With a network: search nixpkgs' 120,000 packages, try an app without installing it, or give one folder its own tools with direnv.</p></div>
     <div class="card"><h3>AI chat, your choice</h3><p>Local AI after a one-time model download (Qwen3 through Ollama, ~2.5 GB; then offline, and nothing leaves the computer), or Claude, ChatGPT or Grok with your API key (your questions go to that company).</p></div>
     <div class="card"><h3>Read aloud</h3><p>Copy any text and an offline voice (Piper) reads it, sentence by sentence.</p></div>
@@ -209,19 +209,19 @@ chmod +x mos-usb-linux-x86_64
     <div class="card"><h3>Settings and a doctor</h3><p>Common settings in one place, exported to another computer in one file; a doctor that finds problems and offers a fix.</p></div>
     <div class="card"><h3>Scales to the screen</h3><p>Text grows with large and sharp screens by itself; icons keep their size.</p></div>
     <div class="card"><h3>A terminal that helps</h3><p>VictorMono Nerd Font, Atuin history, fzf, zoxide, yazi with image previews and drag and drop.</p></div>
-    <div class="card"><h3>A guided tour, and Help</h3><p>A tutorial video with subtitles on every desktop, filmed in a VM from the same system; this page and the manual are on the stick too (Help in the command bar).</p></div>
+    <div class="card"><h3>A guided tour, and Help</h3><p>A tutorial video with subtitles on every desktop, filmed in a VM from the same system; the manual is on the stick too (Help in the command bar).</p></div>
   </div>
 </section>
 
 <section id="tools">
   <h2>MeccanicOS tools</h2>
-  <p class="lead">You meet them by name in the command bar (Super+Space); in a terminal, every <code>mos-*</code> command answers <code>--help</code> and <code>mos</code> lists them all. The full-screen ones look and work the same way: a teal title bar, the keys at the bottom, and whatever Enter acts on in orange. Click a screenshot to enlarge it.</p>
+  <p class="lead">You meet them by name in the command bar (Super+Space); in a terminal, every <code translate="no">mos-*</code> command answers <code translate="no">--help</code> and <code translate="no">mos</code> lists them all. The full-screen ones look and work the same way: a teal title bar, the keys at the bottom, and whatever Enter acts on in orange. Click a screenshot to enlarge it.</p>
   <div id="tool-groups"></div>
 </section>
 
 <section id="packages">
   <h2>Pre-installed packages</h2>
-  <p class="lead">All on the stick, all working offline. More with <code>apps install NAME</code>.</p>
+  <p class="lead">All on the stick, all working offline. More with <code translate="no">apps install NAME</code>.</p>
   <div class="packages" id="package-list"></div>
 </section>
 
@@ -304,7 +304,7 @@ const nixpkgsLink = (name) => {
   const href = attr.startsWith("gh:") ? `https://github.com/${attr.slice(3)}`
     : attr.startsWith("option:") ? `https://search.nixos.org/options?channel=26.05&show=${attr.slice(7)}&query=${attr.slice(7)}`
     : `https://search.nixos.org/packages?channel=26.05&show=${encodeURIComponent(attr)}&query=${encodeURIComponent(attr)}`;
-  return el("a", { href }, name);
+  return el("a", { href, translate: "no" }, name); // a name: never translated
 };
 const packageName = (name) => name.split(/(, | \+ )/).map((part, i) => (i % 2 ? part : nixpkgsLink(part)));
 
@@ -343,7 +343,7 @@ for (const [group, tools] of TOOLS) {
     const button = el("button", { class: "shot", type: "button", "aria-label": `Enlarge the ${name} screenshot` }, img);
     button.onclick = () => enlarge(src, name);
     list.append(el("article", { class: "tool" }, button,
-      el("div", { class: "body" }, el("h3", {}, name), el("p", {}, what), el("code", {}, example))));
+      el("div", { class: "body" }, el("h3", {}, name), el("p", {}, what), el("code", { translate: "no" }, example))));
   }
   groups.append(list);
 }

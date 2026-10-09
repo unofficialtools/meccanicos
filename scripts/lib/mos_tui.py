@@ -116,14 +116,15 @@ def keybar(win, y, keys):
         x = put(win, y, x, f" {what}   ", attr(BAR))
 
 
-def frame(win, title=""):
-    """A popup's box, its title on the top line."""
+def frame(win, title="", a=None):
+    """A popup's box, its title on the top line; a: the box's and title's
+    attribute (e.g. attr(ERR) for a warning), else the usual ones."""
     win.erase()
-    win.attron(attr(BORDER))
+    win.attron(a or attr(BORDER))
     win.box()
-    win.attroff(attr(BORDER))
+    win.attroff(a or attr(BORDER))
     if title:
-        put(win, 0, 2, f" {title} ", attr(HEADING))
+        put(win, 0, 2, f" {title} ", a or attr(HEADING))
 
 
 def row(win, y, x, width, text, selected, a=None):

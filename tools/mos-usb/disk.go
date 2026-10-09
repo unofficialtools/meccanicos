@@ -12,10 +12,13 @@ type Disk struct {
 	Parts  []string // its partitions (Linux)
 }
 
+// Name is how the drive is always called, so nobody needs to know what
+// /dev/sdb means: USB DRIVE (/dev/sdb), USB DRIVE (Disk 2) on Windows.
+func (d Disk) Name() string { return "USB DRIVE (" + deviceName(d) + ")" }
+
 func (d Disk) String() string {
-	model := d.Model
-	if model == "" {
-		model = "USB drive"
+	if d.Model == "" {
+		return fmt.Sprintf("%s, %s", d.Name(), human(d.Size))
 	}
-	return fmt.Sprintf("%s (%s, %s)", d.Path, model, human(d.Size))
+	return fmt.Sprintf("%s: %s, %s", d.Name(), d.Model, human(d.Size))
 }

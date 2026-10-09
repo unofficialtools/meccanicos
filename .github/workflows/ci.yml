@@ -1,7 +1,9 @@
 name: CI
+# The quick jobs (lint, eval, mos-usb) run on every push to any branch; the
+# slow VM tests on pushes to main, and on demand.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -19,12 +21,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: shellcheck
-        run: shellcheck -S warning scripts/*.sh
+      - name: shellcheck (every severity, as the NixOS build checks its scripts)
+        run: shellcheck start scripts/*.sh branding/samples.sh
       - name: pyflakes
         run: |
           python3 -m pip install --quiet pyflakes
-          python3 -m pyflakes scripts/*.py branding/generate.py
+          python3 -m pyflakes scripts/*.py scripts/mos/*.py scripts/lib/*.py branding/generate.py tests/*.py
+      - name: tutorial scenes point only at their own bullets
+        run: python3 tests/tutorial_points.py
+
+  mos-usb:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/mos-usb
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: tools/mos-usb/go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+      - name: go vet (Linux, Windows, macOS)
+        run: |
+          for os in linux windows darwin; do GOOS=$os go vet ./...; done
+      - name: go test
+        run: go test ./...
+      - name: Build the five release binaries
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          for t in windows/amd64 darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            GOOS=${t%/*} GOARCH=${t#*/} go build -trimpath -ldflags='-s -w' -o /dev/null .
+          done
 
   eval:
     runs-on: ubuntu-latest
@@ -40,14 +69,14 @@ jobs:
 
   vm-tests:
     # Building the ISO and booting it takes a while: run on main and on demand.
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.vm-tests)
-    needs: [lint, eval]
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.vm-tests)
+    needs: [lint, eval, mos-usb]
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
-        test: [live, install]
+        test: [live, install, ventoy]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-nix

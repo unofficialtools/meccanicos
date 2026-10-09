@@ -10,8 +10,8 @@
 #                               -> tutorial/tutorial.mp4, shipped on the next ISO
 #   ./start burn /dev/sdX       write the ISO to a USB stick (erases it; asks first)
 #   ./start burn                list the USB disks it can see
-#   ./start ventoy /dev/sdX     copy the ISO onto a Ventoy stick (keeps everything
-#                               else on it); not a Ventoy stick yet: install
+#   ./start ventoy /dev/sdX     copy the ISO onto a Ventoy stick (deletes nothing
+#                               on it); not a Ventoy stick yet: install
 #                               Ventoy first (erases it; asks first)
 #   ./start ventoy              list the USB disks, marking Ventoy sticks
 
@@ -52,6 +52,7 @@ build_iso() {
 }
 
 newest_iso() {
+    # shellcheck disable=SC2012 # by date; our ISO names have no spaces or newlines
     ls -t dist/*.iso 2>/dev/null | head -n1
 }
 
@@ -117,6 +118,30 @@ check_stick() {
     fi
 }
 
+# A big red box naming the stick as "USB DRIVE (/dev/sdX)"; goes on only if
+# the user types YES (any case), else exits. $1: tag, $2: device, $3: what
+# comes next (e.g. "MeccanicOS is then written on it.").
+confirm_erase() {
+    local tag=$1 dev=$2 what=$3 name details l w=0 answer
+    name="USB DRIVE ($dev)"
+    details="$name: $(lsblk -dno MODEL "$dev" | xargs), $(lsblk -dno SIZE "$dev" | xargs)B"
+    local lines=(
+        "WARNING: EVERYTHING ON THIS USB DRIVE WILL BE ERASED"
+        ""
+        "$details"
+        "All the files on it will be lost. This cannot be undone."
+        "$what"
+        ""
+        "Type YES and press Enter to erase it. Anything else cancels."
+    )
+    for l in "${lines[@]}"; do ((${#l} > w)) && w=${#l}; done
+    printf '\n\033[1;31m╔%s╗\n' "$(printf '═%.0s' $(seq $((w + 4))))"
+    for l in "${lines[@]}"; do printf '║  %s%*s  ║\n' "$l" $((w - ${#l})) ""; done
+    printf '╚%s╝\033[0m\n\n' "$(printf '═%.0s' $(seq $((w + 4))))"
+    read -r -p "Erase $name? Type YES: " answer
+    [[ ${answer,,} == yes ]] || { echo "[$tag] cancelled: nothing was written to $name"; exit 1; }
+}
+
 unmount_all() {
     local part
     for part in $(lsblk -nro NAME "$1" | tail -n +2); do
@@ -127,7 +152,7 @@ unmount_all() {
 # Raw image ("DD mode"), which the encrypted storage on the stick needs.
 # Refuses anything that isn't a whole USB/removable disk, and asks first.
 burn() {
-    local dev=${1:-} iso isosize devsize answer
+    local dev=${1:-} iso isosize devsize
     if [[ -z $dev ]]; then
         echo "usage: $0 burn /dev/sdX"
         echo
@@ -142,11 +167,9 @@ burn() {
     ((devsize >= isosize)) || { echo "[burn] $dev is smaller than the ISO" >&2; exit 1; }
 
     echo "ISO:    $iso ($((isosize / 1000000)) MB)"
-    echo "Target: $dev"
+    echo "Target: USB DRIVE ($dev)"
     lsblk -o NAME,SIZE,TRAN,MODEL,LABEL,MOUNTPOINT "$dev"
-    echo
-    read -r -p "Erase EVERYTHING on $dev and write the ISO? Type YES: " answer
-    [[ $answer == YES ]] || { echo "[burn] cancelled"; exit 1; }
+    confirm_erase burn "$dev" "MeccanicOS is then written on it."
 
     unmount_all "$dev"
     sudo dd if="$iso" of="$dev" bs=4M status=progress oflag=sync conv=fsync
@@ -175,8 +198,7 @@ ventoy_bin() {
 
 # Put the ISO on a Ventoy stick; make it one first if needed (erases it).
 ventoy() {
-    local dev=${1:-} iso name answer part mnt v need have
-    local -a old=()
+    local dev=${1:-} iso name part mnt v need have
     if [[ -z $dev ]]; then
         echo "usage: $0 ventoy /dev/sdX"
         echo
@@ -192,11 +214,9 @@ ventoy() {
     check_stick ventoy "$dev"
 
     if ! is_ventoy "$dev"; then
-        echo "$dev is not a Ventoy stick yet:"
+        echo "USB DRIVE ($dev) is not a Ventoy stick yet:"
         lsblk -o NAME,SIZE,TRAN,MODEL,LABEL,MOUNTPOINT "$dev"
-        echo
-        read -r -p "Install Ventoy on $dev, ERASING everything on it? Type YES: " answer
-        [[ $answer == YES ]] || { echo "[ventoy] cancelled"; exit 1; }
+        confirm_erase ventoy "$dev" "Ventoy is then installed on it, and MeccanicOS copied to it."
         echo "[ventoy] getting Ventoy (from the pinned nixpkgs)"
         v=$(ventoy_bin)
         unmount_all "$dev"
@@ -229,21 +249,16 @@ ventoy() {
         # shellcheck disable=SC2064
         trap "sync; sudo umount $(printf %q "$mnt") 2>/dev/null || true; rmdir $(printf %q "$mnt") 2>/dev/null || true" EXIT
     fi
-    for v in "$mnt"/mos-*.iso; do
-        [[ -e $v && ${v##*/} != "$name" ]] && old+=("${v##*/}")
-    done
+    # Nothing on the stick is deleted, older ISOs included; only a file with
+    # this ISO's name is replaced.
     need=$(stat -Lc %s "$iso")
     have=$(df --output=avail -B1 "$mnt" | tail -n1)
-    [[ -e $mnt/$name ]] && have=$((have + need))
-    if ((${#old[@]})); then
-        ((need > have)) && echo "Not enough room for $name without removing older MeccanicOS ISOs."
-        read -r -p "Remove the older MeccanicOS ISO(s) from the stick (${old[*]})? [y/N] " answer
-        if [[ $answer == [yY]* ]]; then
-            for v in "${old[@]}"; do $as rm -f "$mnt/$v"; done
-            have=$(df --output=avail -B1 "$mnt" | tail -n1)
-        fi
-    fi
-    ((need <= have)) || { echo "[ventoy] not enough free space on the stick for $name" >&2; exit 1; }
+    [[ -e $mnt/$name ]] && have=$((have + $(stat -Lc %s "$mnt/$name")))
+    ((need <= have)) || {
+        echo "[ventoy] not enough free space on the stick for $name; nothing was changed:" >&2
+        echo "         delete files you no longer need from it (older ISOs, for example)" >&2
+        exit 1
+    }
     echo "[ventoy] copying $name"
     $as cp "$iso" "$mnt/$name.part"
     $as mv "$mnt/$name.part" "$mnt/$name"
