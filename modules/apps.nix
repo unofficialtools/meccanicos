@@ -4,7 +4,9 @@
 { pkgs, ... }:
 let
   inherit (import ./not-root.nix) notRoot;
+  tSh = import ./i18n-sh.nix pkgs;
   apps = pkgs.writeShellScriptBin "apps" ''
+    ${tSh "mos-apps"}
     ${notRoot "apps"}
     export MECCANICOS_PYLIB=${../scripts/lib}
     exec ${pkgs.python3}/bin/python3 ${../scripts/mos-apps.py} "$@"

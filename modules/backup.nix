@@ -6,6 +6,7 @@
 { lib, pkgs, ... }:
 let
   inherit (import ./not-root.nix) notRoot;
+  tSh = import ./i18n-sh.nix pkgs;
   mos-backup = pkgs.writeShellApplication {
     name = "mos-backup";
     runtimeInputs = with pkgs; [
@@ -22,7 +23,7 @@ let
       # not fuse3: restic mount needs the setuid fusermount3 in /run/wrappers/bin
     ];
     # `mos-backup browse` (and `restore` in a terminal) is scripts/mos-backup-restore.py.
-    text = notRoot "mos-backup" + ''
+    text = tSh "mos-backup" + notRoot "mos-backup" + ''
       export MECCANICOS_PYLIB=${../scripts/lib}
       export MOS_BACKUP_PYTHON=${pkgs.python3}/bin/python3
       export MOS_BACKUP_BROWSE=${../scripts/mos-backup-restore.py}

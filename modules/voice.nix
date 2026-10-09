@@ -8,6 +8,7 @@
 { pkgs, ... }:
 let
   inherit (import ./not-root.nix) notRoot;
+  tSh = import ./i18n-sh.nix pkgs;
   # Speech only: nixpkgs' default also bundles voice *training* (PyTorch,
   # ~1.5 GB), an HTTP server and alignment tools.
   piper = pkgs.piper-tts.override {
@@ -39,6 +40,7 @@ let
   # so a second one waits instead of talking over the first.
   speechLock = "\${XDG_RUNTIME_DIR:-/tmp}/mos-speech.lock";
   say = pkgs.writeShellScriptBin "say" ''
+    ${tSh "mos-say"}
     ${notRoot "say"}
     # say "text"  or  echo text | say   (Amy speaks at 22050 Hz, 16-bit mono)
     # A bit faster than Piper's pace: SAY_LENGTH_SCALE=1 for the original.
@@ -56,16 +58,16 @@ let
     }
     case ''${1:-} in
       -h | --help)
-        echo "say - speak text aloud (Amy, offline)"
+        echo "say - $(T 'speak text aloud (Amy, offline)')"
         echo
-        echo "  say TEXT...           speak TEXT"
-        echo "  echo TEXT | say       speak what comes in"
-        echo "  say --to FILE TEXT    make the audio into FILE (to speak later)"
-        echo "  say --play FILE       speak FILE once it exists"
-        echo "SAY_LENGTH_SCALE=1 for Piper's own (slower) pace."
+        echo "  say TEXT...           $(T 'speak TEXT')"
+        echo "  echo TEXT | say       $(T 'speak what comes in')"
+        echo "  say --to FILE TEXT    $(T 'make the audio into FILE (to speak later)')"
+        echo "  say --play FILE       $(T 'speak FILE once it exists')"
+        echo "$(T "SAY_LENGTH_SCALE=1 for Piper's own (slower) pace.")"
         exit 0 ;;
       --to | --play)
-        [ "$#" -ge 2 ] || { echo "say: $1 needs a FILE (say --help)" >&2; exit 2; } ;;
+        [ "$#" -ge 2 ] || { Tf 'say: %s needs a FILE (say --help)\n' "$1" >&2; exit 2; } ;;
     esac
     case ''${1:-} in
       --to)

@@ -8,16 +8,22 @@
   ...
 }:
 let
+  tSh = import ./i18n-sh.nix pkgs;
   # "nvidia" or "open": which kernel driver should run NVIDIA GPUs (see below).
+  # Its stdout is read by modprobe (below) and mos-about: only the help and
+  # the error are translated, and only they load the translations.
   mos-gpu-driver = pkgs.writeShellScriptBin "mos-gpu-driver" ''
+    if [ -n "''${1-}" ]; then
+      ${tSh "mos-gpu-driver"}
+    fi
     case "''${1-}" in
       "") ;;
       -h | --help | help)
-        echo "mos-gpu-driver - print which kernel driver runs NVIDIA GPUs: nvidia or open"
+        echo "$(T 'mos-gpu-driver - print which kernel driver runs NVIDIA GPUs: nvidia or open')"
         echo
-        echo "  mos-gpu-driver   (no options; meccanicos.gpu=nvidia|open at boot overrides it)"
+        echo "  $(T 'mos-gpu-driver   (no options; meccanicos.gpu=nvidia|open at boot overrides it)')"
         exit 0 ;;
-      *) echo "mos-gpu-driver: unknown option $1 (mos-gpu-driver --help)" >&2; exit 2 ;;
+      *) Tf 'mos-gpu-driver: unknown option %s (mos-gpu-driver --help)\n' "$1" >&2; exit 2 ;;
     esac
     case " $(< /proc/cmdline) " in
       *" meccanicos.gpu=nvidia "*) echo nvidia; exit 0 ;;

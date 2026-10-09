@@ -93,6 +93,16 @@
   .tool button.shot:focus-visible { outline: 2px solid var(--orange); }
   .tool img { width: 100%; height: 100%; object-fit: contain; display: block; }
   .tool .body { padding: 14px 18px 18px; }
+  .languages { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 28px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 22px; margin: 0 0 40px; }
+  .languages h3 { margin: 0 0 8px; font-size: 20px; color: var(--sand); }
+  .languages p { margin: 0 0 12px; color: var(--dim); }
+  .languages ul { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .languages li { background: #000; border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; font-size: 15px; }
+  .languages li span { color: var(--dim); font-size: 13px; }
+  .languages button.shot { all: unset; cursor: zoom-in; display: block; border-radius: 8px; overflow: hidden; }
+  .languages button.shot:focus-visible { outline: 2px solid var(--orange); }
+  .languages img { width: 100%; height: auto; display: block; }
   .tool h3 { margin: 0 0 4px; font: 600 17px var(--mono); color: var(--orange); }
   .tool p { margin: 0 0 8px; color: var(--dim); }
   .tool code { font: 13px var(--mono); color: var(--sand); background: #000; padding: 2px 8px; border-radius: 6px; display: inline-block; }
@@ -118,6 +128,7 @@
     header.hero { padding: 56px 0 40px; }
     .buttons { grid-template-columns: 1fr; }
     .tools, .grid { grid-template-columns: 1fr; }
+    .languages { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -165,13 +176,13 @@
       <p><a class="get" href="https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-windows.exe">Download mos-usb-windows.exe</a></p>
       <p>Double-click it and allow it to make changes. If Windows warns about an unknown publisher: <i>More info</i> → <i>Run anyway</i>.</p></div>
     <div class="card" data-os="mac"><h3>macOS</h3>
-      <p>In Terminal (Apple silicon; on an Intel Mac use <code>mos-usb-macos-x86_64</code>):</p>
-      <pre><code>curl -fLO https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-macos-arm64
+      <p>In Terminal (Apple silicon; on an Intel Mac use <code translate="no">mos-usb-macos-x86_64</code>):</p>
+      <pre translate="no"><code translate="no">curl -fLO https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-macos-arm64
 chmod +x mos-usb-macos-arm64
 ./mos-usb-macos-arm64</code></pre></div>
     <div class="card" data-os="linux"><h3>Linux</h3>
-      <p>In a terminal (on ARM use <code>mos-usb-linux-arm64</code>):</p>
-      <pre><code>curl -fLO https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-linux-x86_64
+      <p>In a terminal (on ARM use <code translate="no">mos-usb-linux-arm64</code>):</p>
+      <pre translate="no"><code translate="no">curl -fLO https://github.com/unofficialtools/meccanicos/releases/download/latest/mos-usb-linux-x86_64
 chmod +x mos-usb-linux-x86_64
 ./mos-usb-linux-x86_64</code></pre></div>
   </div>
@@ -185,7 +196,7 @@ chmod +x mos-usb-linux-x86_64
   <div class="grid">
     <div class="card"><h3>Keyboard first</h3><p>No start menu. Super+Space opens one command bar for apps, commands, websites, folders and questions.</p></div>
     <div class="card"><h3>Works offline</h3><p>The desktop, the included apps and the drivers are on the stick, and installing needs no network. More apps and local AI models are downloaded once, when you ask for them.</p></div>
-    <div class="card"><h3>Secure, with stated trade-offs</h3><p>Installed: the whole disk encrypted (LUKS2). Live: the session stays in memory, and your vaults and persistent home are encrypted. A hardened kernel, a firewall, login alerts. For convenience <code>sudo</code> asks no password, and an installed system runs SSH with keys only; both can be changed.</p></div>
+    <div class="card"><h3>Secure, with stated trade-offs</h3><p>Installed: the whole disk encrypted (LUKS2). Live: the session stays in memory, and your vaults and persistent home are encrypted. A hardened kernel, a firewall, login alerts. For convenience <code translate="no">sudo</code> asks no password, and an installed system runs SSH with keys only; both can be changed.</p></div>
     <div class="card"><h3>Coherent</h3><p>One way to open any file, one look for every tool, apps named by what they do: "Web Browser (Brave)".</p></div>
     <div class="card"><h3>Reproducible</h3><p>The whole system is one Nix flake. Upgrades are atomic: a failed one changes nothing, and you can roll back.</p></div>
     <div class="card"><h3>Hardware first</h3><p>MeccanicOS comes with a large collection of drivers and firmware (all of it freely redistributable): Mesa and Vulkan, video acceleration, PipeWire, Bluetooth, printers and scanners, NVIDIA's driver picked by itself. Hardening never gets in a driver's way.</p></div>
@@ -197,10 +208,10 @@ chmod +x mos-usb-linux-x86_64
   <h2>Features</h2>
   <p class="lead">What you get on the stick.</p>
   <div class="grid">
-    <div class="card"><h3>Command bar</h3><p>Type part of an app name, a website, a command, a path (<code>~/Documents</code> opens it in yazi) or <code>!command</code> to run it in a new shell. <code>?question</code> asks the AI.</p></div>
+    <div class="card"><h3>Command bar</h3><p>Type part of an app name, a website, a command, a path (<code translate="no">~/Documents</code> opens it in yazi) or <code translate="no">!command</code> to run it in a new shell. <code translate="no">?question</code> asks the AI.</p></div>
     <div class="card"><h3>Live, persistent or installed</h3><p>Run from USB with nothing kept, keep your home encrypted on the stick, or install to the disk from one page. <a href="https://github.com/unofficialtools/meccanicos#what-survives-a-restart">What survives a restart</a>.</p></div>
     <div class="card"><h3>Encrypted vaults</h3><p>LUKS2 vaults in the stick's free space, and on Ventoy sticks as files next to the ISO.</p></div>
-    <div class="card"><h3>Open anything</h3><p><code>open FILE</code> works like on a Mac, and the same rules apply in the shell, yazi, mc, fzf and on a double-click.</p></div>
+    <div class="card"><h3>Open anything</h3><p><code translate="no">open FILE</code> works like on a Mac, and the same rules apply in the shell, yazi, mc, fzf and on a double-click.</p></div>
     <div class="card"><h3>Apps on demand</h3><p>With a network: search nixpkgs' 120,000 packages, try an app without installing it, or give one folder its own tools with direnv.</p></div>
     <div class="card"><h3>AI chat, your choice</h3><p>Local AI after a one-time model download (Qwen3 through Ollama, ~2.5 GB; then offline, and nothing leaves the computer), or Claude, ChatGPT or Grok with your API key (your questions go to that company).</p></div>
     <div class="card"><h3>Read aloud</h3><p>Copy any text and an offline voice (Piper) reads it, sentence by sentence.</p></div>
@@ -215,13 +226,39 @@ chmod +x mos-usb-linux-x86_64
 
 <section id="tools">
   <h2>MeccanicOS tools</h2>
-  <p class="lead">You meet them by name in the command bar (Super+Space); in a terminal, every <code>mos-*</code> command answers <code>--help</code> and <code>mos</code> lists them all. The full-screen ones look and work the same way: a teal title bar, the keys at the bottom, and whatever Enter acts on in orange. Click a screenshot to enlarge it.</p>
+  <p class="lead">You meet them by name in the command bar (Super+Space); in a terminal, every <code translate="no">mos-*</code> command answers <code translate="no">--help</code> and <code translate="no">mos</code> lists them all. The full-screen ones look and work the same way: a teal title bar, the keys at the bottom, and whatever Enter acts on in orange. Click a screenshot to enlarge it.</p>
+  <div class="languages">
+    <div>
+      <h3>They speak your language</h3>
+      <p>The mos-* tools support multiple languages. Each one follows the system language
+        (and the language picked in the installer), with no setting to change:</p>
+      <ul>
+        <li>English</li>
+        <li>Español <span>Spanish</span></li>
+        <li>Português <span>Portuguese</span></li>
+        <li>Français <span>French</span></li>
+        <li>Italiano <span>Italian</span></li>
+        <li>Deutsch <span>German</span></li>
+        <li>简体中文 <span>Chinese</span></li>
+        <li>日本語 <span>Japanese</span></li>
+        <li>한국어 <span>Korean</span></li>
+      </ul>
+      <p>Related languages use the closest of these (Catalan and Basque get Spanish, Galician
+        Portuguese, Dutch German, …); any other language gets English. Commands and options stay the
+        same in every language, so <code translate="no">mos-printers --help</code> works everywhere.</p>
+      <p>This page is in English: your browser's Translate button reads it in yours (the commands stay as they are).</p>
+    </div>
+    <button class="shot" type="button" aria-label="Enlarge the screenshot of mos-printers in Chinese"
+      onclick="enlarge('screenshots/mos-printers-zh.png', 'mos-printers in Chinese')">
+      <img src="screenshots/mos-printers-zh.png" alt="mos-printers in Chinese: the printers, their state and the keys, all translated" loading="lazy">
+    </button>
+  </div>
   <div id="tool-groups"></div>
 </section>
 
 <section id="packages">
   <h2>Pre-installed packages</h2>
-  <p class="lead">All on the stick, all working offline. More with <code>apps install NAME</code>.</p>
+  <p class="lead">All on the stick, all working offline. More with <code translate="no">apps install NAME</code>.</p>
   <div class="packages" id="package-list"></div>
 </section>
 
@@ -304,7 +341,7 @@ const nixpkgsLink = (name) => {
   const href = attr.startsWith("gh:") ? `https://github.com/${attr.slice(3)}`
     : attr.startsWith("option:") ? `https://search.nixos.org/options?channel=26.05&show=${attr.slice(7)}&query=${attr.slice(7)}`
     : `https://search.nixos.org/packages?channel=26.05&show=${encodeURIComponent(attr)}&query=${encodeURIComponent(attr)}`;
-  return el("a", { href }, name);
+  return el("a", { href, translate: "no" }, name); // a name: never translated
 };
 const packageName = (name) => name.split(/(, | \+ )/).map((part, i) => (i % 2 ? part : nixpkgsLink(part)));
 
@@ -343,7 +380,7 @@ for (const [group, tools] of TOOLS) {
     const button = el("button", { class: "shot", type: "button", "aria-label": `Enlarge the ${name} screenshot` }, img);
     button.onclick = () => enlarge(src, name);
     list.append(el("article", { class: "tool" }, button,
-      el("div", { class: "body" }, el("h3", {}, name), el("p", {}, what), el("code", {}, example))));
+      el("div", { class: "body" }, el("h3", {}, name), el("p", {}, what), el("code", { translate: "no" }, example))));
   }
   groups.append(list);
 }

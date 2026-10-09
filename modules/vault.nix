@@ -3,6 +3,7 @@
 # an existing vault.
 { pkgs, distro, ... }:
 let
+  tSh = import ./i18n-sh.nix pkgs;
   usb-vault = pkgs.writeShellApplication {
     name = "usb-vault";
     runtimeInputs = with pkgs; [
@@ -23,7 +24,7 @@ let
       # sudo is NOT listed: the setuid one lives in /run/wrappers/bin (already on PATH)
     ];
     # Labels come from flake.nix so the ISO, the tool and udev agree.
-    text = ''
+    text = tSh "mos-vault" + ''
       export VAULT_LABEL="''${VAULT_LABEL:-${distro.vaultLabel}}"
       export DATA_LABEL="''${DATA_LABEL:-${distro.dataLabel}}"
       export HOME_LABEL="''${HOME_LABEL:-${distro.homeLabel}}"

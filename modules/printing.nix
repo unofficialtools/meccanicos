@@ -6,7 +6,9 @@
 { pkgs, ... }:
 let
   inherit (import ./not-root.nix) notRoot;
+  tSh = import ./i18n-sh.nix pkgs;
   mos-printers = pkgs.writeShellScriptBin "mos-printers" ''
+    ${tSh "mos-printers"}
     ${notRoot "mos-printers"}
     export MECCANICOS_PYLIB=${../scripts/lib}
     export MECCANICOS_TESTPAGE=${pkgs.cups}/share/cups/data/testprint

@@ -5,6 +5,7 @@
 # its subtitle cues to the disk labelled MECCOSREC and turns the VM off.
 { pkgs, distro, ... }:
 let
+  tSh = import ./i18n-sh.nix pkgs;
   # ~/Tutorial: the example picture and video (branding/samples.sh), a PDF
   # to open, and two text files.
   samples =
@@ -34,16 +35,17 @@ let
       util-linux # flock
       xclip # the text it copies to read aloud
     ];
-    text = ''
+    text = tSh "mos-tour" + ''
       # --window: open the tour in its own window (one tour at a time).
       if [ "''${1:-}" = --window ]; then
         shift
         exec xfce4-terminal --disable-server --class mos-tutorial \
-          --title ${pkgs.lib.escapeShellArg "Tutorial (${distro.name})"} \
+          --title "$(Tf 'Tutorial (%s)' ${pkgs.lib.escapeShellArg distro.name})" \
           --geometry 78x24-0+32 -x mos-tour "$@"
       fi
       export MECCANICOS_NAME=${pkgs.lib.escapeShellArg distro.name}
       export MECCANICOS_TUTORIAL_SAMPLES=${samples}
+      export MECCANICOS_PYLIB=${../scripts/lib}
       exec ${pkgs.python3}/bin/python3 ${../scripts/mos-tutorial.py} "$@"
     '';
   };

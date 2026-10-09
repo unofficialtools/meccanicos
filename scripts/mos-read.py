@@ -24,6 +24,9 @@ import time
 # The look shared by MeccanicOS TUIs: MECCANICOS_PYLIB from the Nix wrapper, else next to this file.
 sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 import mos_tui as tui  # noqa: E402
+from mos_i18n import translator  # noqa: E402
+
+T = translator("mos-read")
 
 # 1.0x: a bit faster than Piper's own pace, as `say` (voice.nix).
 LENGTH_SCALE = 0.8
@@ -229,15 +232,15 @@ def draw(scr, reader):
     cur = min(reader.idx, len(reader.sentences) - 1)
     first = next(k for k, (_, n) in enumerate(lines) if n == cur)
     top = max(0, min(first - body // 3, len(lines) - body))
-    state = "Paused" if reader.paused else "Reading"
-    tui.bar(scr, 0, "Reading aloud · Piper / Amy", f"{state}  {cur + 1}/{len(reader.sentences)}  {reader.speed:.1f}x")
+    state = T("Paused") if reader.paused else T("Reading")
+    tui.bar(scr, 0, T("Reading aloud · Piper / Amy"), f"{state}  {cur + 1}/{len(reader.sentences)}  {reader.speed:.1f}x")
     for row, (text, n) in enumerate(lines[top:top + body]):
         # The sentence being read: dark on orange, as what has focus in every tool.
         if n == cur:
             tui.put(scr, 2 + row, 1, f" {text} ", tui.attr(tui.SELECTED))
         else:
             tui.put(scr, 2 + row, 2, text, tui.attr(tui.NORMAL))
-    tui.keybar(scr, h - 1, [("Space", "pause"), ("←→", "sentence"), ("+/-", "speed"), ("q", "stop")])
+    tui.keybar(scr, h - 1, [("Space", T("pause")), ("←→", T("sentence")), ("+/-", T("speed")), ("q", T("stop"))])
     scr.refresh()
 
 
@@ -267,7 +270,7 @@ def main():
     if sentences:
         remember(text)
     if not sentences:
-        print("Nothing to read: the clipboard is empty. Copy some text first.")
+        print(T("Nothing to read: the clipboard is empty. Copy some text first."))
         time.sleep(3)
         return 1
     # Held until we exit: another voice waits for this one, and vice versa.
@@ -275,9 +278,9 @@ def main():
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        print("Waiting for the other voice to finish…", flush=True)
+        print(T("Waiting for the other voice to finish…"), flush=True)
         fcntl.flock(lock, fcntl.LOCK_EX)
-    print("Loading the voice…", flush=True)
+    print(T("Loading the voice…"), flush=True)
     # onnxruntime/espeak may print to stderr, which would scribble over the UI.
     log = os.path.join(CACHE, "mos-read.log")
     os.makedirs(CACHE, exist_ok=True)

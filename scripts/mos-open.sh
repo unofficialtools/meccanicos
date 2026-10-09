@@ -17,13 +17,17 @@
 # in this terminal, or in a new terminal window when started from the desktop).
 
 set -uo pipefail
+# Translations (scripts/lib/mos_i18n.sh); without them, English.
+# shellcheck source=/dev/null disable=SC2059
+declare -F T >/dev/null || . "${MOS_I18N_SH:-$(dirname "$0")/lib/mos_i18n.sh}" 2>/dev/null ||
+  { T() { printf '%s' "$1"; } && Tf() { local f=$1 && shift && printf -- "$f" "$@"; }; }
 
 SYS_CONF=${MECCANICOS_OPEN_SYSTEM_CONF:-/etc/meccanicos/open.conf}
 USER_CONF=${XDG_CONFIG_HOME:-$HOME/.config}/meccanicos/open.conf
 
 usage() {
-    cat <<'EOF'
-Usage: open [options] FILE|FOLDER|URL...
+    local help
+    help=$(T 'Usage: open [options] FILE|FOLDER|URL...
 
   (no option)  open with the app chosen by the rules in open.conf
   -a APP       open with APP (a command, e.g. -a eog)
@@ -36,8 +40,8 @@ Usage: open [options] FILE|FOLDER|URL...
   --config     create/edit your own rules (~/.config/meccanicos/open.conf)
   -h, --help   this help
 
-Examples: open .   open report.pdf   open -a eog photo.jpg   open https://nixos.org
-EOF
+Examples: open .   open report.pdf   open -a eog photo.jpg   open https://nixos.org')
+    printf '%s\n' "$help"
 }
 
 die() {
@@ -65,12 +69,12 @@ run() {
         elif have_display; then
             setsid -f xfce4-terminal -x bash -c "$cmd" >/dev/null 2>&1 </dev/null
         else
-            die "no terminal or display to run: $cmd"
+            die "$(Tf 'no terminal or display to run: %s' "$cmd")"
         fi
     elif ((wait)); then
         bash -c "$cmd"
     else
-        have_display || die "no graphical display (try -t for the terminal editor)"
+        have_display || die "$(T 'no graphical display (try -t for the terminal editor)')"
         setsid -f bash -c "$cmd" >/dev/null 2>&1 </dev/null
     fi
 }
@@ -124,14 +128,14 @@ open_one() {
     if [[ $target =~ ^([A-Za-z][A-Za-z0-9+.-]*):(//)? && ! -e $target ]]; then
         scheme=${BASH_REMATCH[1],,}
     else
-        [[ -e $target ]] || die "$target: no such file or folder"
+        [[ -e $target ]] || die "$(Tf '%s: no such file or folder' "$target")"
         target=$(realpath -- "$target")
     fi
 
     if [[ -n $reveal ]]; then
-        [[ -z $scheme ]] || die "-R needs a file or folder"
-        if ((dry)); then echo "show $target in the file manager"; return 0; fi
-        have_display || die "no graphical display"
+        [[ -z $scheme ]] || die "$(T '-R needs a file or folder')"
+        if ((dry)); then Tf 'show %s in the file manager\n' "$target"; return 0; fi
+        have_display || die "$(T 'no graphical display')"
         # Thunar implements FileManager1: opens the folder with the item selected.
         dbus-send --session --type=method_call --dest=org.freedesktop.FileManager1 \
             /org/freedesktop/FileManager1 org.freedesktop.FileManager1.ShowItems \
@@ -165,11 +169,11 @@ open_one() {
 # --list: what opens with what (your rules first), and the keys in each app.
 list_rules() {
     local conf line pats cmd label="" exts p app
-    echo "What open uses (first match wins):"
+    echo "$(T 'What open uses (first match wins):')"
     for conf in "$USER_CONF" "$SYS_CONF"; do
         [[ -r $conf ]] || continue
         echo
-        if [[ $conf == "$USER_CONF" ]]; then echo "  Your rules ($conf)"; else echo "  System rules ($conf)"; fi
+        if [[ $conf == "$USER_CONF" ]]; then Tf '  Your rules (%s)\n' "$conf"; else Tf '  System rules (%s)\n' "$conf"; fi
         while IFS= read -r line || [[ -n $line ]]; do
             line=${line#"${line%%[![:space:]]*}"}
             if [[ $line == '#:'* ]]; then
@@ -196,7 +200,7 @@ list_rules() {
             if [[ $cmd == term:* ]]; then
                 cmd=${cmd#term:}
                 cmd=${cmd#"${cmd%%[![:space:]]*}"}
-                app="${cmd%% *} (in the terminal)"
+                app=$(Tf '%s (in the terminal)' "${cmd%% *}")
             else
                 app=${cmd%% *}
             fi
@@ -204,9 +208,8 @@ list_rules() {
             label=""
         done <"$conf"
     done
-    cat <<'EOF'
-
-Keys that open the file under the cursor with open:
+    local keys
+    keys=$(T 'Keys that open the file under the cursor with open:
     yazi     Enter or Ctrl+O (a folder: go into it); O offers VSCodium, Jed
              (terminal editor), "Print…" and "show in file manager";
              e drags the selected files out, i takes files dropped on it
@@ -216,17 +219,18 @@ Keys that open the file under the cursor with open:
 Text, folders and archive listings stay in this terminal (from the desktop: a
 terminal window); everything else opens in a window.
 Double-click in Thunar or on the desktop also goes through open (Thunar keeps
-folders); right-click > "Open in Browser" shows anything in Brave.
-EOF
+folders); right-click > "Open in Browser" shows anything in Brave.')
+    printf '\n%s\n' "$keys"
 }
 
 edit_config() {
     if [[ ! -e $USER_CONF ]]; then
         mkdir -p "$(dirname -- "$USER_CONF")"
         {
-            echo "# Your own open rules: checked before the system rules below (all"
-            echo "# commented out). Uncomment and change a line, or add new ones."
-            echo "# Test with: open -n FILE"
+            T '# Your own open rules: checked before the system rules below (all
+# commented out). Uncomment and change a line, or add new ones.
+# Test with: open -n FILE'
+            echo
             echo
             sed -e 's/^\([^#[:space:]]\)/# \1/' "$SYS_CONF"
         } >"$USER_CONF"
@@ -238,7 +242,7 @@ app="" reveal="" gui_editor=0 term_editor=0 wait=0 dry=0
 while (($#)); do
     case $1 in
     -a)
-        [[ $# -ge 2 ]] || usage_error "-a needs an app"
+        [[ $# -ge 2 ]] || usage_error "$(T '-a needs an app')"
         app=$2
         shift 2
         ;;
@@ -251,11 +255,11 @@ while (($#)); do
     --config) edit_config; exit ;;
     -h | --help) usage; exit 0 ;;
     --) shift; break ;;
-    -*) usage_error "unknown option $1" ;;
+    -*) usage_error "$(Tf 'unknown option %s' "$1")" ;;
     *) break ;;
     esac
 done
-(($#)) || usage_error "missing FILE"
+(($#)) || usage_error "$(T 'missing FILE')"
 
 status=0
 for t in "$@"; do

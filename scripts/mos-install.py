@@ -29,6 +29,9 @@ import time
 # The look shared by MeccanicOS TUIs: MECCANICOS_PYLIB from the Nix wrapper, else next to this file.
 sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 import mos_tui as ui  # noqa: E402
+from mos_i18n import translator, N_  # noqa: E402
+
+T = translator("mos-install")
 
 NAME = os.environ.get("MECCANICOS_NAME", "MeccanicOS")
 SYSTEM = os.environ.get("MECCANICOS_SYSTEM", "")
@@ -202,6 +205,9 @@ COUNTRIES = [
     ("Malta", "MT", "mt_MT.UTF-8", "mt_MT.UTF-8", "Europe/Malta", "Maltese"),
 ]
 
+# Screen orientations: stored and compared in English, shown with T().
+SCREENS = [N_("Landscape"), N_("Portrait")]
+
 KB = {k[0]: k for k in KEYBOARDS}
 LANG = {label: loc for label, loc in LANGUAGES}
 LANG_BY_LOCALE = {loc: label for label, loc in LANGUAGES}
@@ -230,7 +236,7 @@ def run(cmd, check=True, input=None, capture=False, quiet=False):
         for line in out.rstrip().splitlines()[-15:]:
             print("    " + line)
     if check and r.returncode != 0:
-        raise RuntimeError(f"command failed ({r.returncode}): {shown}\n{out[-2000:]}")
+        raise RuntimeError(T("command failed ({code}): {command}").format(code=r.returncode, command=shown) + f"\n{out[-2000:]}")
     return out
 
 
@@ -273,24 +279,24 @@ def run_with_progress(cmd, total, where):
                 bar = "#" * int(frac * width) + "." * (width - int(frac * width))
                 rate = done / secs if secs > 0 else 0
                 if frac >= 0.99:
-                    tail = "finishing (boot loader, settings)…"
+                    tail = T("finishing (boot loader, settings)…")
                 elif rate > 0:
                     left = (total - done) / rate
-                    tail = f"{rate / 1e6:5.0f} MB/s, about {int(left // 60)}:{int(left % 60):02d} left"
+                    tail = T("{rate} MB/s, about {time} left").format(rate=f"{rate / 1e6:5.0f}", time=f"{int(left // 60)}:{int(left % 60):02d}")
                 else:
                     tail = ""
-                line = f"    [{bar}] {frac * 100:3.0f}%  {done / 1e9:4.1f} of {total / 1e9:.1f} GB  {tail}"
+                line = f"    [{bar}] {frac * 100:3.0f}%  " + T("{done} of {total} GB").format(done=f"{done / 1e9:4.1f}", total=f"{total / 1e9:.1f}") + f"  {tail}"
             else:
-                line = f"    {done / 1e9:4.1f} GB copied, {int(secs // 60)}:{int(secs % 60):02d} elapsed"
-            print("\r" + line.ljust(96)[:96], end="", flush=True)
+                line = "    " + T("{done} GB copied, {time} elapsed").format(done=f"{done / 1e9:4.1f}", time=f"{int(secs // 60)}:{int(secs % 60):02d}")
+            print("\r" + ui.pad(line, 96), end="", flush=True)
         rc = p.returncode
     if total > 0 and rc == 0:
-        print("\r" + f"    [{'#' * width}] 100%  done".ljust(96)[:96], flush=True)
+        print("\r" + ui.pad(f"    [{'#' * width}] 100%  " + T("done"), 96), flush=True)
     else:
         print(flush=True)
     if rc != 0:
         tail = open(LOG, errors="replace").read()[-2000:]
-        raise RuntimeError(f"command failed ({rc}): {shown}\n{tail}")
+        raise RuntimeError(T("command failed ({code}): {command}").format(code=rc, command=shown) + f"\n{tail}")
 
 
 # ------------------------------------------------------ system discovery ----
@@ -323,7 +329,7 @@ def list_disks():
         size = int(d.get("size") or 0)
         if size < 8 * 1024**3:
             continue
-        model = (d.get("model") or "").strip() or "disk"
+        model = (d.get("model") or "").strip() or T("disk")
         tran = d.get("tran") or ""
         label = f"{d['name']}  {size / 1e9:6.1f} GB  {model}" + (f"  ({tran})" if tran else "")
         disks.append((label, d["path"], size))
@@ -396,7 +402,7 @@ class Form:
             "language": LANG_BY_LOCALE[c[2]],
             "timezone": c[4],
             "keyboard": c[5],
-            "screen": "Landscape",
+            "screen": SCREENS[0],
             "wifi": "",
             "wifi_security": "",
             "wifi_password": "",
@@ -409,23 +415,23 @@ class Form:
         }
         self.touched = set()  # fields the user set explicitly (not overwritten by country)
         self.fields = [
-            ("country", "Country"),
-            ("language", "Language"),
-            ("timezone", "Time zone"),
-            ("keyboard", "Keyboard"),
-            ("screen", "Screen"),
-            ("wifi", "Wi-Fi network"),
-            ("wifi_password", "Wi-Fi password"),
-            ("fullname", "Full name"),
-            ("username", "Username"),
-            ("password", "Password"),
-            ("luks_password", "Disk password"),
-            ("disk", "Target disk"),
-            ("fs", "Filesystem"),
+            ("country", N_("Country")),
+            ("language", N_("Language")),
+            ("timezone", N_("Time zone")),
+            ("keyboard", N_("Keyboard")),
+            ("screen", N_("Screen")),
+            ("wifi", N_("Wi-Fi network")),
+            ("wifi_password", N_("Wi-Fi password")),
+            ("fullname", N_("Full name")),
+            ("username", N_("Username")),
+            ("password", N_("Password")),
+            ("luks_password", N_("Disk password")),
+            ("disk", N_("Target disk")),
+            ("fs", N_("Filesystem")),
             ("install", None),
         ]
         self.sel = 0
-        self.msg = "Keyboard changes apply immediately, so passwords match at boot."
+        self.msg = T("Keyboard changes apply immediately, so passwords match at boot.")
         self.err = False
         self._tz = None
         self._disks = None
@@ -434,30 +440,32 @@ class Form:
     def show(self, key):
         v = self.v
         if key in ("password", "luks_password"):
-            return "•" * min(len(v[key]), 24) if v[key] else "(not set)"
+            return "•" * min(len(v[key]), 24) if v[key] else T("(not set)")
         if key == "wifi_password":
             if not v["wifi"]:
                 return "—"
             if not v["wifi_security"]:
-                return "(open network)"
-            return "•" * min(len(v[key]), 24) if v[key] else "(not set)"
+                return T("(open network)")
+            return "•" * min(len(v[key]), 24) if v[key] else T("(not set)")
         if key == "wifi":
-            return v["wifi"] or "(none — set up later)"
+            return v["wifi"] or T("(none — set up later)")
         if key == "disk":
-            return v["disk_label"] or "(choose a disk)"
+            return v["disk_label"] or T("(choose a disk)")
         if key == "fs":
-            return "ext4 on LUKS2 (encrypted), EFI boot"
+            return T("ext4 on LUKS2 (encrypted), EFI boot")
         if key == "fullname":
-            return v["fullname"] or "(optional)"
+            return v["fullname"] or T("(optional)")
         if key == "username":
-            return v["username"] or "(not set)"
+            return v["username"] or T("(not set)")
+        if key == "screen":
+            return T(v["screen"])
         return v.get(key, "")
 
 
 def draw(scr, f):
     scr.erase()
     h, w = scr.getmaxyx()
-    ui.bar(scr, 0, f"{NAME} installer")
+    ui.bar(scr, 0, T("{name} installer").format(name=NAME))
     top = 2
     labw = 16
     for i, (key, label) in enumerate(f.fields):
@@ -465,14 +473,14 @@ def draw(scr, f):
         if y >= h - 2:
             break
         if key == "install":
-            btn = "  Install now  "
-            ui.button(scr, y, max(2, (w - len(btn) - 2) // 2), btn, f.sel == i)
+            btn = "  " + T("Install now") + "  "
+            ui.button(scr, y, max(2, (w - ui.cols(btn) - 2) // 2), btn, f.sel == i)
             continue
-        line = f"  {label:<{labw}} {f.show(key)}"
+        line = f"  {ui.pad(T(label), max(labw, ui.cols(T(label))))} {f.show(key)}"
         ui.row(scr, y, 0, w - 1, line, f.sel == i, ui.attr(ui.DIM if key == "fs" else ui.NORMAL))
-    ui.keybar(scr, h - 1, [("↑↓", "move"), ("Enter", "change"), ("Tab", "next"), ("Ctrl-C", "quit")])
+    ui.keybar(scr, h - 1, [("↑↓", T("move")), ("Enter", T("change")), ("Tab", T("next")), ("Ctrl-C", T("quit"))])
     if f.msg:
-        ui.message(scr, h - 2, 1, ("✗ " if f.err and not f.msg.startswith("✗") else "") + f.msg[: w - 5])
+        ui.message(scr, h - 2, 1, ("✗ " if f.err and not f.msg.startswith("✗") else "") + ui.fit(f.msg, w - 5))
     scr.refresh()
 
 
@@ -481,7 +489,7 @@ def popup_list(scr, title, items, current=None, filterable=True):
     query = ""
     h, w = scr.getmaxyx()
     ph = min(h - 4, max(8, len(items) + 4))
-    pw = min(w - 4, max(40, len(title) + 8, max((len(i) for i in items), default=10) + 6))
+    pw = min(w - 4, max(40, ui.cols(title) + 8, max((ui.cols(i) for i in items), default=10) + 6))
     y0, x0 = (h - ph) // 2, (w - pw) // 2
     win = curses.newwin(ph, pw, y0, x0)
     win.keypad(True)
@@ -493,8 +501,8 @@ def popup_list(scr, title, items, current=None, filterable=True):
         idx_list = [i for i, s in enumerate(items) if q in s.lower()] if q else list(range(len(items)))
         if sel not in idx_list:
             sel = idx_list[0] if idx_list else -1
-        hdr = f"{title} " + (f"— filter: {query}_" if filterable and query else ("— type to filter" if filterable else ""))
-        ui.frame(win, hdr[: pw - 6])
+        hdr = f"{title} " + (T("— filter: {query}_").format(query=query) if filterable and query else (T("— type to filter") if filterable else ""))
+        ui.frame(win, ui.fit(hdr, pw - 6))
         rows = ph - 2
         pos = idx_list.index(sel) if sel in idx_list else 0
         if pos < scroll:
@@ -504,7 +512,7 @@ def popup_list(scr, title, items, current=None, filterable=True):
         for r, i in enumerate(idx_list[scroll : scroll + rows]):
             ui.row(win, 1 + r, 1, pw - 2, " " + items[i], i == sel)
         if not idx_list:
-            ui.put(win, 1, 2, "(no match)", ui.attr(ui.DIM))
+            ui.put(win, 1, 2, T("(no match)"), ui.attr(ui.DIM))
         win.refresh()
         k = win.get_wch()
         if k in (curses.KEY_UP,) and idx_list:
@@ -537,10 +545,10 @@ def popup_input(scr, title, value="", secret=False, hint=""):
     curses.curs_set(1)
     try:
         while True:
-            ui.frame(win, title[: pw - 6])
+            ui.frame(win, ui.fit(title, pw - 6))
             at = ui.field(win, 1, 2, pw - 4, "".join(buf), True, secret)
             if hint:
-                ui.put(win, 3, 2, hint[: pw - 4], ui.attr(ui.DIM))
+                ui.put(win, 3, 2, ui.fit(hint, pw - 4), ui.attr(ui.DIM))
             win.move(1, at)
             win.refresh()
             k = win.get_wch()
@@ -565,9 +573,10 @@ def popup_message(scr, title, text, confirm_word=None):
     lines = []
     pw = min(w - 4, 72)
     for para in text.split("\n"):
-        while len(para) > pw - 4:
-            cut = para.rfind(" ", 0, pw - 4)
-            cut = cut if cut > 0 else pw - 4
+        while ui.cols(para) > pw - 4:
+            room = len(ui.fit(para, pw - 4))  # characters that fit in pw - 4 columns
+            cut = para.rfind(" ", 0, room)
+            cut = cut if cut > 0 else room
             lines.append(para[:cut])
             para = para[cut:].lstrip()
         lines.append(para)
@@ -580,10 +589,11 @@ def popup_message(scr, title, text, confirm_word=None):
         for i, l in enumerate(lines):
             ui.put(win, 1 + i, 2, l, ui.attr(ui.NORMAL))
         if confirm_word:
-            ui.put(win, ph - 3, 2, f"Type {confirm_word} to continue, Esc to go back:", ui.attr(ui.KEY))
+            ui.put(win, ph - 3, 2, T("Type {word} to continue, Esc to go back:").format(word=confirm_word), ui.attr(ui.KEY))
             ui.field(win, ph - 2, 2, pw - 4, typed, True)
         else:
-            ui.button(win, ph - 2, pw - 9, "OK", True)
+            ok = T("OK")
+            ui.button(win, ph - 2, pw - 7 - ui.cols(ok), ok, True)
         win.refresh()
         k = win.get_wch()
         if not confirm_word:
@@ -601,16 +611,16 @@ def popup_message(scr, title, text, confirm_word=None):
 
 
 def ask_password(scr, title, minlen):
-    p1 = popup_input(scr, title, secret=True, hint=f"At least {minlen} characters.")
+    p1 = popup_input(scr, title, secret=True, hint=T("At least {count} characters.").format(count=minlen))
     if p1 is None:
         return None, ""
     if len(p1) < minlen:
-        return None, f"{title}: use at least {minlen} characters."
-    p2 = popup_input(scr, title + " (repeat)", secret=True)
+        return None, T("{title}: use at least {count} characters.").format(title=title, count=minlen)
+    p2 = popup_input(scr, T("{title} (repeat)").format(title=title), secret=True)
     if p2 is None:
         return None, ""
     if p1 != p2:
-        return None, f"{title}: the two entries did not match."
+        return None, T("{title}: the two entries did not match.").format(title=title)
     return p1, ""
 
 
@@ -619,7 +629,7 @@ def edit(scr, f, key):
     f.msg, f.err = "", False
     if key == "country":
         names = [c[0] for c in COUNTRIES]
-        i = popup_list(scr, "Country", names, v["country"])
+        i = popup_list(scr, T("Country"), names, v["country"])
         if i is None:
             return
         c = COUNTRIES[i]
@@ -632,48 +642,48 @@ def edit(scr, f, key):
         if "keyboard" not in f.touched:
             v["keyboard"] = c[5]
             apply_keyboard_live(KB[v["keyboard"]])
-        f.msg = "Language, time zone and keyboard follow the country unless you change them."
+        f.msg = T("Language, time zone and keyboard follow the country unless you change them.")
     elif key == "language":
         names = [l[0] for l in LANGUAGES]
-        i = popup_list(scr, "Language", names, v["language"])
+        i = popup_list(scr, T("Language"), names, v["language"])
         if i is not None:
             v["language"] = names[i]
             f.touched.add(key)
     elif key == "timezone":
         if f._tz is None:
             f._tz = list_timezones()
-        i = popup_list(scr, "Time zone", f._tz, v["timezone"])
+        i = popup_list(scr, T("Time zone"), f._tz, v["timezone"])
         if i is not None:
             v["timezone"] = f._tz[i]
             f.touched.add(key)
     elif key == "keyboard":
         names = [k[0] for k in KEYBOARDS]
-        i = popup_list(scr, "Keyboard layout", names, v["keyboard"])
+        i = popup_list(scr, T("Keyboard layout"), names, v["keyboard"])
         if i is not None:
             v["keyboard"] = names[i]
             f.touched.add(key)
             apply_keyboard_live(KEYBOARDS[i])
-            f.msg = f"Keyboard switched to {names[i]}. Test it: type in any field."
+            f.msg = T("Keyboard switched to {layout}. Test it: type in any field.").format(layout=names[i])
     elif key == "screen":
-        opts = ["Landscape", "Portrait"]
-        i = popup_list(scr, "Screen orientation", opts, v["screen"], filterable=False)
+        shown = [T(o) for o in SCREENS]
+        i = popup_list(scr, T("Screen orientation"), shown, T(v["screen"]), filterable=False)
         if i is not None:
-            v["screen"] = opts[i]
+            v["screen"] = SCREENS[i]
     elif key == "wifi":
-        f.msg = "Scanning for Wi-Fi networks..."
+        f.msg = T("Scanning for Wi-Fi networks...")
         draw(scr, f)
         nets = scan_wifi()
-        items = ["(none — set up later)"] + [
-            f"{s}   {'▂▄▆█'[: max(1, min(4, sig // 25 + 1))]:<4} {sig:3d}%  {sec or 'open'}" for s, sig, sec in nets
-        ] + ["Other network (type the name)…"]
-        f.msg = "" if nets else "No networks found (no Wi-Fi card, or switched off). You can type a name."
-        i = popup_list(scr, "Wi-Fi network", items, None)
+        items = [T("(none — set up later)")] + [
+            f"{s}   {'▂▄▆█'[: max(1, min(4, sig // 25 + 1))]:<4} {sig:3d}%  {sec or T('open')}" for s, sig, sec in nets
+        ] + [T("Other network (type the name)…")]
+        f.msg = "" if nets else T("No networks found (no Wi-Fi card, or switched off). You can type a name.")
+        i = popup_list(scr, T("Wi-Fi network"), items, None)
         if i is None:
             return
         if i == 0:
             v["wifi"], v["wifi_security"], v["wifi_password"] = "", "", ""
         elif i == len(items) - 1:
-            s = popup_input(scr, "Wi-Fi network name (SSID)", v["wifi"])
+            s = popup_input(scr, T("Wi-Fi network name (SSID)"), v["wifi"])
             if s:
                 v["wifi"], v["wifi_security"] = s, "WPA2"
         else:
@@ -685,16 +695,16 @@ def edit(scr, f, key):
             edit(scr, f, "wifi_password")
     elif key == "wifi_password":
         if not v["wifi"]:
-            f.msg = "Choose a Wi-Fi network first."
+            f.msg = T("Choose a Wi-Fi network first.")
             return
         if not v["wifi_security"]:
-            f.msg = "This network is open; no password needed."
+            f.msg = T("This network is open; no password needed.")
             return
-        p = popup_input(scr, f"Password for {v['wifi']}", v["wifi_password"], secret=True)
+        p = popup_input(scr, T("Password for {network}").format(network=v["wifi"]), v["wifi_password"], secret=True)
         if p is not None:
             v["wifi_password"] = p
     elif key == "fullname":
-        s = popup_input(scr, "Full name (optional)", v["fullname"])
+        s = popup_input(scr, T("Full name (optional)"), v["fullname"])
         if s is not None:
             v["fullname"] = s.strip()
             if not v["username"] and s.strip():
@@ -702,17 +712,17 @@ def edit(scr, f, key):
                 if guess and guess[0].isalpha():
                     v["username"] = guess
     elif key == "username":
-        s = popup_input(scr, "Username", v["username"], hint="lowercase letters, digits, - and _")
+        s = popup_input(scr, T("Username"), v["username"], hint=T("lowercase letters, digits, - and _"))
         if s is not None:
             v["username"] = s.strip()
     elif key == "password":
-        p, err = ask_password(scr, "User password", 1)
+        p, err = ask_password(scr, T("User password"), 1)
         if p is not None:
             v["password"] = p
         elif err:
             f.msg, f.err = err, True
     elif key == "luks_password":
-        p, err = ask_password(scr, "Disk encryption password", LUKS_MIN)
+        p, err = ask_password(scr, T("Disk encryption password"), LUKS_MIN)
         if p is not None:
             v["luks_password"] = p
         elif err:
@@ -720,30 +730,30 @@ def edit(scr, f, key):
     elif key == "disk":
         disks = list_disks()
         if not disks:
-            f.msg, f.err = "No suitable disk found (needs 8 GB+, the USB stick itself is excluded).", True
+            f.msg, f.err = T("No suitable disk found (needs 8 GB+, the USB stick itself is excluded)."), True
             return
         labels = [d[0] for d in disks]
-        i = popup_list(scr, "Install on (ALL DATA WILL BE ERASED)", labels, v["disk_label"], filterable=False)
+        i = popup_list(scr, T("Install on (ALL DATA WILL BE ERASED)"), labels, v["disk_label"], filterable=False)
         if i is not None:
             v["disk_label"], v["disk"] = disks[i][0], disks[i][1]
     elif key == "fs":
-        f.msg = "MeccanicOS installs ext4 inside full-disk LUKS2 encryption."
+        f.msg = T("MeccanicOS installs ext4 inside full-disk LUKS2 encryption.")
 
 
 def validate(v):
     errs = []
     if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", v["username"] or ""):
-        errs.append("Username: lowercase letters/digits, starting with a letter.")
+        errs.append(T("Username: lowercase letters/digits, starting with a letter."))
     elif v["username"] in ("root", "nixos", "nobody", "daemon", "bin", "sys", "messagebus", "sshd", "nixbld"):
-        errs.append(f"Username '{v['username']}' is reserved.")
+        errs.append(T("Username '{name}' is reserved.").format(name=v["username"]))
     if not v["password"]:
-        errs.append("Set a user password.")
+        errs.append(T("Set a user password."))
     if len(v["luks_password"]) < LUKS_MIN:
-        errs.append(f"Set a disk password ({LUKS_MIN}+ characters).")
+        errs.append(T("Set a disk password ({count}+ characters).").format(count=LUKS_MIN))
     if not v["disk"]:
-        errs.append("Choose the target disk.")
+        errs.append(T("Choose the target disk."))
     if v["wifi"] and v["wifi_security"] and len(v["wifi_password"]) < 8:
-        errs.append("Wi-Fi password must be at least 8 characters.")
+        errs.append(T("Wi-Fi password must be at least 8 characters."))
     return errs
 
 
@@ -769,20 +779,23 @@ def tui(scr):
                 continue
             errs = validate(f.v)
             if errs:
-                popup_message(scr, "Almost there", "\n".join("• " + e for e in errs))
+                popup_message(scr, T("Almost there"), "\n".join("• " + e for e in errs))
                 continue
             ok = popup_message(
                 scr,
-                "Erase disk?",
-                f"ALL DATA on {f.v['disk_label'].strip()} will be erased and {NAME} installed.\n\n"
-                f"User: {f.v['username']} (passwordless sudo)   Keyboard: {f.v['keyboard']}\n"
-                f"Language: {f.v['language']}   Time zone: {f.v['timezone']}",
+                T("Erase disk?"),
+                T("ALL DATA on {disk} will be erased and {name} installed.").format(disk=f.v["disk_label"].strip(), name=NAME)
+                + "\n\n"
+                + T("User: {user} (passwordless sudo)").format(user=f.v["username"]) + "   "
+                + T("Keyboard: {keyboard}").format(keyboard=f.v["keyboard"]) + "\n"
+                + T("Language: {language}").format(language=f.v["language"]) + "   "
+                + T("Time zone: {zone}").format(zone=f.v["timezone"]),
                 confirm_word="YES",
             )
             if ok:
                 return f.v
         elif k in ("q", "Q"):
-            if popup_message(scr, "Quit", "Leave the installer without changing anything?", confirm_word="y"):
+            if popup_message(scr, T("Quit"), T("Leave the installer without changing anything?"), confirm_word="y"):
                 return None
 
 
@@ -834,18 +847,18 @@ def install(v):
     total = 8
     open(LOG, "w").close()
     os.chmod(LOG, 0o600)
-    print(f"\033[1m{NAME} installer\033[0m — log: {LOG}")
+    print(f"\033[1m{T('{name} installer').format(name=NAME)}\033[0m — " + T("log: {path}").format(path=LOG))
 
     if not TEST:
         if not os.path.isdir("/sys/firmware/efi"):
             raise RuntimeError(
-                "This PC started the USB stick in legacy BIOS mode.\n"
-                "Reboot, open the firmware boot menu and pick the UEFI entry for the stick."
+                T("This PC started the USB stick in legacy BIOS mode.\n"
+                  "Reboot, open the firmware boot menu and pick the UEFI entry for the stick.")
             )
         if not SYSTEM or not os.path.exists(SYSTEM):
-            raise RuntimeError("Prebuilt system not found on the ISO (MECCANICOS_SYSTEM).")
+            raise RuntimeError(T("Prebuilt system not found on the ISO (MECCANICOS_SYSTEM)."))
 
-    step(1, total, f"Partitioning {disk}")
+    step(1, total, T("Partitioning {disk}").format(disk=disk))
     release_disk(disk)
     run(["wipefs", "-af", disk], quiet=True)
     layout = (
@@ -859,15 +872,15 @@ def install(v):
     time.sleep(1)
     parts = partitions_of(disk)
     if len(parts) < 2:
-        raise RuntimeError(f"Expected 2 partitions on {disk}, found {parts}")
+        raise RuntimeError(T("Expected 2 partitions on {disk}, found {parts}").format(disk=disk, parts=parts))
     efi, crypt = parts[0], parts[1]
 
-    step(2, total, "Encrypting (LUKS2)")
+    step(2, total, T("Encrypting (LUKS2)"))
     pw = v["luks_password"]
     run(["cryptsetup", "luksFormat", "--batch-mode", "--type", "luks2", "--label", "MOS_CRYPT", "--key-file", "-", crypt], input=pw)
     run(["cryptsetup", "open", "--allow-discards", "--key-file", "-", crypt, MAPPER], input=pw)
 
-    step(3, total, "Creating filesystems")
+    step(3, total, T("Creating filesystems"))
     run(["mkfs.fat", "-F", "32", "-n", "MOS_EFI", efi])
     run(["mkfs.ext4", "-q", "-F", "-L", "MECCANICOS_ROOT", f"/dev/mapper/{MAPPER}"])
     os.makedirs(TARGET, exist_ok=True)
@@ -875,7 +888,7 @@ def install(v):
     os.makedirs(f"{TARGET}/boot", exist_ok=True)
     run(["mount", "-o", "umask=0077", efi, f"{TARGET}/boot"])
 
-    step(4, total, f"Copying {NAME} to disk (no download needed)")
+    step(4, total, T("Copying {name} to disk (no download needed)").format(name=NAME))
     if TEST:
         print("    [test mode] skipping nixos-install")
         os.makedirs(f"{TARGET}/etc", exist_ok=True)
@@ -890,23 +903,23 @@ def install(v):
         if not total:  # plain size, plus ~10% for ext4's 4 KiB blocks
             total = int(closure_bytes(SYSTEM) * 1.1)
         if total:
-            print(f"    {total / 1e9:.1f} GB to copy")
+            print("    " + T("{size} GB to copy").format(size=f"{total / 1e9:.1f}"))
         run_with_progress(
             ["nixos-install", "--root", TARGET, "--system", SYSTEM, "--no-root-passwd", "--no-channel-copy"],
             total,
             TARGET,
         )
 
-    step(5, total, "Language, keyboard, time zone, screen")
+    step(5, total, T("Language, keyboard, time zone, screen"))
     write_runtime_config(v, s)
 
-    step(6, total, f"Creating user {v['username']}")
+    step(6, total, T("Creating user {user}").format(user=v["username"]))
     create_user(v)
 
-    step(7, total, "Saving your configuration to /etc/nixos")
+    step(7, total, T("Saving your configuration to /etc/nixos"))
     write_nixos_config(v, s)
 
-    step(8, total, "Finishing")
+    step(8, total, T("Finishing"))
     with open(LOG) as src, open(f"{TARGET}/etc/meccanicos/install.log", "w") as dst:
         dst.write(src.read())
     # When the ISO it was installed from was built (System Info shows it).
@@ -960,7 +973,7 @@ def write_runtime_config(v, s):
             f"[wifi]\nmode=infrastructure\nssid={ssid}\n{sec}\n[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n",
             mode=0o600,
         )
-        print(f"    Wi-Fi '{ssid}' will connect automatically.")
+        print("    " + T("Wi-Fi '{network}' will connect automatically.").format(network=ssid))
 
     # Make the first boot use the right keyboard for the LUKS prompt and the
     # right console rotation. (local.nix bakes these into later generations.)
@@ -971,7 +984,8 @@ def write_runtime_config(v, s):
         lines = open(p).read().splitlines()
         lines = [l + " " + extra if l.startswith("options ") and extra not in l else l for l in lines]
         open(p, "w").write("\n".join(lines) + "\n")
-    print(f"    {s['lang']}, keyboard {s['xkb_layout']}{'/' + s['xkb_variant'] if s['xkb_variant'] else ''}, {s['timezone']}")
+    print("    " + T("{language}, keyboard {layout}, {zone}").format(
+        language=s["lang"], layout=s["xkb_layout"] + ("/" + s["xkb_variant"] if s["xkb_variant"] else ""), zone=s["timezone"]))
 
 
 def enter(cmd, input=None):
@@ -996,8 +1010,8 @@ def create_user(v):
         f"ssh-keygen -q -t ed25519 -a 100 -N '' -C {shlex.quote(u + '@' + NAME.lower())} -f {ssh}/id_ed25519 && "
         f"chown {u}:users {ssh}/id_ed25519 {ssh}/id_ed25519.pub"
     )
-    print(f"    {u}: member of wheel (passwordless sudo). Root login is disabled.")
-    print("    SSH key: ~/.ssh/id_ed25519.pub")
+    print("    " + T("{user}: member of wheel (passwordless sudo). Root login is disabled.").format(user=u))
+    print("    " + T("SSH key: {path}").format(path="~/.ssh/id_ed25519.pub"))
 
 
 def nix_str(s):
@@ -1051,12 +1065,12 @@ def write_nixos_config(v, s):
     write("/etc/nixos/local.nix", local)
     # The MeccanicOS version /etc/nixos came from (mos-update shows what changed).
     write("/etc/nixos/.mos-commit", os.environ.get("MECCANICOS_COMMIT", "unknown") + "\n")
-    print("    /etc/nixos is a copy of the distro flake + local.nix with these choices.")
+    print("    " + T("/etc/nixos is a copy of the distro flake + local.nix with these choices."))
 
 
 def main():
     if os.geteuid() != 0 and not TEST:
-        print("Run as root (the mos-install wrapper does this for you).")
+        print(T("Run as root (the mos-install wrapper does this for you)."))
         return 1
     if len(sys.argv) > 2 and sys.argv[1] == "--config":
         v = json.load(open(sys.argv[2]))
@@ -1064,24 +1078,24 @@ def main():
         os.environ.setdefault("ESCDELAY", "25")
         v = curses.wrapper(tui)
         if v is None:
-            print("Nothing was changed.")
+            print(T("Nothing was changed."))
             return 0
     try:
         install(v)
     except (Exception, KeyboardInterrupt) as e:  # noqa: BLE001
         if isinstance(e, KeyboardInterrupt):
-            print(f"\n\033[1;31mInstallation cancelled.\033[0m The disk is incomplete. Full log: {LOG}")
+            print(f"\n\033[1;31m{T('Installation cancelled.')}\033[0m " + T("The disk is incomplete. Full log: {path}").format(path=LOG))
         else:
-            print(f"\n\033[1;31mInstallation failed:\033[0m {e}\nFull log: {LOG}")
+            print(f"\n\033[1;31m{T('Installation failed:')}\033[0m {e}\n" + T("Full log: {path}").format(path=LOG))
         run(["umount", "-R", TARGET], check=False, quiet=True)
         run(["cryptsetup", "close", MAPPER], check=False, quiet=True)
-        input("\nPress Enter to close.")
+        input("\n" + T("Press Enter to close."))
         return 1
-    print(f"\n\033[1;32m{NAME} is installed.\033[0m Remove the USB stick and reboot.")
-    print("At boot, type your disk password; then log in as", v["username"])
+    print(f"\n\033[1;32m{T('{name} is installed.').format(name=NAME)}\033[0m " + T("Remove the USB stick and reboot."))
+    print(T("At boot, type your disk password; then log in as {user}").format(user=v["username"]))
     if not TEST and sys.stdin.isatty():
-        a = input("\nReboot now? [Y/n] ").strip().lower()
-        if a in ("", "y", "yes"):
+        a = input("\n" + T("Reboot now? [Y/n]") + " ").strip().lower()
+        if a in ("", "y", "yes"):  # the English letters, in any language
             subprocess.run(["systemctl", "reboot"])
     return 0
 

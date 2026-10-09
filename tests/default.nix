@@ -541,6 +541,8 @@ in
       tool("mos-backup", "Restore from backup", "mos-backup browse", keys=("Return",))
       tool("mos-apps", "Apps Manager", "apps manage")
       tool("mos-printers", "Printers", "mos-printers")
+      # The same in Chinese, for the web page's languages line (i18n/).
+      tool("mos-printers-zh", "Printers", "env LANGUAGE=zh_CN mos-printers")
       tool("mos-logins", "Logins", "mos-logins", keys=("h",))
       tool("mos-vault", "USB Vault", "usb-vault menu")
       tool("mos-install", "Install MeccanicOS", "mos-install")

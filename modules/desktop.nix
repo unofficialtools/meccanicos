@@ -6,6 +6,7 @@
   ...
 }:
 let
+  tSh = import ./i18n-sh.nix pkgs;
   mos-autorotate = pkgs.writeShellApplication {
     name = "mos-autorotate";
     runtimeInputs = with pkgs; [
@@ -14,7 +15,7 @@ let
       gawk
       gnugrep
     ];
-    text = builtins.readFile ../scripts/mos-autorotate.sh;
+    text = tSh "mos-autorotate" + builtins.readFile ../scripts/mos-autorotate.sh;
   };
 in
 {

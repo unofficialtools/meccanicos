@@ -13,60 +13,63 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common as c  # noqa: E402
+import common as c  # noqa: E402  (it puts the shared lib, scripts/lib, on sys.path)
+from mos_i18n import translator, N_  # noqa: E402
+
+T = translator("mos")
 
 # Every MeccanicOS command, what it is for (shown by `mos` when it is installed).
 COMMANDS = [
-    ("Fix and set up", [
-        ("mos-doctor", "find and fix problems: Wi-Fi, Bluetooth, sound, display, disk"),
-        ("mos-config", "common settings in one place; export them to another computer"),
-        ("mos-ai-setup", "set up the AI (a local model, or Claude, ChatGPT, Grok)"),
-        ("mos-unlock", "ways to unlock the encrypted disk (TPM, key, remote)"),
+    (N_("Fix and set up"), [
+        ("mos-doctor", N_("find and fix problems: Wi-Fi, Bluetooth, sound, display, disk")),
+        ("mos-config", N_("common settings in one place; export them to another computer")),
+        ("mos-ai-setup", N_("set up the AI (a local model, or Claude, ChatGPT, Grok)")),
+        ("mos-unlock", N_("ways to unlock the encrypted disk (TPM, key, remote)")),
     ]),
-    ("Apps and files", [
-        ("mos-apps", "find, try, install and remove apps"),
-        ("mos-open", "open any file with the right app (also: open)"),
-        ("mos-print", "print a file, or save it as PDF (also: print)"),
-        ("mos-printers", "printers: add them, pick the default, see and cancel the queue"),
-        ("mos-logins", "who logged in or tried; block, stop SSH, disconnect / reconnect"),
-        ("mos-vault", "encrypted vaults and a persistent home on the USB stick"),
-        ("mos-backup", "back up your home, encrypted"),
-        ("mos-dropbox", "Dropbox in a folder"),
-        ("mos-passwords", "your passwords (gopass)"),
+    (N_("Apps and files"), [
+        ("mos-apps", N_("find, try, install and remove apps")),
+        ("mos-open", N_("open any file with the right app (also: open)")),
+        ("mos-print", N_("print a file, or save it as PDF (also: print)")),
+        ("mos-printers", N_("printers: add them, pick the default, see and cancel the queue")),
+        ("mos-logins", N_("who logged in or tried; block, stop SSH, disconnect / reconnect")),
+        ("mos-vault", N_("encrypted vaults and a persistent home on the USB stick")),
+        ("mos-backup", N_("back up your home, encrypted")),
+        ("mos-dropbox", N_("Dropbox in a folder")),
+        ("mos-passwords", N_("your passwords (gopass)")),
     ]),
-    ("Desktop", [
-        ("mos-ask", "the command bar (Super+Space)"),
-        ("mos-keys", "every keyboard shortcut (shortcuts in the command bar)"),
-        ("mos-screenshot", "take a screenshot"),
-        ("mos-read", "read the copied text aloud"),
-        ("mos-say", "say something aloud (also: say)"),
-        ("mos-ai", "ask the AI from the terminal"),
-        ("mos-about", "this computer and MeccanicOS"),
+    (N_("Desktop"), [
+        ("mos-ask", N_("the command bar (Super+Space)")),
+        ("mos-keys", N_("every keyboard shortcut (shortcuts in the command bar)")),
+        ("mos-screenshot", N_("take a screenshot")),
+        ("mos-read", N_("read the copied text aloud")),
+        ("mos-say", N_("say something aloud (also: say)")),
+        ("mos-ai", N_("ask the AI from the terminal")),
+        ("mos-about", N_("this computer and MeccanicOS")),
     ]),
-    ("System", [
-        ("mos-updates", "updates in one place: system and apps, and how to go back"),
-        ("mos-update", "update to the newest MeccanicOS"),
-        ("mos-upgrade", "newer packages, same MeccanicOS"),
-        ("mos-rebuild", "apply changes made in /etc/nixos"),
-        ("mos-install", "install MeccanicOS on this computer (live USB)"),
-        ("mos-gpu-driver", "which graphics driver this computer uses"),
+    (N_("System"), [
+        ("mos-updates", N_("updates in one place: system and apps, and how to go back")),
+        ("mos-update", N_("update to the newest MeccanicOS")),
+        ("mos-upgrade", N_("newer packages, same MeccanicOS")),
+        ("mos-rebuild", N_("apply changes made in /etc/nixos")),
+        ("mos-install", N_("install MeccanicOS on this computer (live USB)")),
+        ("mos-gpu-driver", N_("which graphics driver this computer uses")),
     ]),
 ]
 
 
 def index():
     version = open("/etc/meccanicos/version").read().split()[0] if os.path.exists("/etc/meccanicos/version") else ""
-    print(f"{c.NAME} {version}".strip() + " commands (each one: --help)\n")
+    print(T("{name} commands (each one: --help)").format(name=f"{c.NAME} {version}".strip()) + "\n")
     width = max(len(n) for _, cmds in COMMANDS for n, _ in cmds)
     for group, cmds in COMMANDS:
         here = [(n, d) for n, d in cmds if shutil.which(n)]
         if here:
-            print(group)
+            print(T(group))
             for n, d in here:
-                print(f"  {n:<{width}}  {d}")
+                print(f"  {n:<{width}}  {T(d)}")
             print()
-    print("Start with: mos-doctor (something isn't working) or mos-config (change a setting).")
-    print("The manual: mos help [TOPIC], e.g. mos help backups.")
+    print(T("Start with: mos-doctor (something isn't working) or mos-config (change a setting)."))
+    print(T("The manual: mos help [TOPIC], e.g. mos help backups."))
     return 0
 
 
@@ -103,12 +106,12 @@ def find_heading(topic):
 
 def show_help(topic):
     if not os.path.isdir(HELP):
-        print(f"mos help: the Help is not on this system ({HELP})", file=sys.stderr)
+        print("mos help: " + T("the Help is not on this system ({folder})").format(folder=HELP), file=sys.stderr)
         return 1
     heading = find_heading(" ".join(topic)) if topic else None
     if topic and not heading:
-        print(f"mos help: nothing about '{' '.join(topic)}' in the manual; the topics are its headings.",
-              file=sys.stderr)
+        print("mos help: " + T("nothing about '{topic}' in the manual; the topics are its headings.").format(
+            topic=' '.join(topic)), file=sys.stderr)
     graphical = os.environ.get("DISPLAY") and not os.environ.get("SSH_CONNECTION")
     if graphical:
         # The browser, not xdg-open: a file:// address with ?version and #topic.
@@ -158,8 +161,8 @@ def main():
         if argv and argv[0] == "help":
             return show_help(argv[1:])
         if argv and argv[0] not in ("-h", "--help"):
-            print(f"mos: unknown command {argv[0]} (the commands are mos-*; run mos to list them)",
-                  file=sys.stderr)
+            print("mos: " + T("unknown command {command} (the commands are mos-*; run mos to list them)").format(
+                command=argv[0]), file=sys.stderr)
             return 2
         return index()
     except c.UsageError as e:

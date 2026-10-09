@@ -89,6 +89,7 @@
         ./modules/tutorial.nix
         ./modules/help.nix
         ./modules/mos-cli.nix
+        ./modules/i18n.nix
         ./modules/printing.nix
         ./modules/updates.nix
         ./modules/backup.nix
@@ -204,7 +205,10 @@
                 gnused
                 gawk
               ];
-              text = ''
+              text =
+                import ./modules/i18n-sh.nix pkgs "mos-tour"
+                + ''
+                export MECCANICOS_PYLIB=${./scripts/lib}
                 export MECCANICOS_RECORDER_ISO="${recorder.config.system.build.isoImage}/iso/${recorder.config.image.fileName}"
                 export MECCANICOS_MESA=${pkgs.mesa}
                 export MECCANICOS_VM_OVMF_CODE="${pkgs.OVMF.fd}/FV/OVMF_CODE.fd"

@@ -12,6 +12,7 @@
   ...
 }:
 let
+  tSh = import ./i18n-sh.nix pkgs;
   # Applies the keyboard layout and screen orientation chosen at install time
   # (stored in /etc/meccanicos/settings) to the running X server.
   displaySetup = pkgs.writeShellScript "mos-display-setup" ''
@@ -250,7 +251,7 @@ in
         pkgs.hostname
         config.system.build.nixos-rebuild
       ];
-      text = builtins.readFile ../scripts/mos-unlock.sh;
+      text = tSh "mos-unlock" + builtins.readFile ../scripts/mos-unlock.sh;
     })
     # Newest MeccanicOS from distro.repo (flake.nix), keeping local.nix & co.
     (pkgs.writeShellApplication {
@@ -263,28 +264,30 @@ in
         pkgs.gnugrep
         config.system.build.nixos-rebuild
       ];
-      text = ''
+      text = tSh "mos-update" + ''
         export MECCANICOS_REPO=''${MECCANICOS_REPO:-${distro.repo}}
       '' + builtins.readFile ../scripts/mos-update.sh;
     })
     (pkgs.writeShellScriptBin "mos-rebuild" ''
       # Apply changes made in /etc/nixos (packages.nix, local.nix, modules/…)
+      ${tSh "mos-rebuild"}
       case "''${1-}" in
         -h | --help)
-          echo "mos-rebuild - apply the changes made in /etc/nixos (packages.nix, local.nix, modules/...)"
+          echo "$(T 'mos-rebuild - apply the changes made in /etc/nixos (packages.nix, local.nix, modules/...)')"
           echo
-          echo "  mos-rebuild [NIXOS-REBUILD OPTIONS]   sudo nixos-rebuild switch --flake /etc/nixos#installed ..."
+          echo "  $(T 'mos-rebuild [NIXOS-REBUILD OPTIONS]   sudo nixos-rebuild switch --flake /etc/nixos#installed ...')"
           exit 0 ;;
       esac
       exec sudo nixos-rebuild switch --flake /etc/nixos#installed "$@"
     '')
     (pkgs.writeShellScriptBin "mos-upgrade" ''
       # Pull the newest packages for the pinned NixOS release, then rebuild
+      ${tSh "mos-upgrade"}
       case "''${1-}" in
         -h | --help)
-          echo "mos-upgrade - pull the newest packages for the pinned NixOS release, then rebuild"
+          echo "$(T 'mos-upgrade - pull the newest packages for the pinned NixOS release, then rebuild')"
           echo
-          echo "  mos-upgrade [NIXOS-REBUILD OPTIONS]   nix flake update, then mos-rebuild ..."
+          echo "  $(T 'mos-upgrade [NIXOS-REBUILD OPTIONS]   nix flake update, then mos-rebuild ...')"
           exit 0 ;;
       esac
       set -e

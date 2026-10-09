@@ -7,12 +7,16 @@
 #
 # Saves to ~/Pictures/Screenshots and copies the image to the clipboard.
 set -uo pipefail
+# Translations (scripts/lib/mos_i18n.sh); without them, English.
+# shellcheck source=/dev/null disable=SC2059
+declare -F T >/dev/null || . "${MOS_I18N_SH:-$(dirname "$0")/lib/mos_i18n.sh}" 2>/dev/null ||
+  { T() { printf '%s' "$1"; } && Tf() { local f=$1 && shift && printf -- "$f" "$@"; }; }
 
 mode=${1:-full}
 case $mode in
     -h | --help | help) sed -n '/^# mos-screenshot - /,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     full | window | area) ;;
-    *) echo "mos-screenshot: unknown mode $mode (mos-screenshot --help)" >&2; exit 2 ;;
+    *) Tf 'mos-screenshot: unknown mode %s (mos-screenshot --help)\n' "$mode" >&2; exit 2 ;;
 esac
 dir="${XDG_PICTURES_DIR:-$HOME/Pictures}/Screenshots"
 mkdir -p "$dir"
@@ -25,4 +29,4 @@ case $mode in
 esac || exit 1
 
 xclip -selection clipboard -t image/png -i "$file"
-notify-send -i "$file" -t 4000 "Screenshot copied" "Saved as ${file/#$HOME/\~}"
+notify-send -i "$file" -t 4000 "$(T 'Screenshot copied')" "$(Tf 'Saved as %s' "${file/#$HOME/\~}")"

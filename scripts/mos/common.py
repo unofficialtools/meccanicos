@@ -12,6 +12,12 @@ import shutil
 import subprocess
 import sys
 
+# The shared library (mos_i18n): MECCANICOS_PYLIB from the Nix wrapper, else scripts/lib.
+sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
+from mos_i18n import translator  # noqa: E402
+
+T = translator("")  # texts shared by mos-config and mos-doctor
+
 NAME = os.environ.get("MECCANICOS_NAME", "MeccanicOS")
 HOME = os.path.expanduser("~")
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "meccanicos")
@@ -54,15 +60,15 @@ def run(*cmd, check=False, sudo=False, input=None, timeout=30):
         p = subprocess.run(cmd, capture_output=True, text=True, input=input, timeout=timeout)
     except FileNotFoundError:
         if check:
-            raise Failed(f"{cmd[0]} is not installed")
+            raise Failed(T("{program} is not installed").format(program=cmd[0]))
         return 127, ""
     except subprocess.TimeoutExpired:
         if check:
-            raise Failed(f"{' '.join(cmd)} took too long")
+            raise Failed(T("{command} took too long").format(command=' '.join(cmd)))
         return 124, ""
     out = (p.stdout + p.stderr).strip()
     if check and p.returncode != 0:
-        raise Failed(out.splitlines()[-1] if out else f"{' '.join(cmd)} failed")
+        raise Failed(out.splitlines()[-1] if out else T("{command} failed").format(command=' '.join(cmd)))
     return p.returncode, out
 
 
@@ -126,7 +132,7 @@ def choose(question, options):
     for i, o in enumerate(options, 1):
         print(f"  {i}) {o}", file=sys.stderr)
     try:
-        a = input("Number (Enter to cancel): ").strip()
+        a = input(T("Number (Enter to cancel): ")).strip()
     except EOFError:
         return None
     return int(a) - 1 if a.isdigit() and 1 <= int(a) <= len(options) else None

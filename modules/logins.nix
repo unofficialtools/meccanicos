@@ -15,7 +15,9 @@
 }:
 let
   inherit (import ./not-root.nix) notRoot';
+  tSh = import ./i18n-sh.nix pkgs;
   mos-logins = pkgs.writeShellScriptBin "mos-logins" ''
+    ${tSh "mos-logins"}
     ${notRoot' "mos-logins" [ "root" "watch" ]}
     export MECCANICOS_PYLIB=${../scripts/lib}
     export MECCANICOS_LOGINS_SELF=/run/current-system/sw/bin/mos-logins

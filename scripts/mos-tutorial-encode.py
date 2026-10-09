@@ -15,9 +15,18 @@ The video starts shortly before the first spoken line and leaves out:
 The spoken lines are burnt in as subtitles: one line each, all the same size.
 """
 
+import os
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+try:
+    from mos_i18n import translator  # noqa: E402
+    T = translator("mos-tour")
+except ImportError:  # run on its own from the Nix store (flake.nix): English
+    def T(text):
+        return text
 
 PAUSE = 1.0  # silence + still screen at least this long is a pause
 KEEP = 0.35  # seconds of a pause kept on each side
@@ -102,7 +111,8 @@ def main(work, out, fontdir):
     skip = max(0.0, cues[0][0] - 2.5)
     found = minus(pauses(f"{work}/raw.mkv", skip), [(a - skip, b - skip) for a, b in holds])
     cuts = merge([(a - skip, b - skip) for a, b in marked if b > a] + found)
-    print(f"Leaving out {len(cuts)} waits and pauses, {sum(b - a for a, b in cuts):.0f} s in all.")
+    print(T("Leaving out {count} waits and pauses, {seconds} s in all.").format(
+        count=len(cuts), seconds=f"{sum(b - a for a, b in cuts):.0f}"))
 
     def shift(t):
         """Where a moment of the recording ends up once the cuts are gone."""
@@ -152,7 +162,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        sys.exit(__doc__.strip())
+        sys.exit(T(__doc__).strip())
     try:
         main(*sys.argv[1:])
     except KeyboardInterrupt:

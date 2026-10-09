@@ -19,6 +19,10 @@
 #   - or reconnect with  ssh -L 53682:localhost:53682 ...,  run
 #     mos-dropbox login --browser  and open the printed link locally.
 set -euo pipefail
+# Translations (scripts/lib/mos_i18n.sh); without them, English.
+# shellcheck source=/dev/null disable=SC2059
+declare -F T >/dev/null || . "${MOS_I18N_SH:-$(dirname "$0")/lib/mos_i18n.sh}" 2>/dev/null ||
+  { T() { printf '%s' "$1"; } && Tf() { local f=$1 && shift && printf -- "$f" "$@"; }; }
 
 REMOTE=dropbox
 DIR=${MECCANICOS_DROPBOX_DIR:-$HOME/Dropbox}
@@ -28,55 +32,55 @@ UNIT=mos-dropbox-sync
 
 die() { echo "mos-dropbox: $*" >&2; exit 1; }
 have_remote() { rclone listremotes 2>/dev/null | grep -qx "$REMOTE:"; }
-need_remote() { have_remote || die "not connected to Dropbox yet: run  mos-dropbox login"; }
+need_remote() { have_remote || die "$(T 'not connected to Dropbox yet: run  mos-dropbox login')"; }
 is_mounted() { mountpoint -q "$DIR" 2>/dev/null; }
 sync_state() { cat "$SYNC_STATE" 2>/dev/null || echo off; }
 
 login() {
     if have_remote && [[ ${1:-} != --force ]]; then
-        echo "Already connected to Dropbox (mos-dropbox logout first to use another account)."
+        printf '%s\n' "$(T 'Already connected to Dropbox (mos-dropbox logout first to use another account).')"
         return
     fi
     if [[ ${1:-} == --browser || ( -n ${DISPLAY:-} && -z ${SSH_CONNECTION:-} ) ]]; then
-        echo "Sign in to Dropbox in the browser (over SSH: open the link below on your computer,"
-        echo "connected with  ssh -L 53682:localhost:53682 ...)."
+        printf '%s\n' "$(T 'Sign in to Dropbox in the browser (over SSH: open the link below on your computer,
+connected with  ssh -L 53682:localhost:53682 ...).')"
         rclone config create "$REMOTE" dropbox >/dev/null
     else
-        cat <<'EOF'
-No browser here (SSH). On your own computer, with a browser, run:
+        local help
+        help=$(T 'No browser here (SSH). On your own computer, with a browser, run:
 
     rclone authorize "dropbox"
       (no rclone there but Nix?  nix run nixpkgs#rclone -- authorize dropbox)
 
 Sign in; it then prints a token like {"access_token":"...",...}.
 Paste that whole line here. (Or: reconnect with  ssh -L 53682:localhost:53682 ...
-and run  mos-dropbox login --browser .)
-EOF
+and run  mos-dropbox login --browser .)')
+        printf '%s\n' "$help"
         local token
-        read -r -p "Token: " token
-        [[ $token == '{'*'}' ]] || die "that does not look like a token (it starts with { and ends with })."
+        read -r -p "$(T 'Token: ')" token
+        [[ $token == '{'*'}' ]] || die "$(T 'that does not look like a token (it starts with { and ends with }).')"
         rclone config create "$REMOTE" dropbox token "$token" --non-interactive >/dev/null
     fi
-    have_remote || die "the Dropbox account was not saved."
-    echo "Connected. Next:  mos-dropbox mount  (live, online)  or  mos-dropbox sync  (local copy)"
+    have_remote || die "$(T 'the Dropbox account was not saved.')"
+    printf '%s\n' "$(T 'Connected. Next:  mos-dropbox mount  (live, online)  or  mos-dropbox sync  (local copy)')"
 }
 
 mount_it() {
     need_remote
-    is_mounted && { echo "Dropbox is already mounted at $DIR"; return; }
+    is_mounted && { Tf 'Dropbox is already mounted at %s\n' "$DIR"; return; }
     [[ $(sync_state) == off ]] ||
-        die "$DIR is your synced copy ($(sync_state)); to mount instead, first: mos-dropbox logout or move it"
+        die "$(Tf '%s is your synced copy (%s); to mount instead, first: mos-dropbox logout or move it' "$DIR" "$(sync_state)")"
     mkdir -p "$DIR"
-    [[ -z $(ls -A "$DIR") ]] || die "$DIR is not empty; mount needs an empty folder (MECCANICOS_DROPBOX_DIR=... to use another)."
+    [[ -z $(ls -A "$DIR") ]] || die "$(Tf '%s is not empty; mount needs an empty folder (MECCANICOS_DROPBOX_DIR=... to use another).' "$DIR")"
     rclone mount "$REMOTE:" "$DIR" --vfs-cache-mode full --daemon
-    echo "Dropbox is mounted at $DIR  (mos-dropbox unmount to stop)."
+    Tf 'Dropbox is mounted at %s  (mos-dropbox unmount to stop).\n' "$DIR"
 }
 
 unmount_it() {
-    is_mounted || { echo "Dropbox is not mounted."; return; }
+    is_mounted || { printf '%s\n' "$(T 'Dropbox is not mounted.')"; return; }
     fusermount3 -u "$DIR" 2>/dev/null || fusermount -u "$DIR" ||
-        die "could not unmount $DIR (files still open?)"
-    echo "Unmounted $DIR"
+        die "$(Tf 'could not unmount %s (files still open?)' "$DIR")"
+    Tf 'Unmounted %s\n' "$DIR"
 }
 
 # One two-way sync run (also what the timer runs). The first run merges both
@@ -94,12 +98,12 @@ sync_once() {
 
 sync_on() {
     need_remote
-    is_mounted && die "Dropbox is mounted at $DIR; unmount it first (mos-dropbox unmount)."
+    is_mounted && die "$(Tf 'Dropbox is mounted at %s; unmount it first (mos-dropbox unmount).' "$DIR")"
     mkdir -p "$STATE"
     echo on >"$SYNC_STATE"
-    echo "Syncing $DIR now (the first time copies everything; it can take a while)..."
+    Tf 'Syncing %s now (the first time copies everything; it can take a while)...\n' "$DIR"
     sync_once
-    echo "Done. From now on it syncs every 5 minutes (mos-dropbox pause to stop)."
+    printf '%s\n' "$(T 'Done. From now on it syncs every 5 minutes (mos-dropbox pause to stop).')"
 }
 
 case ${1:-status} in
@@ -108,14 +112,14 @@ case ${1:-status} in
     unmount | umount) unmount_it ;;
     sync) sync_on ;;
     pause)
-        [[ $(sync_state) != off ]] || die "not syncing (mos-dropbox sync to start)."
+        [[ $(sync_state) != off ]] || die "$(T 'not syncing (mos-dropbox sync to start).')"
         echo paused >"$SYNC_STATE"
-        echo "Sync paused (mos-dropbox resume to continue)."
+        printf '%s\n' "$(T 'Sync paused (mos-dropbox resume to continue).')"
         ;;
     resume)
-        [[ $(sync_state) != off ]] || die "not syncing (mos-dropbox sync to start)."
+        [[ $(sync_state) != off ]] || die "$(T 'not syncing (mos-dropbox sync to start).')"
         echo on >"$SYNC_STATE"
-        echo "Sync resumed; syncing now..."
+        printf '%s\n' "$(T 'Sync resumed; syncing now...')"
         sync_once
         ;;
     tick) # run by the timer
@@ -123,12 +127,12 @@ case ${1:-status} in
         sync_once
         ;;
     status)
-        if have_remote; then echo "Account : connected"; else echo "Account : not connected (mos-dropbox login)"; fi
-        echo "Folder  : $DIR"
-        if is_mounted; then echo "Mount   : mounted"; else echo "Mount   : not mounted"; fi
-        echo "Sync    : $(sync_state)"
+        if have_remote; then printf '%s\n' "$(T 'Account : connected')"; else printf '%s\n' "$(T 'Account : not connected (mos-dropbox login)')"; fi
+        Tf 'Folder  : %s\n' "$DIR"
+        if is_mounted; then printf '%s\n' "$(T 'Mount   : mounted')"; else printf '%s\n' "$(T 'Mount   : not mounted')"; fi
+        Tf 'Sync    : %s\n' "$(sync_state)"
         if [[ $(sync_state) != off ]]; then
-            echo "Last sync:"
+            printf '%s\n' "$(T 'Last sync:')"
             journalctl --user -u "$UNIT" -n 3 --no-pager -o cat 2>/dev/null | sed 's/^/  /' || true
         fi
         ;;
@@ -136,8 +140,8 @@ case ${1:-status} in
         is_mounted && unmount_it
         rm -f "$SYNC_STATE" "$STATE/resynced"
         have_remote && rclone config delete "$REMOTE"
-        echo "Logged out. Your files in $DIR stay where they are."
+        Tf 'Logged out. Your files in %s stay where they are.\n' "$DIR"
         ;;
     -h | --help | help) sed -n '/^# mos-dropbox - /,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//' ;;
-    *) echo "mos-dropbox: unknown command: $1 (mos-dropbox --help)" >&2; exit 2 ;;
+    *) Tf 'mos-dropbox: unknown command: %s (mos-dropbox --help)\n' "$1" >&2; exit 2 ;;
 esac

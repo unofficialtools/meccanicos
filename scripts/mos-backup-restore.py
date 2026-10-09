@@ -26,6 +26,9 @@ import sys
 # The look shared by MeccanicOS TUIs: MECCANICOS_PYLIB from the Nix wrapper, else next to this file.
 sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 import mos_tui as ui  # noqa: E402
+from mos_i18n import translator  # noqa: E402
+
+T = translator("mos-backup")
 
 HOME = os.path.expanduser("~")
 TAG = "meccanicos"
@@ -46,7 +49,7 @@ def restic(*args, lock=False):
     if p.returncode != 0:
         lines = [l for l in p.stderr.splitlines() if l.strip()]
         if not lines:
-            raise Failed("restic failed (is the backup disk plugged in?)")
+            raise Failed(T("restic failed (is the backup disk plugged in?)"))
         try:  # with --json, errors are JSON too
             raise Failed(json.loads(lines[-1])["message"])
         except (ValueError, KeyError, TypeError):
@@ -103,7 +106,7 @@ def target():
 def restore(sid, paths, to):
     """Restore paths (everything if none) of snapshot sid under folder to."""
     if os.path.realpath(to) == "/":
-        raise Failed("restoring into / would overwrite your files; pick another folder")
+        raise Failed(T("restoring into / would overwrite your files; pick another folder"))
     os.makedirs(to, exist_ok=True)
     restic("restore", sid, "--target", to, *[a for p in paths for a in ("--include", literal(p))], lock=True)
     return to
@@ -134,7 +137,9 @@ def versions(path):
 
 
 def note(v):
-    return ("changed" if v["changed"] else "unchanged") + (", same as now" if v["now"] else "")
+    if v["now"]:
+        return T("changed, same as now") if v["changed"] else T("unchanged, same as now")
+    return T("changed") if v["changed"] else T("unchanged")
 
 
 def snapshot(sid):
@@ -142,7 +147,7 @@ def snapshot(sid):
     snaps = snapshots()
     found = snaps[:1] if sid == "latest" else [s for s in snaps if s["id"].startswith(sid)]
     if len(found) != 1:
-        raise Failed(f"no backup {sid}" if not found else f"{sid} matches several backups")
+        raise Failed(T("no backup {id}").format(id=sid) if not found else T("{id} matches several backups").format(id=sid))
     return found[0]
 
 
@@ -158,7 +163,7 @@ def next_to(path, snap):
         restic("restore", snap["id"], "--target", tmp, "--include", literal(path), lock=True)
         got = tmp + path
         if not os.path.lexists(got):
-            raise Failed(f"{tilde(path)} is not in the backup of {date(snap['time'])}")
+            raise Failed(T("{file} is not in the backup of {when}").format(file=tilde(path), when=date(snap['time'])))
         for n in range(1, 100):
             new = os.path.join(folder, f"{stem} ({label}){'' if n == 1 else f' {n}'}{ext}")
             try:
@@ -171,7 +176,7 @@ def next_to(path, snap):
                 return new
             except FileExistsError:
                 continue
-        raise Failed("too many restored copies already")
+        raise Failed(T("too many restored copies already"))
     except OSError as e:
         raise Failed(str(e))
     finally:
@@ -193,6 +198,17 @@ def date(t, full=True):
     return t.strftime("%a %d %b %Y %H:%M" if full else "%d %b %Y %H:%M")
 
 
+def left(text, width):
+    """text padded to width columns (never cut), as f"{text:<width}" does."""
+    return text + " " * max(0, width - ui.cols(text))
+
+
+def right(text, width):
+    """A column head right-aligned in width columns (cut if longer)."""
+    text = ui.fit(text, width)
+    return " " * (width - ui.cols(text)) + text
+
+
 def tilde(path):
     return "~" + path[len(HOME):] if path == HOME or path.startswith(HOME + "/") else path
 
@@ -208,10 +224,10 @@ class App:
         self.snaps, self.snap, self.cwd, self.entries = [], None, "/", []
         self.marked = set()
         self.cache = {}
-        self.busy("Reading the list of backups…")
+        self.busy(T("Reading the list of backups…"))
         try:
             self.snaps = snapshots()
-            self.say("" if self.snaps else "No backups yet: run mos-backup now.")
+            self.say("" if self.snaps else T("No backups yet: run mos-backup now."))
         except Failed as e:
             self.say(f"✗ {e}", True)
 
@@ -229,11 +245,11 @@ class App:
 
     def buttons(self):
         if self.view == "snapshots":
-            return [("Browse", "b", self.browse), ("Restore everything", "e", self.restore_all), ("Quit", "q", None)]
+            return [(T("Browse"), "b", self.browse), (T("Restore everything"), "e", self.restore_all), (T("Quit"), "q", None)]
         n = len(self.marked)
-        return [("Open", "o", self.open), ("Mark", "m", self.mark),
-                (f"Restore {n} marked" if n else "Restore", "r", self.restore_marked),
-                ("Back", "b", self.back), ("Quit", "q", None)]
+        return [(T("Open"), "o", self.open), (T("Mark"), "m", self.mark),
+                (T("Restore {count} marked").format(count=n) if n else T("Restore"), "r", self.restore_marked),
+                (T("Back"), "b", self.back), (T("Quit"), "q", None)]
 
     def say(self, msg, err=False):
         self.msg, self.err = msg, err
@@ -244,17 +260,17 @@ class App:
         s.erase()
         h, w = s.getmaxyx()
         if h < 12 or w < 60:
-            ui.put(s, 0, 0, "Make the window larger.")
+            ui.put(s, 0, 0, T("Make the window larger."))
             s.refresh()
             return
         if self.view == "snapshots":
-            ui.bar(s, 0, "Restore from a backup › pick a backup")
-            head = f"  {'When':<22}{'Computer':<16}{'Files':>9}{'Size':>11}   Backup"
-            empty = "No backups to show."
+            ui.bar(s, 0, T("Restore from a backup › pick a backup"))
+            head = "  " + ui.pad(T("When"), 22) + ui.pad(T("Computer"), 16) + right(T("Files"), 9) + right(T("Size"), 11) + "   " + T("Backup")
+            empty = T("No backups to show.")
         else:
-            ui.bar(s, 0, f"Restore › {date(self.snap['time'], False)} › {tilde(self.cwd)}")
-            head = f"  {'':2}{'Name':<44}{'Size':>10}   Changed"
-            empty = "This folder is empty in the backup."
+            ui.bar(s, 0, T("Restore › {when} › {folder}").format(when=date(self.snap['time'], False), folder=tilde(self.cwd)))
+            head = "    " + ui.pad(T("Name"), 44) + right(T("Size"), 10) + "   " + T("Changed")
+            empty = T("This folder is empty in the backup.")
         y = 2
         ui.put(s, y, 0, head, ui.attr(ui.HEADING))
         ui.put(s, y + 1, 0, "─" * w, ui.attr(ui.BORDER))
@@ -269,14 +285,14 @@ class App:
             a = ui.attr(ui.NORMAL)
             if self.view == "snapshots":
                 files = "" if r["files"] is None else str(r["files"])
-                line = f"  {date(r['time']):<22}{r['host'][:15]:<16}{files:>9}{human(r['size']):>11}   {r['short']}"
+                line = f"  {left(date(r['time']), 22)}{left(ui.fit(r['host'], 15), 16)}{files:>9}{human(r['size']):>11}   {r['short']}"
             elif r.get("up"):
-                line = "     .. (the folder above)"
+                line = "     " + T(".. (the folder above)")
                 a = ui.attr(ui.DIM)
             else:
                 mark = "✓" if r["path"] in self.marked else " "
                 name = r["name"] + ("/" if r["dir"] else "")
-                line = f"  {mark} {name[:43]:<44}{'' if r['dir'] else human(r['size']):>10}   {date(r['mtime'], False)}"
+                line = f"  {mark} {left(ui.fit(name, 43), 44)}{'' if r['dir'] else human(r['size']):>10}   {date(r['mtime'], False)}"
                 if r["path"] in self.marked:
                     a = ui.attr(ui.OK)
             ui.row(s, y + i, 0, w, line, top + i == cur, a)
@@ -284,22 +300,23 @@ class App:
         info = ""
         if self.view == "snapshots" and self.snaps:
             snap = self.current()
-            info = f"Backed up: {', '.join(tilde(p) for p in snap['paths'])}   Restores go to ~/Restored-<date>; your files are not touched."
+            info = T("Backed up: {folders}   Restores go to ~/Restored-<date>; your files are not touched.").format(
+                folders=", ".join(tilde(p) for p in snap['paths']))
         elif self.view == "browse":
             if self.marked:
                 names = ", ".join(tilde(p) for p in sorted(self.marked))
-                info = f"{len(self.marked)} marked: {names}"
+                info = T("{count} marked: {names}").format(count=len(self.marked), names=names)
             else:
-                info = "Space marks files and folders; r restores them into ~/Restored-<date>."
+                info = T("Space marks files and folders; r restores them into ~/Restored-<date>.")
         ui.put(s, h - 5, 0, "─" * w, ui.attr(ui.BORDER))
-        ui.put(s, h - 4, 2, info[: w - 3], ui.attr(ui.DIM))
+        ui.put(s, h - 4, 2, ui.fit(info, w - 3), ui.attr(ui.DIM))
         ui.buttons(s, h - 3, 1, [(l, k) for l, k, _ in self.buttons()], self.focus)
         ui.message(s, h - 2, 1, ("✗ " if self.err and not self.msg.startswith("✗") else "") + self.msg)
         if self.view == "snapshots":
-            keys = [("↑↓", "move"), ("←→", "button"), ("Enter", "press"), ("q", "quit")]
+            keys = [("↑↓", T("move")), ("←→", T("button")), ("Enter", T("press")), ("q", T("quit"))]
         else:
-            keys = [("↑↓", "move"), ("←→", "button"), ("Enter", "press"), ("Space", "mark"),
-                    ("Backspace", "folder above"), ("Esc", "backups")]
+            keys = [("↑↓", T("move")), ("←→", T("button")), ("Enter", T("press")), ("Space", T("mark")),
+                    ("Backspace", T("folder above")), ("Esc", T("backups"))]
         ui.keybar(s, h - 1, keys)
         s.refresh()
 
@@ -311,7 +328,7 @@ class App:
     def browse(self):
         snap = self.current()
         if not snap:
-            return self.say("No backup to browse.")
+            return self.say(T("No backup to browse."))
         if snap is not self.snap:
             self.marked, self.cache = set(), {}
         self.snap = snap
@@ -323,7 +340,7 @@ class App:
     def go(self, path):
         key = path
         if key not in self.cache:
-            self.busy(f"Reading {tilde(path)}…")
+            self.busy(T("Reading {folder}…").format(folder=tilde(path)))
             try:
                 self.cache[key] = ls(self.snap["id"], path)
             except Failed as e:
@@ -363,33 +380,35 @@ class App:
 
     def do_restore(self, paths):
         snap, to = self.snap, target()
-        what = (f"{len(paths)} marked item(s)" if len(paths) > 1 else tilde(paths[0])) if paths else "everything"
-        question = (f"Restore {what}\nfrom the backup of {date(snap['time'])}\ninto {tilde(to)}?\n\n"
-                    "Your home folder is not changed: copy back what you need.")
-        if not ui.confirm(self.scr, question, yes="Restore", title="Restore from backup"):
+        what = ((T("{count} marked item(s)").format(count=len(paths)) if len(paths) > 1 else tilde(paths[0])) if paths
+                else T("everything"))
+        question = T("Restore {what}\nfrom the backup of {when}\ninto {folder}?\n\n"
+                     "Your home folder is not changed: copy back what you need.").format(
+                         what=what, when=date(snap['time']), folder=tilde(to))
+        if not ui.confirm(self.scr, question, yes=T("Restore"), title=T("Restore from backup")):
             return
-        self.busy(f"Restoring into {tilde(to)}…")
+        self.busy(T("Restoring into {folder}…").format(folder=tilde(to)))
         try:
             restore(snap["id"], paths, to)
         except Failed as e:
             return self.say(f"✗ {e}", True)
         where = to + (paths[0] if len(paths) == 1 else os.path.commonpath(paths) if paths else (snap["paths"] or [""])[0])
         self.marked = set()
-        self.say(f"✓ Restored. Your files are in {tilde(where)}")
+        self.say(T("✓ Restored. Your files are in {folder}").format(folder=tilde(where)))
 
     def restore_marked(self):
         paths = sorted(self.marked)
         if not paths:
             r = self.current()
             if not r or r.get("up"):
-                return self.say("Mark files or folders first (Space).")
+                return self.say(T("Mark files or folders first (Space)."))
             paths = [r["path"]]
         self.do_restore(paths)
 
     def restore_all(self):
         self.snap = self.current()
         if not self.snap:
-            return self.say("No backup to restore.")
+            return self.say(T("No backup to restore."))
         self.marked, self.cache = set(), {}
         self.do_restore([])
 
@@ -448,10 +467,10 @@ class Versions:
         self.sel, self.focus = 0, 0
         self.msg, self.err = "", False
         self.rows = []
-        self.busy("Looking through the backups…")
+        self.busy(T("Looking through the backups…"))
         try:
             self.rows = versions(path)
-            self.say("" if self.rows else "No backup has this file yet.")
+            self.say("" if self.rows else T("No backup has this file yet."))
         except Failed as e:
             self.say(f"✗ {e}", True)
 
@@ -467,35 +486,35 @@ class Versions:
         s.erase()
         h, w = s.getmaxyx()
         if h < 10 or w < 50:
-            ui.put(s, 0, 0, "Make the window larger.")
+            ui.put(s, 0, 0, T("Make the window larger."))
             s.refresh()
             return
-        ui.bar(s, 0, f"Versions › {tilde(self.path)}")
-        ui.put(s, 2, 0, f"  {'Backup of':<24}{'Size':>10}   {'Last edited':<20}", ui.attr(ui.HEADING))
+        ui.bar(s, 0, T("Versions › {file}").format(file=tilde(self.path)))
+        ui.put(s, 2, 0, "  " + ui.pad(T("Backup of"), 24) + right(T("Size"), 10) + "   " + ui.pad(T("Last edited"), 20), ui.attr(ui.HEADING))
         ui.put(s, 3, 0, "─" * w, ui.attr(ui.BORDER))
         list_h = h - 10
         self.sel = min(self.sel, max(0, len(self.rows) - 1))
         top = max(0, self.sel - list_h + 1)
         for i, v in enumerate(self.rows[top: top + list_h]):
-            line = f"  {date(v['snap']['time']):<24}{'' if v['dir'] else human(v['size']):>10}   {date(v['mtime'], False):<20}{note(v)}"
+            line = f"  {left(date(v['snap']['time']), 24)}{'' if v['dir'] else human(v['size']):>10}   {left(date(v['mtime'], False), 20)}{note(v)}"
             ui.row(s, 4 + i, 0, w, line, top + i == self.sel, ui.attr(ui.DIM if not v["changed"] else ui.NORMAL))
         ui.put(s, h - 5, 0, "─" * w, ui.attr(ui.BORDER))
-        ui.put(s, h - 4, 2, "Restore puts the chosen version next to the file, with its date in the name.", ui.attr(ui.DIM))
-        ui.buttons(s, h - 3, 1, [("Restore next to it", "r"), ("Quit", "q")], self.focus)
+        ui.put(s, h - 4, 2, T("Restore puts the chosen version next to the file, with its date in the name."), ui.attr(ui.DIM))
+        ui.buttons(s, h - 3, 1, [(T("Restore next to it"), "r"), (T("Quit"), "q")], self.focus)
         ui.message(s, h - 2, 1, ("✗ " if self.err and not self.msg.startswith("✗") else "") + self.msg)
-        ui.keybar(s, h - 1, [("↑↓", "move"), ("←→", "button"), ("Enter", "press"), ("q", "quit")])
+        ui.keybar(s, h - 1, [("↑↓", T("move")), ("←→", T("button")), ("Enter", T("press")), ("q", T("quit"))])
         s.refresh()
 
     def restore(self):
         if not self.rows:
-            return self.say("Nothing to restore.")
+            return self.say(T("Nothing to restore."))
         v = self.rows[self.sel]
-        self.busy(f"Restoring the version of {date(v['snap']['time'])}…")
+        self.busy(T("Restoring the version of {when}…").format(when=date(v['snap']['time'])))
         try:
             new = next_to(self.path, v["snap"])
         except Failed as e:
             return self.say(f"✗ {e}", True)
-        self.say(f"✓ Saved as {os.path.basename(new)}")
+        self.say(T("✓ Saved as {name}").format(name=os.path.basename(new)))
 
     def run(self):
         while True:
@@ -522,28 +541,28 @@ def cli_versions(args):
     """mos-backup versions FILE [--restore ID | --menu]"""
     if not args or args[0].startswith("--") or len(args) not in (1, 2, 3) or \
             (len(args) == 2 and args[1] != "--menu") or (len(args) == 3 and args[1] != "--restore"):
-        print("usage: mos-backup versions FILE [--restore ID | --menu]", file=sys.stderr)
+        print(T("usage: mos-backup versions FILE [--restore ID | --menu]"), file=sys.stderr)
         return 2
     path = os.path.abspath(os.path.expanduser(args[0]))
     try:
         if args[1:2] == ["--menu"]:
             if not sys.stdout.isatty():
-                print("mos-backup: --menu needs a terminal", file=sys.stderr)
+                print("mos-backup: " + T("--menu needs a terminal"), file=sys.stderr)
                 return 2
             locale.setlocale(locale.LC_ALL, "")
             os.environ.setdefault("ESCDELAY", "25")
             curses.wrapper(lambda scr: (ui.init(), Versions(scr, path).run()))
         elif args[1:2] == ["--restore"]:
             new = next_to(path, snapshot(args[2]))
-            print(f"Restored next to it: {new}")
+            print(T("Restored next to it: {file}").format(file=new))
         else:
             vs = versions(path)
             if not vs:
-                print(f"No backup has {path}.", file=sys.stderr)
+                print(T("No backup has {file}.").format(file=path), file=sys.stderr)
                 return 1
-            print(f"Versions of {path}, newest first:")
+            print(T("Versions of {file}, newest first:").format(file=path))
             for v in vs:
-                print(f"  {v['snap']['short']}  {date(v['snap']['time']):<22}{'' if v['dir'] else human(v['size']):>10}  {note(v)}")
+                print(f"  {v['snap']['short']}  {left(date(v['snap']['time']), 22)}{'' if v['dir'] else human(v['size']):>10}  {note(v)}")
     except Failed as e:
         print(f"mos-backup: {e}", file=sys.stderr)
         return 1
@@ -552,15 +571,15 @@ def cli_versions(args):
 
 def main(argv):
     if argv and argv[0] in ("-h", "--help", "help"):
-        print(__doc__.strip())
+        print(T(__doc__).strip())
         return 0
     if not os.environ.get("RESTIC_REPOSITORY"):
-        print("mos-backup-restore: start it with mos-backup browse", file=sys.stderr)
+        print("mos-backup-restore: " + T("start it with mos-backup browse"), file=sys.stderr)
         return 2
     if argv[:1] == ["versions"]:
         return cli_versions(argv[1:])
     if not sys.stdout.isatty():
-        print("mos-backup-restore: the full-screen view needs a terminal", file=sys.stderr)
+        print("mos-backup-restore: " + T("the full-screen view needs a terminal"), file=sys.stderr)
         return 2
     locale.setlocale(locale.LC_ALL, "")
     os.environ.setdefault("ESCDELAY", "25")

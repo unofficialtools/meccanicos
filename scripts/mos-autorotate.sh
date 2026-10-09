@@ -10,11 +10,15 @@
 # that are already landscape or rotated, or when the installer's
 # "Screen: Portrait" was chosen (ORIENTATION=portrait in /etc/meccanicos/settings).
 set -uo pipefail
+# Translations (scripts/lib/mos_i18n.sh); without them, English.
+# shellcheck source=/dev/null disable=SC2059
+declare -F T >/dev/null || . "${MOS_I18N_SH:-$(dirname "$0")/lib/mos_i18n.sh}" 2>/dev/null ||
+  { T() { printf '%s' "$1"; } && Tf() { local f=$1 && shift && printf -- "$f" "$@"; }; }
 
 case ${1-} in
     "") ;;
     -h | --help | help) sed -n '/^# mos-autorotate - /,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
-    *) echo "mos-autorotate: unknown option $1 (mos-autorotate --help)" >&2; exit 2 ;;
+    *) Tf 'mos-autorotate: unknown option %s (mos-autorotate --help)\n' "$1" >&2; exit 2 ;;
 esac
 
 ORIENTATION=

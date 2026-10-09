@@ -23,13 +23,20 @@ import sys
 # The look shared by MeccanicOS TUIs: MECCANICOS_PYLIB from the Nix wrapper, else next to this file.
 sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 import mos_tui as ui  # noqa: E402
+from mos_i18n import translator, N_  # noqa: E402
+
+T = translator("mos-vault")
 
 VAULT = os.environ.get("USB_VAULT_CMD", "usb-vault")
 ENTER, ESC = ui.ENTER, ui.ESC
 MIN_PASS = 16  # usb-vault.sh new_passphrase
 SIZE_RE = re.compile(r"\d+(\.\d+)?[KMGT]?", re.I)
+# usb-vault.sh prints status and summary in English (this menu reads them).
 SUMMARY = "What survives a restart"  # its first line (usb-vault.sh cmd_summary)
 OK_RE, LOST_RE = re.compile(r"kept"), re.compile(r"lost at shutdown")
+# Form fields: the English label is the key of the values, T(label) is shown.
+ROOM, PASSWORD, AGAIN = N_("Room for"), N_("Password"), N_("Password again")
+NAME, FOLDER = N_("Name"), N_("To folder")
 
 
 def vault(*args, input=None, yes=False):
@@ -65,8 +72,8 @@ class Menu:
     # ---- the stick ---------------------------------------------------------------
     def load(self):
         code, out = vault("status")
-        self.status = out.splitlines() if code == 0 else ["No MeccanicOS USB stick found:", last_line(out),
-                                                          "(Vaults live on the stick MeccanicOS started from.)"]
+        self.status = out.splitlines() if code == 0 else [T("No MeccanicOS USB stick found:"), last_line(out),
+                                                          T("(Vaults live on the stick MeccanicOS started from.)")]
         self.found = code == 0
         # status ends with the summary (what survives a restart); without a
         # stick (an installed system) ask for the summary alone.
@@ -91,22 +98,24 @@ class Menu:
             locked = [v for v in self.vaults if v[0] == "locked"]
             opened = [v for v in self.vaults if v[0] == "open"]
             if locked:
-                items.append(("Unlock a vault", "Open a locked folder (asks for its password)", self.unlock))
+                items.append((T("Unlock a vault"), T("Open a locked folder (asks for its password)"), self.unlock))
             if opened:
-                items.append(("Lock vaults", "Lock every open vault again", self.lock))
+                items.append((T("Lock vaults"), T("Lock every open vault again"), self.lock))
             # Two ways to keep things, in plain words; the CLI has the rest
             # (create-partition, create-home --file, sizes of the files area).
             if not has_home:
-                items.append(("Keep my files and settings on this stick", "Recommended: everything you do is kept, "
-                              "encrypted; asks for its password at start-up", self.create_home))
-            items.append(("Create a vault (a locked folder)", "A folder for a few private files, "
-                          "locked until you unlock it with its password", self.create_file))
-            items.append(("Open the USB stick's files", "The stick's own files area, in the file manager", self.stick))
+                items.append((T("Keep my files and settings on this stick"), T("Recommended: everything you do is kept, "
+                              "encrypted; asks for its password at start-up"), self.create_home))
+            items.append((T("Create a vault (a locked folder)"), T("A folder for a few private files, "
+                          "locked until you unlock it with its password"), self.create_file))
+            items.append((T("Open the USB stick's files"), T("The stick's own files area, in the file manager"), self.stick))
             if self.vaults or has_home:
-                items.append(("Back up vaults to another disk", "Copy them (still encrypted) to a folder on another disk", self.backup))
+                items.append((T("Back up vaults to another disk"), T("Copy them (still encrypted) to a folder on another disk"),
+                              self.backup))
             if self.recover:
-                items.append(("Recover vaults after re-flashing", "Put the vault partitions back in the table: nothing is erased", self.do_recover))
-        items.append(("Quit", "", None))
+                items.append((T("Recover vaults after re-flashing"),
+                              T("Put the vault partitions back in the table: nothing is erased"), self.do_recover))
+        items.append((T("Quit"), "", None))
         self.items = items
         self.sel = min(self.sel, len(items) - 1)
 
@@ -119,10 +128,10 @@ class Menu:
         scr.erase()
         h, w = scr.getmaxyx()
         if h < 16 or w < 60:
-            self.put(0, 0, "Make the window larger.")
+            self.put(0, 0, T("Make the window larger."))
             scr.refresh()
             return
-        ui.bar(scr, 0, "USB Vault — encrypted storage on your boot USB stick")
+        ui.bar(scr, 0, T("USB Vault — encrypted storage on your boot USB stick"))
         y = 2
         room = h - 7 - len(self.items)
         # The summary first (its "kept"/"lost" in green/red), then the stick.
@@ -140,7 +149,7 @@ class Menu:
             ui.row(scr, y + i, 2, min(w - 4, 50), f"  {label}", i == self.sel)
         self.put(h - 3, 2, self.items[self.sel][1], ui.attr(ui.DIM))
         ui.message(scr, h - 2, 2, self.msg)
-        ui.keybar(scr, h - 1, [("↑↓", "move"), ("Enter", "choose"), ("r", "reload"), ("q", "quit")])
+        ui.keybar(scr, h - 1, [("↑↓", T("move")), ("Enter", T("choose")), ("r", T("reload")), ("q", T("quit"))])
         scr.refresh()
 
     def summary_line(self, y, line):
@@ -161,7 +170,7 @@ class Menu:
     def box(self, title, lines, height=None, width=0):
         self.draw()  # the menu behind, without what an earlier box left
         h, w = self.scr.getmaxyx()
-        bw = min(max([len(l) for l in lines] + [len(title) + 6, 52, width]) + 6, w - 2)
+        bw = min(max([ui.cols(l) for l in lines] + [ui.cols(title) + 6, 52, width]) + 6, w - 2)
         bh = min(height or len(lines) + 2, h - 2)
         win = curses.newwin(bh, bw, (h - bh) // 2, (w - bw) // 2)
         win.keypad(True)
@@ -188,20 +197,22 @@ class Menu:
             elif k in (ESC, "q"):
                 return None
 
-    def confirm(self, title, text, yes="Go ahead"):
+    def confirm(self, title, text, yes=None):
         self.draw()
+        yes = yes or T("Go ahead")
         return ui.confirm(self.scr, text, yes=yes, title=title, default_yes=True)
 
-    def form(self, title, fields, note="", ok="OK"):
+    def form(self, title, fields, note="", ok=None):
         """fields: [(label, default, kind)], kind "text", "secret" or a list of
         choices (←→ changes), then the buttons ok and Cancel. ↑↓/Tab move,
         Enter goes to the next field or presses the button. Returns
-        {label: value} or None (Cancel, Esc)."""
+        {label: value} or None (Cancel, Esc). The labels are English (N_),
+        shown as T(label)."""
         values = {l: d for l, d, _ in fields}
-        labels = [(ok, ""), ("Cancel", "")]  # letters type into the fields
+        labels = [(ok or T("OK"), ""), (T("Cancel"), "")]  # letters type into the fields
         n = len(fields)
         i = 0  # n: the ok button, n + 1: Cancel
-        lw = max(len(l) for l, _, _ in fields) + 2
+        lw = max(ui.cols(T(l)) for l, _, _ in fields) + 2
         notes = note.splitlines() if note else []
         try:
             while True:
@@ -211,7 +222,7 @@ class Menu:
                 at = None
                 for j, (label, _, kind) in enumerate(fields):
                     v = values[label]
-                    self.put(1 + j, 2, f"{label}:", ui.attr(ui.KEY if j == i else ui.NORMAL), win)
+                    self.put(1 + j, 2, T("{label}:").format(label=T(label)), ui.attr(ui.KEY if j == i else ui.NORMAL), win)
                     shown = f"‹ {v} ›" if isinstance(kind, list) else v
                     x = ui.field(win, 1 + j, 2 + lw, bw - lw - 5, shown, j == i, kind == "secret")
                     if j == i and not isinstance(kind, list):
@@ -253,9 +264,9 @@ class Menu:
 
     def check_password(self, v, a, b):
         if v[a] != v[b]:
-            self.msg = "✗ The two passwords are different."
+            self.msg = "✗ " + T("The two passwords are different.")
         elif len(v[a]) < MIN_PASS:
-            self.msg = f"✗ Use a password of at least {MIN_PASS} characters (a few words work well)."
+            self.msg = "✗ " + T("Use a password of at least {count} characters (a few words work well).").format(count=MIN_PASS)
         else:
             return True
         return False
@@ -263,7 +274,8 @@ class Menu:
     def check_size(self, size, empty_ok):
         if (empty_ok and not size) or SIZE_RE.fullmatch(size):
             return True
-        self.msg = "✗ How much room: like 16G (gigabytes) or 500M" + (", or empty for all the free space." if empty_ok else ".")
+        self.msg = "✗ " + (T("How much room: like 16G (gigabytes) or 500M, or empty for all the free space.") if empty_ok
+                           else T("How much room: like 16G (gigabytes) or 500M."))
         return False
 
     # ---- doing ---------------------------------------------------------------------
@@ -277,34 +289,34 @@ class Menu:
             code = subprocess.run([VAULT, *args], input=stdin, text=True, env=env).returncode
         except (OSError, KeyboardInterrupt):
             code = 1
-        print("\n" + ("Done." if code == 0 else "That did not work (see above)."))
+        print("\n" + (T("Done.") if code == 0 else T("That did not work (see above).")))
         try:
-            input("Press Enter to go back to the menu.")
+            input(T("Press Enter to go back to the menu."))
         except (EOFError, KeyboardInterrupt):
             pass
         self.scr.refresh()
         self.load()
-        self.msg = f"✓ {title}: done" if code == 0 else f"✗ {title}: did not work"
+        self.msg = "✓ " + T("{title}: done").format(title=title) if code == 0 else "✗ " + T("{title}: did not work").format(title=title)
 
     def unlock(self):
         locked = [v for v in self.vaults if v[0] == "locked"]
-        i = 0 if len(locked) == 1 else self.pick("Unlock which vault?", [os.path.basename(v[1]) for v in locked])
+        i = 0 if len(locked) == 1 else self.pick(T("Unlock which vault?"), [os.path.basename(v[1]) for v in locked])
         if i is None:
             return
         path = locked[i][1]
-        v = self.form(f"Unlock {os.path.basename(path)}", [("Password", "", "secret")], ok="Unlock")
+        v = self.form(T("Unlock {vault}").format(vault=os.path.basename(path)), [(PASSWORD, "", "secret")], ok=T("Unlock"))
         if not v:
             return
-        self.msg = "Unlocking…"
+        self.msg = T("Unlocking…")
         self.draw()
-        code, out = vault("open", path, input=v["Password"] + "\n")
+        code, out = vault("open", path, input=v[PASSWORD] + "\n")
         self.load()
         self.msg = ("✓ " if code == 0 else "✗ ") + last_line(out)
 
     def lock(self):
         code, out = vault("close")
         self.load()
-        self.msg = ("✓ Vaults locked." if code == 0 else "✗ " + last_line(out))
+        self.msg = ("✓ " + T("Vaults locked.") if code == 0 else "✗ " + last_line(out))
 
     def stick(self):
         code, out = vault("stick")
@@ -312,68 +324,72 @@ class Menu:
         if code == 0 and m:
             subprocess.Popen(["xdg-open", m.group(1)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
-            self.msg = f"✓ The stick's files: {m.group(1)}"
+            self.msg = "✓ " + T("The stick's files: {folder}").format(folder=m.group(1))
         else:
             self.msg = "✗ " + last_line(out)
 
     def create_home(self):
-        v = self.form("Keep my files and settings", [("Room for", "16G", "text"), ("Password", "", "secret"),
-                                                     ("Password again", "", "secret")],
-                      ok="Next", note="Everything you do from now on is kept on this stick, encrypted.\n"
-                      "At every start you'll be asked for this password (Enter skips:\n"
-                      "a fresh session). Forget it and the files can't be opened.")
-        if not v or not self.check_size(v["Room for"], False) or not self.check_password(v, "Password", "Password again"):
+        title = T("Keep my files and settings")
+        v = self.form(title, [(ROOM, "16G", "text"), (PASSWORD, "", "secret"), (AGAIN, "", "secret")],
+                      ok=T("Next"), note=T("Everything you do from now on is kept on this stick, encrypted.\n"
+                                           "At every start you'll be asked for this password (Enter skips:\n"
+                                           "a fresh session). Forget it and the files can't be opened."))
+        if not v or not self.check_size(v[ROOM], False) or not self.check_password(v, PASSWORD, AGAIN):
             return
-        if not self.confirm("Keep my files and settings",
-                            f"{v['Room for']} on this stick for your files and settings, encrypted.\n"
-                            "What you have now is copied in. Nothing on the stick is erased.\n"
-                            "Restart the computer afterwards to start using it.", yes="Create"):
+        if not self.confirm(title,
+                            T("{size} on this stick for your files and settings, encrypted.\n"
+                              "What you have now is copied in. Nothing on the stick is erased.\n"
+                              "Restart the computer afterwards to start using it.").format(size=v[ROOM]),
+                            yes=T("Create")):
             return
         # usb-vault picks partition or file (Ventoy, or no partition slot left: file).
-        self.outside("Keep my files and settings", ["create-home", "--size", v["Room for"]], v["Password"])
+        self.outside(title, ["create-home", "--size", v[ROOM]], v[PASSWORD])
 
     def create_file(self):
         taken = {os.path.basename(v[1]).removesuffix(".luks") for v in self.vaults}
         default = next(n for n in ["private"] + [f"private-{i}" for i in range(2, 100)] if n not in taken)
-        v = self.form("Create a vault", [("Name", default, "text"), ("Room for", "4G", "text"),
-                                         ("Password", "", "secret"), ("Password again", "", "secret")],
-                      ok="Next", note="A locked folder for a few private files. Unlock it here when you\n"
-                      "need it: it opens as ~/Vault-NAME. Forget the password and the\n"
-                      "files can't be opened.")
-        if not v or not self.check_size(v["Room for"], False) or not self.check_password(v, "Password", "Password again"):
+        title = T("Create a vault")
+        v = self.form(title, [(NAME, default, "text"), (ROOM, "4G", "text"), (PASSWORD, "", "secret"), (AGAIN, "", "secret")],
+                      ok=T("Next"), note=T("A locked folder for a few private files. Unlock it here when you\n"
+                                           "need it: it opens as ~/Vault-NAME. Forget the password and the\n"
+                                           "files can't be opened."))
+        if not v or not self.check_size(v[ROOM], False) or not self.check_password(v, PASSWORD, AGAIN):
             return
-        name = re.sub(r"[^\w-]", "_", v["Name"].strip().removesuffix(".luks") or default)
+        name = re.sub(r"[^\w-]", "_", v[NAME].strip().removesuffix(".luks") or default)
         if name in taken:
-            self.msg = f"✗ There is already a vault called {name}."
+            self.msg = "✗ " + T("There is already a vault called {name}.").format(name=name)
             return
-        if not self.confirm("Create a vault", f"A locked folder called {name}, with room for {v['Room for']}.\n"
-                                              f"Unlocked, it opens as ~/Vault-{name}. Nothing on the stick is erased.", yes="Create"):
+        if not self.confirm(title, T("A locked folder called {name}, with room for {size}.\n"
+                                     "Unlocked, it opens as ~/Vault-{name}. Nothing on the stick is erased.").format(
+                                         name=name, size=v[ROOM]), yes=T("Create")):
             return
-        args = ["create-file", "--size", v["Room for"], "--name", name]
+        args = ["create-file", "--size", v[ROOM], "--name", name]
         if not self.ventoy:
             # A plain stick without a files area gets one just big enough (2 GiB to spare),
             # so its free space is still there for "Keep my files and settings".
-            args += ["--data-size", str(to_bytes(v["Room for"]) + 2 * 2**30)]
-        self.outside("Create a vault", args, v["Password"])
+            args += ["--data-size", str(to_bytes(v[ROOM]) + 2 * 2**30)]
+        self.outside(title, args, v[PASSWORD])
 
     def backup(self):
         user = os.environ.get("USER", "")
         disks = sorted(glob.glob(f"/run/media/{user}/*"))
-        v = self.form("Back up vaults", [("To folder", disks[0] if disks else "", "text")],
-                      ok="Back up", note="A folder on another disk (plugged-in disks are in /run/media).\n"
-                      "Vaults are locked first, and copied still encrypted.")
+        title = T("Back up vaults")
+        v = self.form(title, [(FOLDER, disks[0] if disks else "", "text")],
+                      ok=T("Back up"), note=T("A folder on another disk (plugged-in disks are in /run/media).\n"
+                                              "Vaults are locked first, and copied still encrypted."))
         if not v:
             return
-        folder = os.path.expanduser(v["To folder"].strip())
+        folder = os.path.expanduser(v[FOLDER].strip())
         if not os.path.isdir(folder):
-            self.msg = f"✗ No such folder: {folder or '(empty)'}"
+            self.msg = "✗ " + T("No such folder: {folder}").format(folder=folder or T("(empty)"))
             return
-        self.outside("Back up vaults", ["backup", folder])
+        self.outside(title, ["backup", folder])
 
     def do_recover(self):
-        if self.confirm("Recover vaults", "Put the vault partitions saved on the stick back in its\n"
-                                          "partition table. Nothing is erased.", yes="Recover"):
-            self.outside("Recover vaults", ["recover"])
+        title = T("Recover vaults")
+        if self.confirm(title, T("Put the vault partitions saved on the stick back in its\n"
+                                 "partition table. Nothing is erased."), yes=T("Recover")):
+            self.outside(title, ["recover"])
 
     def run(self):
         while True:
@@ -393,15 +409,15 @@ class Menu:
                 return
             elif k == "r":
                 self.load()
-                self.msg = "reloaded"
+                self.msg = T("reloaded")
 
 
 def main(argv):
     if argv and argv[0] in ("-h", "--help", "help"):
-        print(__doc__.strip())
+        print(T(__doc__).strip())
         return 0
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        print("usb-vault menu needs a terminal (usb-vault --help for the commands)", file=sys.stderr)
+        print(T("usb-vault menu needs a terminal (usb-vault --help for the commands)"), file=sys.stderr)
         return 2
     # Root comes from sudo: ask for its password now, on the plain terminal, if it wants one.
     if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode != 0:

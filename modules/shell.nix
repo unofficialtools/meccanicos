@@ -7,6 +7,7 @@
 }:
 let
   inherit (import ./not-root.nix) notRoot;
+  tSh = import ./i18n-sh.nix pkgs;
   # tldr pages bundled into the ISO so `tldr` works with no network.
   tldrPages = pkgs.fetchFromGitHub {
     owner = "tldr-pages";
@@ -26,7 +27,7 @@ let
       _7zz # list archive contents
       less
     ];
-    text = notRoot "mos-open" + ''exec ${pkgs.bash}/bin/bash ${../scripts/mos-open.sh} "$@"'';
+    text = tSh "mos-open" + notRoot "mos-open" + ''exec ${pkgs.bash}/bin/bash ${../scripts/mos-open.sh} "$@"'';
   };
   # print: a menu of printers + "Save as PDF", then prints (scripts/mos-print.sh).
   # Brave, pandoc and typst (for conversions) come from the system.
@@ -41,7 +42,7 @@ let
       cups # lp, lpstat
       ghostscript # ps2pdf
     ];
-    text = notRoot "mos-print" + ''exec ${pkgs.bash}/bin/bash ${../scripts/mos-print.sh} "$@"'';
+    text = tSh "mos-print" + notRoot "mos-print" + ''exec ${pkgs.bash}/bin/bash ${../scripts/mos-print.sh} "$@"'';
   };
   # "File Editor (Jed)": Jed in its own terminal window (command bar, Open With).
   jedMimeTypes = [

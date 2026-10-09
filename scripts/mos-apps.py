@@ -41,6 +41,8 @@ import urllib.request
 # The look shared by MeccanicOS TUIs: MECCANICOS_PYLIB from the Nix wrapper, else next to this file.
 sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 import mos_tui as ui  # noqa: E402
+from mos_i18n import translator, N_  # noqa: E402
+T = translator("mos-apps")
 
 FLAKE = "nixpkgs"  # the system's pinned nixpkgs (nix registry)
 # Public read-only credentials of the search.nixos.org web page.
@@ -250,7 +252,20 @@ def search_nix(words):
     return found
 
 
-OFFLINE = "No internet connection: {} needs it. Connect (the network icon in the top bar) and try again."
+# The no-internet message for each thing that needs it (the key is what is
+# being done; the message, a whole sentence, is translated where shown).
+OFFLINE = {
+    "searching": N_("No internet connection: searching needs it. Connect (the network icon in the top bar) and try again."),
+    "finding and installing apps": N_("No internet connection: finding and installing apps needs it. Connect (the network icon in the top bar) and try again."),
+    "installing": N_("No internet connection: installing needs it. Connect (the network icon in the top bar) and try again."),
+    "updating": N_("No internet connection: updating needs it. Connect (the network icon in the top bar) and try again."),
+    "trying an app": N_("No internet connection: trying an app needs it. Connect (the network icon in the top bar) and try again."),
+    "getting apps": N_("No internet connection: getting apps needs it. Connect (the network icon in the top bar) and try again."),
+}
+
+
+def offline(what):
+    return T(OFFLINE[what])
 
 
 def online(host="cache.nixos.org"):
@@ -266,16 +281,16 @@ def search(words, progress=lambda note: None):
     """(results, note); note is a problem worth showing, or ""."""
     if not online("search.nixos.org"):
         if not online():
-            return [], OFFLINE.format("searching")
+            return [], offline("searching")
     else:
-        progress(f"Searching search.nixos.org for “{words}”…")
+        progress(T("Searching search.nixos.org for “{words}”…").format(words=words))
         try:
             return search_web(words), ""
         except Exception:  # the site changed or is down
             pass
-    progress("search.nixos.org did not answer: searching with nix search (a minute or more the first time)…")
+    progress(T("search.nixos.org did not answer: searching with nix search (a minute or more the first time)…"))
     found = search_nix(words)
-    return found, "" if found else "search.nixos.org did not answer and nix search found nothing."
+    return found, "" if found else T("search.nixos.org did not answer and nix search found nothing.")
 
 
 # ---- actions (run in the terminal, showing Nix's progress) -------------------
@@ -304,7 +319,7 @@ def do_try(name, program=""):
     """Download NAME into the store without installing it, then run it: a
     desktop app in its own window, a command-line tool in a shell where it is
     on PATH. Nothing is kept: Nix removes it when it cleans up."""
-    print(f"Getting {name} (not installing it)...", flush=True)
+    print(T("Getting {name} (not installing it)...").format(name=name), flush=True)
     res = subprocess.run(NIX + ["build", "--impure", "--no-link", "--print-out-paths", f"{FLAKE}#{name}"], stdout=subprocess.PIPE, text=True, env=NIX_ENV)
     if res.returncode != 0:
         return res.returncode
@@ -315,12 +330,13 @@ def do_try(name, program=""):
     if gui and progs:
         prog = program if program in progs else (name if name in progs else progs[0])
         exe = next(os.path.join(b, prog) for b in bins if os.path.exists(os.path.join(b, prog)))
-        print(f"Starting {prog} in its own window.", flush=True)
+        print(T("Starting {program} in its own window.").format(program=prog), flush=True)
         subprocess.Popen([exe], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return 0
     path = ":".join(bins + [os.environ.get("PATH", "")])
-    print(f"\n\033[1;38;5;214m{name}\033[0m is ready to try in this shell: " + (", ".join(progs[:12]) or "(no commands)"))
-    print("Type \033[38;5;214mexit\033[0m when you are done; nothing stays installed.\n", flush=True)
+    print("\n" + T("{name} is ready to try in this shell: {commands}").format(
+        name=f"\033[1;38;5;214m{name}\033[0m", commands=", ".join(progs[:12]) or T("(no commands)")))
+    print(T("Type {exit} when you are done; nothing stays installed.").format(exit="\033[38;5;214mexit\033[0m") + "\n", flush=True)
     return subprocess.run(["bash", "-i"], env=dict(os.environ, PATH=path)).returncode
 
 
@@ -380,9 +396,9 @@ def here_write(folder, apps):
 def here_names(names):
     for n in names:
         if not NAME_RE.fullmatch(n):
-            usage_error(f"'{n}' is not an app name")
+            usage_error(T("'{name}' is not an app name").format(name=n))
     if not shutil.which("direnv"):
-        sys.exit("apps: direnv is not available, so --here can't work")
+        sys.exit("apps: " + T("direnv is not available, so --here can't work"))
     return list(dict.fromkeys(names))
 
 
@@ -391,18 +407,18 @@ def here_install(names):
     have = here_split(folder)[1]
     new = [n for n in here_names(names) if n not in have]
     if not new:
-        print(f"Already here: {', '.join(names)}.")
+        print(T("Already here: {apps}.").format(apps=", ".join(names)))
         return 0
     # Downloaded now: a wrong name fails here, and the first prompt in the folder is quick.
-    print(f"Getting {', '.join(new)} for {folder}...", flush=True)
+    print(T("Getting {apps} for {folder}...").format(apps=", ".join(new), folder=folder), flush=True)
     code = run(NIX + ["build", "--impure", "--no-link"] + [f"{FLAKE}#{n}" for n in new])
     if code:
         return code
     here_write(folder, have + new)
-    print(f"\n\033[1;38;5;214m{', '.join(have + new)}\033[0m: on PATH in a terminal in {folder}")
-    print("and the folders inside it (this one too, from the next prompt); not elsewhere.")
+    print("\n" + T("{apps}: on PATH in a terminal in {folder}\nand the folders inside it (this one too, from the next prompt); not elsewhere.").format(
+        apps=f"\033[1;38;5;214m{', '.join(have + new)}\033[0m", folder=folder))
     if os.path.exists(os.path.join(folder, ".git")):
-        print("To share them, commit .envrc (and put .direnv/ in .gitignore).")
+        print(T("To share them, commit .envrc (and put .direnv/ in .gitignore)."))
     return 0
 
 
@@ -413,14 +429,14 @@ def here_remove(names):
     gone = [n for n in names if n in have]
     for n in names:
         if n not in have:
-            print(f"{n} is not one of this folder's apps.")
+            print(T("{name} is not one of this folder's apps.").format(name=n))
     if not gone:
         return 1
     left = [a for a in have if a not in gone]
     kept = here_write(folder, left)
-    print(f"Removed {', '.join(gone)} from this folder." +
-          (f" Still here: {', '.join(left)}." if left else "") +
-          ("" if kept else " (.envrc had nothing else, so it is gone.)"))
+    print(T("Removed {apps} from this folder.").format(apps=", ".join(gone)) +
+          (" " + T("Still here: {apps}.").format(apps=", ".join(left)) if left else "") +
+          ("" if kept else " " + T("(.envrc had nothing else, so it is gone.)")))
     return 0
 
 
@@ -428,7 +444,7 @@ def here_list():
     folder = os.getcwd()
     apps = here_split(folder)[1]
     if not apps:
-        print(f"No apps for this folder yet: apps install --here NAME (in {folder}).")
+        print(T("No apps for this folder yet: apps install --here NAME (in {folder}).").format(folder=folder))
     for a in apps:
         print(a)
     return 0
@@ -439,11 +455,11 @@ def here_update():
     system's current packages (they change with mos-upgrade/update)."""
     folder = os.getcwd()
     if not here_split(folder)[1]:
-        print("No apps for this folder: nothing to update.")
+        print(T("No apps for this folder: nothing to update."))
         return 1
     os.utime(envrc(folder))
     subprocess.run(["direnv", "allow", folder])
-    print("This folder's apps are brought up to date at the next prompt here.")
+    print(T("This folder's apps are brought up to date at the next prompt here."))
     return 0
 
 
@@ -472,9 +488,9 @@ class Manager:
         self.online = online()
         self.hits = []  # clickable areas: (y, x0, x1, action)
         if not self.online:
-            self.say(OFFLINE.format("finding and installing apps"), True)
+            self.say(offline("finding and installing apps"), True)
         elif live_usb():
-            self.msg = "Live USB: apps you install last until you shut down."
+            self.msg = T("Live USB: apps you install last until you shut down.")
 
     # -- what's on screen ------------------------------------------------------
     def rows(self):
@@ -482,20 +498,20 @@ class Manager:
 
     def buttons(self):
         if self.tab == "installed":
-            return [("u", "Uninstall", self.uninstall), ("p", "Update", self.update_one), ("a", "Update all", self.update_all), ("o", "Undo", self.undo), ("s", "Search", self.go_search), ("q", "Quit", None)]
-        return [("i", "Install", self.install), ("t", "Try it", self.try_it), ("n", "New search", self.new_search), ("b", "Back", self.go_installed), ("q", "Quit", None)]
+            return [("u", T("Uninstall"), self.uninstall), ("p", T("Update"), self.update_one), ("a", T("Update all"), self.update_all), ("o", T("Undo"), self.undo), ("s", T("Search"), self.go_search), ("q", T("Quit"), None)]
+        return [("i", T("Install"), self.install), ("t", T("Try it"), self.try_it), ("n", T("New search"), self.new_search), ("b", T("Back"), self.go_installed), ("q", T("Quit"), None)]
 
     def add(self, y, x, text, attr=0, w=None):
         h, W = self.scr.getmaxyx()
         if y >= h or x >= W:
             return x
-        text = text[: max(0, (w if w is not None else W - x) - 0)]
-        text = text[: W - x - (1 if y == h - 1 else 0)]
+        text = ui.fit(text, max(0, (w if w is not None else W - x) - 0))
+        text = ui.fit(text, max(0, W - x - (1 if y == h - 1 else 0)))
         try:
             self.scr.addstr(y, x, text, attr)
         except curses.error:
             pass
-        return x + len(text)
+        return x + ui.cols(text)
 
     def draw(self):
         s = self.scr
@@ -504,10 +520,10 @@ class Manager:
         self.hits = []
         cp = ui.attr
         # Title bar
-        ui.bar(s, 0, "Apps Manager", "offline: search and installs need the internet" if not self.online else "")
+        ui.bar(s, 0, "Apps Manager", T("offline: search and installs need the internet") if not self.online else "")
         # Tabs: the one shown is teal, as the bars
         x = 1
-        for key, label, tab in (("1", f" Installed ({len(self.apps) + len(self.system)}) ", "installed"), ("2", " Search ", "search")):
+        for key, label, tab in (("1", " " + T("Installed ({count})").format(count=len(self.apps) + len(self.system)) + " ", "installed"), ("2", " " + T("Search") + " ", "search")):
             attr = cp(ui.BAR) if self.tab == tab else cp(ui.BUTTON)
             x0 = x
             x = self.add(2, x, label, attr)
@@ -516,18 +532,18 @@ class Manager:
         # Search box
         top_y = 4
         if self.tab == "search":
-            self.add(top_y, 1, "Search: ", cp(C_KEY if self.typing else C_TITLE))
-            at = ui.field(s, top_y, 9, max(10, w - 12), self.query, self.typing)
+            fx = self.add(top_y, 1, T("Search:") + " ", cp(C_KEY if self.typing else C_TITLE))
+            at = ui.field(s, top_y, fx, max(10, w - fx - 3), self.query, self.typing)
             if self.typing:
                 self.typing_at = (top_y, at)
-            self.hits.append((top_y, 9, w - 2, ("type",)))
+            self.hits.append((top_y, fx, w - 2, ("type",)))
             top_y += 2
         # Column header
         rows = self.rows()
         namew = max([len(r.get("name", r.get("attr", ""))) for r in rows] + [12])
         namew = min(namew, max(12, w // 3))
         verw = min(max([len(r["version"]) for r in rows] + [7]), 16)
-        head = f"  {'App'.ljust(namew)}  {'Version'.ljust(verw)}  " + ("Status" if self.tab == "installed" else "What it is")
+        head = f"  {ui.pad(T('App'), namew)}  {ui.pad(T('Version'), verw)}  " + (T("Status") if self.tab == "installed" else T("What it is"))
         self.add(top_y, 0, head, cp(C_TITLE))
         self.add(top_y + 1, 0, "─" * w, cp(C_BORDER))
         list_y = top_y + 2
@@ -542,9 +558,9 @@ class Manager:
         mine = {a["attr"] for a in self.apps} | {a["name"] for a in self.apps} | {a["name"] for a in self.system}
         if not rows:
             empty = (
-                "No apps installed yet. Press s to search for one."
+                T("No apps installed yet. Press s to search for one.")
                 if self.tab == "installed"
-                else ("Type what you are looking for (\"drawing\", inkscape) and press Enter." if not self.query else "Nothing found.")
+                else (T("Type what you are looking for (\"drawing\", inkscape) and press Enter.") if not self.query else T("Nothing found."))
             )
             self.add(list_y, 2, empty, cp(C_DIM))
         for i, r in enumerate(rows[top : top + list_h]):
@@ -552,18 +568,18 @@ class Manager:
             y = list_y + i
             name = r.get("name", r.get("attr", ""))
             if self.tab == "installed" and r.get("system"):
-                status, sattr = "comes with MeccanicOS: " + ", ".join(r["apps"]), cp(C_DIM)
+                status, sattr = T("comes with MeccanicOS: {apps}").format(apps=", ".join(r["apps"])), cp(C_DIM)
             elif self.tab == "installed":
-                status, sattr = ("downloaded again by Update" if r["missing"] else "installed"), (cp(C_ERR) if r["missing"] else cp(C_OK))
+                status, sattr = (T("downloaded again by Update") if r["missing"] else T("installed")), (cp(C_ERR) if r["missing"] else cp(C_OK))
             else:
                 status, sattr = r["description"], cp(C_NORMAL)
                 if r["attr"] in mine or r["attr"].split(".")[-1] in mine:
-                    status, sattr = "✓ installed  " + status, cp(C_OK)
+                    status, sattr = "✓ " + T("installed") + "  " + status, cp(C_OK)
                 elif r["unfree"]:
-                    status = "(not open source)  " + status
+                    status = T("(not open source)") + "  " + status
             line = f"  {name[:namew].ljust(namew)}  {r['version'][:verw].ljust(verw)}  "
             if n == cur:
-                self.add(y, 0, (line + status).ljust(w), cp(C_CURSOR) if not self.typing else cp(ui.FIELD))
+                self.add(y, 0, ui.pad(line + status, w), cp(C_CURSOR) if not self.typing else cp(ui.FIELD))
             else:
                 x = self.add(y, 0, line, cp(C_NORMAL))
                 self.add(y, x, status, sattr)
@@ -578,8 +594,8 @@ class Manager:
         # Message + keys
         msg = ("✗ " if self.err and not self.msg.startswith("✗") else "") + self.msg
         ui.message(s, h - 2, 1, msg) if self.err or msg.startswith("✓") else self.add(h - 2, 1, msg, cp(C_KEY if self.busy else C_DIM))
-        keys = [("Enter", "search"), ("Esc", "done typing")] if self.typing else \
-            [("↑↓", "move"), ("←→", "button"), ("Enter", "press"), ("Tab", "switch list"), ("q", "quit")]
+        keys = [("Enter", T("search")), ("Esc", T("done typing"))] if self.typing else \
+            [("↑↓", T("move")), ("←→", T("button")), ("Enter", T("press")), ("Tab", T("switch list")), ("q", T("quit"))]
         ui.keybar(s, h - 1, keys)
         if self.typing:
             ui.cursor(True)
@@ -603,7 +619,8 @@ class Manager:
         except KeyboardInterrupt:
             code = 130
         if wait:
-            print("\n" + ("\033[38;5;114mDone.\033[0m" if code == 0 else f"\033[38;5;203mFailed (exit {code}).\033[0m") + " Press Enter to go back.", end="", flush=True)
+            print("\n" + ("\033[38;5;114m" + T("Done.") + "\033[0m" if code == 0 else "\033[38;5;203m" + T("Failed (exit {code}).").format(code=code) + "\033[0m")
+                  + " " + T("Press Enter to go back."), end="", flush=True)
             try:
                 input()
             except (EOFError, KeyboardInterrupt):
@@ -617,66 +634,66 @@ class Manager:
         self.msg, self.err = msg, err
 
     def confirm(self, question):
-        return ui.confirm(self.scr, question, yes="Yes", no="No")
+        return ui.confirm(self.scr, question, yes=T("Yes"), no=T("No"))
 
     def mos_own(self, a):
         """True (and says why) for an app that comes with MeccanicOS."""
         if a and a.get("system"):
-            self.say(f"{a['name']} comes with MeccanicOS: it is updated with the system (mos-upgrade), not here.")
+            self.say(T("{name} comes with MeccanicOS: it is updated with the system (mos-upgrade), not here.").format(name=a["name"]))
             return True
         return False
 
     def uninstall(self):
         a = self.selected()
         if not a:
-            return self.say("Nothing to uninstall.")
+            return self.say(T("Nothing to uninstall."))
         if self.mos_own(a):
             return
-        if self.confirm(f"Uninstall {a['name']}?"):
+        if self.confirm(T("Uninstall {name}?").format(name=a["name"])):
             code = self.shell(do_remove, [a["name"]])
-            self.say(f"{a['name']} uninstalled." if code == 0 else f"Could not uninstall {a['name']}.", code != 0)
+            self.say((T("{name} uninstalled.") if code == 0 else T("Could not uninstall {name}.")).format(name=a["name"]), code != 0)
 
     def update_one(self):
         a = self.selected()
         if not a:
-            return self.say("Nothing to update.")
+            return self.say(T("Nothing to update."))
         if self.mos_own(a):
             return
         if self.needs_internet("updating"):
             return
         code = self.shell(do_update, [a["name"]])
-        self.say(f"{a['name']} is up to date." if code == 0 else f"Could not update {a['name']}.", code != 0)
+        self.say((T("{name} is up to date.") if code == 0 else T("Could not update {name}.")).format(name=a["name"]), code != 0)
 
     def update_all(self):
         if not self.apps:
-            return self.say("No apps of yours to update. (MeccanicOS's own apps update with the system.)")
+            return self.say(T("No apps of yours to update. (MeccanicOS's own apps update with the system.)"))
         if self.needs_internet("updating"):
             return
         code = self.shell(do_update, [])
-        self.say("All your apps are up to date." if code == 0 else "Some apps could not be updated.", code != 0)
+        self.say(T("All your apps are up to date.") if code == 0 else T("Some apps could not be updated."), code != 0)
 
     def undo(self):
-        if self.confirm("Undo the last install, removal or update?"):
+        if self.confirm(T("Undo the last install, removal or update?")):
             code = self.shell(do_undo)
-            self.say("Undone." if code == 0 else "Nothing to undo.", code != 0)
+            self.say(T("Undone.") if code == 0 else T("Nothing to undo."), code != 0)
 
     def install(self):
         r = self.selected()
         if not r:
-            return self.say("Search for an app first.")
+            return self.say(T("Search for an app first."))
         if self.needs_internet("installing"):
             return
         code = self.shell(do_install, [r["attr"]])
-        self.say(f"{r['attr']} installed: find it in the command bar (Super+Space)." if code == 0 else f"Could not install {r['attr']}.", code != 0)
+        self.say((T("{name} installed: find it in the command bar (Super+Space).") if code == 0 else T("Could not install {name}.")).format(name=r["attr"]), code != 0)
 
     def try_it(self):
         r = self.selected()
         if not r:
-            return self.say("Search for an app first.")
+            return self.say(T("Search for an app first."))
         if self.needs_internet("trying an app"):
             return
         code = self.shell(do_try, r["attr"], r.get("program", ""))
-        self.say(f"Tried {r['attr']}; press i to install it." if code == 0 else f"Could not start {r['attr']}.", code != 0)
+        self.say((T("Tried {name}; press i to install it.") if code == 0 else T("Could not start {name}.")).format(name=r["attr"]), code != 0)
 
     def go_search(self):
         self.tab, self.focus, self.typing = "search", 0, not self.query
@@ -697,23 +714,23 @@ class Manager:
             self.draw()
 
         self.busy = True
-        progress(f"Searching for “{self.query}”…")
+        progress(T("Searching for “{words}”…").format(words=self.query))
         try:
             self.results, note = search(self.query.strip(), progress)
         finally:
             self.busy = False
-        self.online = not note.startswith("No internet")
+        self.online = note != offline("searching")
         self.cursor["search"] = self.top["search"] = 0
         if note:
             self.say(note, True)
         else:
-            self.say(f"✓ {len(self.results)} apps found. i installs, t tries without installing.")
+            self.say("✓ " + T("{count} apps found. i installs, t tries without installing.").format(count=len(self.results)))
 
     def needs_internet(self, what):
         """True (and says so) when offline."""
         self.online = online()
         if not self.online:
-            self.say(OFFLINE.format(what), True)
+            self.say(offline(what), True)
         return not self.online
 
     def press(self, i):
@@ -815,7 +832,7 @@ class Manager:
 
 def manage():
     if not sys.stdout.isatty():
-        sys.exit("apps manage needs a terminal")
+        sys.exit(T("apps manage needs a terminal"))
     os.environ.setdefault("ESCDELAY", "25")
     curses.wrapper(lambda scr: (ui.init(), Manager(scr).loop()))
 
@@ -826,29 +843,29 @@ COMMANDS = ("manage", "list", "search", "install", "add", "remove", "uninstall",
 
 def usage_error(problem):
     """Wrong usage: one line on stderr, exit code 2 (runtime failures exit 1)."""
-    print(f"apps: {problem} (apps --help)", file=sys.stderr)
+    print("apps: " + problem + " (apps --help)", file=sys.stderr)
     sys.exit(2)
 
 
 def main(argv):
     if not argv or argv[0] in ("-h", "--help", "help"):
-        print(__doc__.strip())
+        print(T(__doc__).strip())
         return 0
     cmd, args = argv[0], argv[1:]
     if cmd not in COMMANDS:
-        usage_error(f"unknown command '{cmd}'")
+        usage_error(T("unknown command '{command}'").format(command=cmd))
     here = "--here" in args
     args = [a for a in args if a != "--here"]
     if not shutil.which("nix"):
-        sys.exit("apps: nix is not available")
+        sys.exit("apps: " + T("nix is not available"))
     if here:
         if cmd in ("install", "add", "remove", "uninstall") and not args:
-            usage_error(f"{cmd} --here needs a NAME")
+            usage_error(T("{command} --here needs a NAME").format(command=cmd))
         for n in args:  # a wrong name is a usage error, online or not
             if not NAME_RE.fullmatch(n):
-                usage_error(f"'{n}' is not an app name")
+                usage_error(T("'{name}' is not an app name").format(name=n))
         if cmd in ("install", "add", "update", "upgrade") and not online():
-            sys.exit("apps: " + OFFLINE.format("getting apps"))
+            sys.exit("apps: " + offline("getting apps"))
         if cmd in ("install", "add"):
             return here_install(args)
         if cmd in ("remove", "uninstall"):
@@ -857,60 +874,60 @@ def main(argv):
             return here_list()
         if cmd in ("update", "upgrade"):
             return here_update()
-        usage_error(f"{cmd} has no --here")
+        usage_error(T("{command} has no --here").format(command=cmd))
     if cmd == "manage":
         manage()
         return 0
     if cmd == "list":
         apps = installed()
-        print("\033[1mYour apps\033[0m (apps install, apps remove, apps update):")
+        print(T("{heading} (apps install, apps remove, apps update):").format(heading="\033[1m" + T("Your apps") + "\033[0m"))
         if not apps:
-            print("  none yet: apps search WORDS, then apps install NAME.")
+            print("  " + T("none yet: apps search WORDS, then apps install NAME."))
         for a in apps:
-            print(f"  {a['name']:<26} {a['version']:<16} {'(downloaded again by apps update)' if a['missing'] else ''}")
-        print("\n\033[1mComes with MeccanicOS\033[0m (updated with the system: mos-upgrade):")
+            print(f"  {a['name']:<26} {a['version']:<16} {T('(downloaded again by apps update)') if a['missing'] else ''}")
+        print("\n" + T("{heading} (updated with the system: mos-upgrade):").format(heading="\033[1m" + T("Comes with MeccanicOS") + "\033[0m"))
         for a in system_apps():
             print(f"  {a['name']:<26} {a['version']:<16} {', '.join(a['apps'])}")
         return 0
     if cmd == "search":
         if not args:
-            usage_error("search needs WORDS")
+            usage_error(T("search needs WORDS"))
         found, note = search(" ".join(args), lambda n: print(n, file=sys.stderr, flush=True))
         if note:
             print(note, file=sys.stderr)
-            if note.startswith("No internet"):
+            if note == offline("searching"):
                 return 1
         for r in found[:30]:
-            print(f"\033[1;38;5;214m{r['attr']}\033[0m {r['version']}" + ("  (not open source)" if r["unfree"] else ""))
+            print(f"\033[1;38;5;214m{r['attr']}\033[0m {r['version']}" + ("  " + T("(not open source)") if r["unfree"] else ""))
             print(f"    {r['description']}")
         if not found:
-            print("Nothing found.")
+            print(T("Nothing found."))
         return 0
     if cmd in ("install", "add"):
         if not args:
-            usage_error("install needs a NAME")
+            usage_error(T("install needs a NAME"))
         if not online():
-            sys.exit("apps: " + OFFLINE.format("installing"))
+            sys.exit("apps: " + offline("installing"))
         if live_usb():
-            print("Live USB: apps you install last until you shut down.")
+            print(T("Live USB: apps you install last until you shut down."))
         return do_install(args)
     if cmd in ("remove", "uninstall"):
         if not args:
-            usage_error("remove needs a NAME")
+            usage_error(T("remove needs a NAME"))
         return do_remove(args)
     if cmd in ("update", "upgrade"):
         if not online():
-            sys.exit("apps: " + OFFLINE.format("updating"))
+            sys.exit("apps: " + offline("updating"))
         return do_update(args)
     if cmd == "undo":
         return do_undo()
     if cmd == "try":
         if len(args) != 1:
-            usage_error("try needs one NAME")
+            usage_error(T("try needs one NAME"))
         if not online():
-            sys.exit("apps: " + OFFLINE.format("trying an app"))
+            sys.exit("apps: " + offline("trying an app"))
         return do_try(args[0])
-    usage_error(f"unknown command '{cmd}'")
+    usage_error(T("unknown command '{command}'").format(command=cmd))
 
 
 if __name__ == "__main__":

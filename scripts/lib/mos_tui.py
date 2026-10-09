@@ -18,6 +18,11 @@ the wrappers put this folder on PYTHONPATH.
 """
 
 import curses
+import unicodedata
+
+from mos_i18n import translator
+
+T = translator("")  # the shared translations: these texts appear in every tool
 
 NORMAL, BAR, BAR_KEY, HEADING, KEY, SELECTED, BUTTON, BUTTON_KEY, FIELD, DIM, OK, ERR, BORDER = range(1, 14)
 
@@ -77,6 +82,31 @@ def attr(role):
     return curses.color_pair(role) | STYLE[role][2]
 
 
+def cols(text):
+    """Terminal columns text takes: Chinese, Japanese and Korean take two each."""
+    return sum(0 if unicodedata.combining(ch) else 2 if unicodedata.east_asian_width(ch) in "WF" else 1
+               for ch in text)
+
+
+def fit(text, width):
+    """text cut to at most width columns."""
+    if cols(text) <= width:
+        return text
+    out, used = [], 0
+    for ch in text:
+        used += cols(ch)
+        if used > width:
+            break
+        out.append(ch)
+    return "".join(out)
+
+
+def pad(text, width):
+    """text cut or padded with spaces to exactly width columns."""
+    text = fit(text, width)
+    return text + " " * max(0, width - cols(text))
+
+
 def cursor(on):
     try:
         curses.curs_set(1 if on else 0)
@@ -89,21 +119,21 @@ def put(win, y, x, text, a=0):
     h, w = win.getmaxyx()
     if not (0 <= y < h and 0 <= x < w):
         return x
-    text = text[: w - x - (1 if y == h - 1 else 0)]
+    text = fit(text, w - x - (1 if y == h - 1 else 0))
     try:
         win.addstr(y, x, text, a)
     except curses.error:
         pass
-    return x + len(text)
+    return x + cols(text)
 
 
 def bar(win, y, text, right=""):
     """A full-width title bar."""
     w = win.getmaxyx()[1]
-    line = f" {text}".ljust(w)
+    line = pad(f" {text}", w)
     if right:
-        line = line[: max(0, w - len(right) - 2)] + right + "  "
-    put(win, y, 0, line.ljust(w), attr(BAR))
+        line = pad(line, max(0, w - cols(right) - 2)) + right + "  "
+    put(win, y, 0, pad(line, w), attr(BAR))
 
 
 def keybar(win, y, keys):
@@ -128,13 +158,22 @@ def frame(win, title=""):
 
 def row(win, y, x, width, text, selected, a=None):
     """A line of a list: selected is dark on orange, full width."""
-    put(win, y, x, text[:width].ljust(width), attr(SELECTED) if selected else (attr(NORMAL) if a is None else a))
+    put(win, y, x, pad(text, width), attr(SELECTED) if selected else (attr(NORMAL) if a is None else a))
+
+
+def keyed(label, key):
+    """A button's label with its shortcut key in it: "Install", or, when a
+    translation has no such letter, "Instalar [i]"."""
+    if key and key.lower() not in label.lower():
+        return f"{label} [{key}]"
+    return label
 
 
 def button(win, y, x, label, focused, key=None):
     """ Label  with its shortcut letter marked; returns the column after."""
     base = attr(SELECTED) if focused else attr(BUTTON)
     mark = (attr(SELECTED) if focused else attr(BUTTON_KEY)) | curses.A_UNDERLINE
+    label = keyed(label, key)
     k = label.lower().find(key.lower()) if key else -1
     x = put(win, y, x, " ", base)
     if k >= 0:
@@ -158,15 +197,16 @@ def buttons(win, y, x, labels, focus):
 
 
 def width_of(labels):
-    return sum(len(label) + 4 for label, _ in labels) - 2
+    return sum(cols(keyed(label, key)) + 4 for label, key in labels) - 2
 
 
 def field(win, y, x, width, text, focused, secret=False):
     """An input; returns where the typing cursor goes."""
     shown = "•" * len(text) if secret else text
-    shown = shown[-(width - 1):] if len(shown) >= width else shown
-    put(win, y, x, shown.ljust(width), attr(SELECTED) if focused else attr(FIELD))
-    return x + len(shown)
+    while cols(shown) >= width:  # the end of a long text, where the typing is
+        shown = shown[1:]
+    put(win, y, x, pad(shown, width), attr(SELECTED) if focused else attr(FIELD))
+    return x + cols(shown)
 
 
 def message(win, y, x, text):
@@ -186,13 +226,14 @@ def typed(text, k):
     return None
 
 
-def confirm(scr, question, yes="Yes", no="Cancel", title="Are you sure?", default_yes=False):
+def confirm(scr, question, yes=None, no=None, title=None, default_yes=False):
     """The one confirmation every tool uses: a box with the question and two
     buttons on the right (←→ or Tab move, Enter presses, Esc says no)."""
+    yes, no, title = yes or T("Yes"), no or T("Cancel"), title or T("Are you sure?")
     lines = question.splitlines()
     labels = [(yes, ""), (no, "")]
     h, w = scr.getmaxyx()
-    bw = min(w - 2, max([len(l) for l in lines] + [len(title) + 6, width_of(labels)]) + 8)
+    bw = min(w - 2, max([cols(l) for l in lines] + [cols(title) + 6, width_of(labels)]) + 8)
     bh = len(lines) + 5
     win = curses.newwin(bh, bw, max(0, (h - bh) // 2), (w - bw) // 2)
     win.keypad(True)

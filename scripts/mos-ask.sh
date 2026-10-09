@@ -16,6 +16,10 @@
 #   mos-ask --help          this help
 
 set -uo pipefail
+# Translations (scripts/lib/mos_i18n.sh); without them, English.
+# shellcheck source=/dev/null disable=SC2059
+declare -F T >/dev/null || . "${MOS_I18N_SH:-$(dirname "$0")/lib/mos_i18n.sh}" 2>/dev/null ||
+  { T() { printf '%s' "$1"; } && Tf() { local f=$1 && shift && printf -- "$f" "$@"; }; }
 
 ROFI_THEME="${MECCANICOS_ASK_THEME:-}"
 TERMINAL_CMD=(xfce4-terminal)
@@ -105,6 +109,7 @@ classify() {
     local t
     t=$(trim "$1")
     [[ -z $t ]] && { echo "none"; return; }
+    # shellcheck disable=SC2088 # a typed "~" is matched as text
     case $t in
         \?*) echo "ask	$(trim "${t#\?}")"; return ;;
         !*) echo "shell	$(trim "${t#!}")"; return ;;
@@ -204,11 +209,12 @@ ranked_apps() {
 # A command in its own terminal window. The window stays open after a quick
 # command (ls, df…) or one that failed, so you can read what it printed, and
 # closes by itself after a program you used for a while (btop, yazi…).
+# $2 and $3: the translated "(exit status %s)" and "Press any key to close.".
 # shellcheck disable=SC2016
 RUN_IN_TERMINAL='t=$SECONDS; sh -c "$1"; s=$?
 if ((s != 0 || SECONDS - t < 10)); then
-    ((s)) && printf "\n(exit status %s)" "$s"
-    printf "\nPress any key to close."
+    ((s)) && printf "\n$2" "$s"
+    printf "\n%s" "$3"
     read -rsn1
 fi'
 
@@ -224,11 +230,12 @@ act() {
             setsid -f gtk-launch "$(basename "$file" .desktop)" >/dev/null 2>&1 ||
                 setsid -f gio launch "$file" >/dev/null 2>&1 ;;
         gui) setsid -f sh -c "$rest" >/dev/null 2>&1 ;;
-        run) setsid -f "${TERMINAL_CMD[@]}" --title "$rest" -x bash -c "$RUN_IN_TERMINAL" run "$rest" >/dev/null 2>&1 ;;
+        run) setsid -f "${TERMINAL_CMD[@]}" --title "$rest" -x bash -c "$RUN_IN_TERMINAL" run "$rest" \
+                 "$(T '(exit status %s)')" "$(T 'Press any key to close.')" >/dev/null 2>&1 ;;
         # "!command": in an interactive bash (your aliases), then Enter closes it.
         shell) setsid -f "${TERMINAL_CMD[@]}" --title "$rest" -x bash -c \
-                   'bash -ic "$1"; s=$?; ((s)) && printf "\n(exit status %s)" "$s"; printf "\nPress Enter to close."; read -r' \
-                   shell "$rest" >/dev/null 2>&1 ;;
+                   'bash -ic "$1"; s=$?; ((s)) && printf "\n$2" "$s"; printf "\n%s" "$3"; read -r' \
+                   shell "$rest" "$(T '(exit status %s)')" "$(T 'Press Enter to close.')" >/dev/null 2>&1 ;;
         # A folder opens in yazi; a file shows in yazi, in its folder.
         path) setsid -f "${TERMINAL_CMD[@]}" --title "$rest" -x yazi "$rest" >/dev/null 2>&1 ;;
         search) setsid -f brave "https://duckduckgo.com/?q=$(urlencode "$rest")" >/dev/null 2>&1 ;;
@@ -236,7 +243,7 @@ act() {
         ask) if [[ -n $rest ]]; then
                  setsid -f "${TERMINAL_CMD[@]}" --title "AI" --hold -x mos-ai "$rest" >/dev/null 2>&1
              else
-                 setsid -f "${TERMINAL_CMD[@]}" --title "AI Chat" --hold -x mos-ai >/dev/null 2>&1
+                 setsid -f "${TERMINAL_CMD[@]}" --title "$(T 'AI Chat')" --hold -x mos-ai >/dev/null 2>&1
              fi ;;
     esac
 }
@@ -246,7 +253,7 @@ act() {
 # exactly what you typed, even when an app matches.
 popup() {
     local args=(-dpi 0 -dmenu -p "❯" -i -show-icons -no-fixed-num-lines -no-sort
-        -mesg "Enter: open   ·   Ctrl+Enter: use exactly what I typed   ·   / or ~ a folder   ·   !… run a command   ·   shortcuts: every key")
+        -mesg "$(T 'Enter: open   ·   Ctrl+Enter: use exactly what I typed   ·   / or ~ a folder   ·   !… run a command   ·   shortcuts: every key')")
     [[ -n $ROFI_THEME ]] && args+=(-theme "$ROFI_THEME")
     ranked_apps | while IFS=$'\t' read -r name icon; do
         printf '%s\0icon\x1f%s\n' "$name" "${icon:-application-x-executable}"

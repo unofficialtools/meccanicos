@@ -17,6 +17,10 @@
 # size picked in mos-config (display.scale) stays: it writes "manual" in
 # the stamp. Settings → Appearance → Fonts changes it by hand too.
 set -uo pipefail
+# Translations (scripts/lib/mos_i18n.sh); without them, English.
+# shellcheck source=/dev/null disable=SC2059
+declare -F T >/dev/null || . "${MOS_I18N_SH:-$(dirname "$0")/lib/mos_i18n.sh}" 2>/dev/null ||
+  { T() { printf '%s' "$1"; } && Tf() { local f=$1 && shift && printf -- "$f" "$@"; }; }
 
 stamp="${XDG_CONFIG_HOME:-$HOME/.config}/meccanicos/hidpi-done"
 force=0 dry=0 manual=""
@@ -27,7 +31,7 @@ while (($#)); do
         --force) force=1 ;;
         --dry-run) dry=1 ;;
         --scale)
-            [[ ${1:-} =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "mos-hidpi: --scale needs a number, like 1.5" >&2; exit 2; }
+            [[ ${1:-} =~ ^[0-9]+(\.[0-9]+)?$ ]] || { printf '%s\n' "$(T 'mos-hidpi: --scale needs a number, like 1.5')" >&2; exit 2; }
             # In hundredths, without bc: 1.5 -> 150.
             int=${1%%.*} frac=${1#*.}
             [[ $1 == *.* ]] || frac=0
@@ -37,7 +41,7 @@ while (($#)); do
             shift
             ;;
         -h | --help | help) sed -n '/^# mos-hidpi - /,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
-        *) echo "mos-hidpi: unknown option $a (mos-hidpi --help)" >&2; exit 2 ;;
+        *) Tf 'mos-hidpi: unknown option %s (mos-hidpi --help)\n' "$a" >&2; exit 2 ;;
     esac
 done
 [[ $force == 0 && $(cat "$stamp" 2>/dev/null) == manual ]] && exit 0
@@ -50,7 +54,7 @@ line=$(xrandr --query | grep ' connected primary' | head -n1) || true
 [[ -n $line ]] || line=$(xrandr --query | grep ' connected' | head -n1) || true
 px=$(grep -oE '[0-9]+x[0-9]+\+' <<<"$line" | head -n1 | cut -dx -f1) || true
 mm=$(grep -oE '[0-9]+mm x [0-9]+mm' <<<"$line" | head -n1 | cut -dm -f1) || true
-[[ -n $px ]] || { echo "mos-hidpi: no screen found" >&2; exit 1; }
+[[ -n $px ]] || { printf '%s\n' "$(T 'mos-hidpi: no screen found')" >&2; exit 1; }
 [[ $force == 0 && $(cat "$stamp" 2>/dev/null) == "auto $px" ]] && exit 0
 
 # The factor in hundredths: width/2048, at least 1, or the density's 1.5/2.

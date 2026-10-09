@@ -46,6 +46,11 @@ import tarfile
 import tempfile
 
 import common as c
+# common put the shared lib (scripts/lib) on sys.path
+from mos_i18n import translator, N_  # noqa: E402
+import mos_tui as ui  # noqa: E402
+
+T = translator("mos-config")
 
 # ---- reading and writing the small TOML files we use (flat sections) ---------------
 try:
@@ -140,7 +145,7 @@ class Setting:
         if callable(ch):
             return ch(text)
         if ch and text not in ch:
-            raise c.UsageError(f"{self.key}: one of {', '.join(ch)}")
+            raise c.UsageError(T("{key}: one of {choices}").format(key=self.key, choices=', '.join(ch)))
         return text
 
 
@@ -150,7 +155,7 @@ def onoff(text):
         return True
     if t in ("off", "false", "no", "0"):
         return False
-    raise c.UsageError("on or off")
+    raise c.UsageError(T("on or off"))
 
 
 def minutes(text):
@@ -158,7 +163,7 @@ def minutes(text):
         return 0
     if text.isdigit():
         return int(text)
-    raise c.UsageError("minutes, or never")
+    raise c.UsageError(T("minutes, or never"))
 
 
 def ports(text):
@@ -167,7 +172,7 @@ def ports(text):
     try:
         return sorted({int(p) for p in text.replace(",", " ").split()})
     except ValueError:
-        raise c.UsageError("port numbers, e.g. 8080,8443 (or none)")
+        raise c.UsageError(T("port numbers, e.g. 8080,8443 (or none)"))
 
 
 def percent_or_off(text):
@@ -175,7 +180,7 @@ def percent_or_off(text):
         return 100
     if text.isdigit() and 50 <= int(text) <= 100:
         return int(text)
-    raise c.UsageError("50 to 100 (%), or off")
+    raise c.UsageError(T("50 to 100 (%), or off"))
 
 
 # display.scale -- the size of text, as mos-hidpi sets it (auto: from the
@@ -240,7 +245,7 @@ def apply_keyboard(layout=None, switch=None):
 
 def layout_choice(text):
     if not re.fullmatch(r"[a-z]{2,3}(\([a-z0-9_]+\))?(,[a-z]{2,3}(\([a-z0-9_]+\))?)*", text):
-        raise c.UsageError("keyboard layouts like us, or us,it (see localectl list-x11-keymap-layouts)")
+        raise c.UsageError(T("keyboard layouts like us, or us,it (see localectl list-x11-keymap-layouts)"))
     return text
 
 
@@ -262,7 +267,7 @@ def get_touch(prop):
 def set_touch(prop, on):
     pads = touchpads()
     if not pads:
-        raise c.Failed("no touchpad found")
+        raise c.Failed(T("no touchpad found"))
     for pad in pads:
         c.run("xinput", "set-prop", pad, f"libinput {prop} Enabled", int(on))
         xfconf_set("pointers", f"/{pad.replace(' ', '_')}/Properties/libinput_{prop.replace(' ', '_')}_Enabled",
@@ -294,7 +299,7 @@ def get_suspend():
 
 def set_suspend(m):
     if 0 < m < 15:
-        raise c.UsageError("15 minutes or more, or never")
+        raise c.UsageError(T("15 minutes or more, or never"))
     for src in ("ac", "battery"):
         xfconf_set(PM, f"/{PM}/inactivity-sleep-mode-on-{src}", "uint", 1)  # 1 = suspend
         xfconf_set(PM, f"/{PM}/inactivity-on-{src}", "uint", m or 14)
@@ -314,7 +319,7 @@ def get_charge():
 def set_charge(v):
     files = batteries()
     if not files:
-        raise c.Failed("this battery cannot stop charging early (no charge_control_end_threshold)")
+        raise c.Failed(T("this battery cannot stop charging early (no charge_control_end_threshold)"))
     for f in files:
         c.run("tee", f, sudo=True, input=f"{v}\n", check=True)
     if c.installed():
@@ -349,8 +354,10 @@ def set_audio(kind, text):
     found = nodes(kind)
     match = [i for i, n in found.items() if text.lower() in n.lower()]
     if not match:
-        there = "; ".join(found.values()) if found else "none found"
-        raise c.UsageError(f"no such {'output' if kind == 'Sinks' else 'input'}; there are: {there}")
+        there = "; ".join(found.values()) if found else T("none found")
+        if kind == "Sinks":
+            raise c.UsageError(T("no such output; there are: {names}").format(names=there))
+        raise c.UsageError(T("no such input; there are: {names}").format(names=there))
     c.run("wpctl", "set-default", match[0], check=True)
 
 
@@ -371,7 +378,7 @@ def zone_choice(text):
     if not os.path.exists(os.path.join("/etc/zoneinfo", text)) and \
             not os.path.exists(os.path.join("/usr/share/zoneinfo", text)) and \
             text not in c.output("timedatectl", "list-timezones").split():
-        raise c.UsageError("a time zone like Europe/Rome (timedatectl list-timezones)")
+        raise c.UsageError(T("a time zone like Europe/Rome (timedatectl list-timezones)"))
     return text
 
 
@@ -381,7 +388,7 @@ def set_zone(v):
 
 def locale_choice(text):
     if not re.fullmatch(r"[a-z]{2,3}_[A-Z]{2}\.UTF-8", text):
-        raise c.UsageError("a locale like it_IT.UTF-8 (locale -a)")
+        raise c.UsageError(T("a locale like it_IT.UTF-8 (locale -a)"))
     return text
 
 
@@ -395,7 +402,7 @@ def set_formats(v):
     lang = lang.group(1) if lang else "en_US.UTF-8"
     args = [f"LANG={lang}"] + [f"{k}={v}" for k in ("LC_TIME", "LC_NUMERIC", "LC_MONETARY", "LC_PAPER", "LC_MEASUREMENT")]
     c.run("localectl", "set-locale", *args, sudo=True, check=True)
-    c.info("takes effect at the next login")
+    c.info(T("takes effect at the next login"))
 
 
 # system settings that live in /etc/nixos/meccanicos.toml (installed)
@@ -430,57 +437,57 @@ def get_gpu():
 
 
 SETTINGS = [
-    Setting("display.scale", "size of text on screen (auto: from the screen's width; icons stay)", get_scale,
+    Setting("display.scale", N_("size of text on screen (auto: from the screen's width; icons stay)"), get_scale,
             set_scale, choices=["auto"] + SCALE_STEPS),
-    Setting("keyboard.layout", "keyboard layouts, first is the default (us, us,it, ...)",
+    Setting("keyboard.layout", N_("keyboard layouts, first is the default (us, us,it, ...)"),
             get_layout, lambda v: apply_keyboard(layout=v), choices=layout_choice, runtime=True, example="us,it"),
-    Setting("keyboard.switch", "keys that switch between layouts", get_switch,
+    Setting("keyboard.switch", N_("keys that switch between layouts"), get_switch,
             lambda v: apply_keyboard(switch=v), choices=list(SWITCH), runtime=True),
-    Setting("touchpad.tap", "tap the touchpad to click", lambda: get_touch("Tapping"),
+    Setting("touchpad.tap", N_("tap the touchpad to click"), lambda: get_touch("Tapping"),
             lambda v: set_touch("Tapping", v), choices=onoff),
-    Setting("touchpad.natural_scroll", "scroll like a phone (content follows the fingers)",
+    Setting("touchpad.natural_scroll", N_("scroll like a phone (content follows the fingers)"),
             lambda: get_touch("Natural Scrolling"), lambda v: set_touch("Natural Scrolling", v), choices=onoff),
-    Setting("power.screen_off", "turn the screen off after this many minutes (never)", get_screen_off,
+    Setting("power.screen_off", N_("turn the screen off after this many minutes (never)"), get_screen_off,
             set_screen_off, choices=minutes, example="10"),
-    Setting("power.suspend", "suspend after this many idle minutes (never, or 15+)", get_suspend,
+    Setting("power.suspend", N_("suspend after this many idle minutes (never, or 15+)"), get_suspend,
             set_suspend, choices=minutes, example="30"),
-    Setting("power.profile", "performance, balanced or power-saver (changes with the charger)",
+    Setting("power.profile", N_("performance, balanced or power-saver (changes with the charger)"),
             lambda: c.output("powerprofilesctl", "get") or None,
             lambda v: c.run("powerprofilesctl", "set", v, check=True),
             choices=["performance", "balanced", "power-saver"]),
-    Setting("sound.output", "where sound goes (part of its name)", lambda: get_audio("SINK"),
+    Setting("sound.output", N_("where sound goes (part of its name)"), lambda: get_audio("SINK"),
             lambda v: set_audio("Sinks", v), choices=lambda t: t, example="speakers"),
-    Setting("sound.input", "which microphone is used (part of its name)", lambda: get_audio("SOURCE"),
+    Setting("sound.input", N_("which microphone is used (part of its name)"), lambda: get_audio("SOURCE"),
             lambda v: set_audio("Sources", v), choices=lambda t: t, example="headset"),
-    Setting("clock.format", "the top bar's clock", get_clock, set_clock, choices=list(CLOCK)),
-    Setting("time.zone", "time zone", lambda: c.output("timedatectl", "show", "-p", "Timezone", "--value") or None,
+    Setting("clock.format", N_("the top bar's clock"), get_clock, set_clock, choices=list(CLOCK)),
+    Setting("time.zone", N_("time zone"), lambda: c.output("timedatectl", "show", "-p", "Timezone", "--value") or None,
             set_zone, system=True, choices=zone_choice, runtime=True, example="Europe/Rome"),
-    Setting("time.formats", "how dates, numbers and money are written", get_formats, set_formats,
+    Setting("time.formats", N_("how dates, numbers and money are written"), get_formats, set_formats,
             system=True, live=False, choices=locale_choice, example="it_IT.UTF-8"),
-    Setting("power.charge_limit", "stop charging the battery at this % (off = 100)", get_charge, set_charge,
+    Setting("power.charge_limit", N_("stop charging the battery at this % (off = 100)"), get_charge, set_charge,
             system=True, choices=percent_or_off, runtime=True, example="80"),
-    Setting("power.lid", "closing the lid", from_system("lid", "suspend"), to_system("lid"),
+    Setting("power.lid", N_("closing the lid"), from_system("lid", "suspend"), to_system("lid"),
             system=True, rebuild=True, live=False, choices=["suspend", "hibernate", "lock", "nothing"]),
-    Setting("power.hibernate", "hibernate (suspend to disk) available", from_system("hibernate", True),
+    Setting("power.hibernate", N_("hibernate (suspend to disk) available"), from_system("hibernate", True),
             to_system("hibernate"), system=True, rebuild=True, live=False, choices=onoff),
-    Setting("updates.auto", "update in the background every week (applied at the next start)",
+    Setting("updates.auto", N_("update in the background every week (applied at the next start)"),
             from_system("auto_update", True), to_system("auto_update"), system=True, rebuild=True,
             live=False, choices=onoff),
-    Setting("security.ssh", "SSH server: log in from other computers with a key",
+    Setting("security.ssh", N_("SSH server: log in from other computers with a key"),
             from_system("ssh", True, ssh_running), to_system("ssh"), system=True, rebuild=True, live=False,
             choices=onoff),
-    Setting("security.tcp_ports", "TCP ports let in through the firewall (none)", from_system("tcp_ports", []),
+    Setting("security.tcp_ports", N_("TCP ports let in through the firewall (none)"), from_system("tcp_ports", []),
             to_system("tcp_ports"), system=True, rebuild=True, live=False, choices=ports, example="8080,8443"),
-    Setting("security.udp_ports", "UDP ports let in through the firewall (none)", from_system("udp_ports", []),
+    Setting("security.udp_ports", N_("UDP ports let in through the firewall (none)"), from_system("udp_ports", []),
             to_system("udp_ports"), system=True, rebuild=True, live=False, choices=ports, example="none"),
-    Setting("security.remote_unlock", "unlock the disk over SSH while starting (mos-unlock)",
+    Setting("security.remote_unlock", N_("unlock the disk over SSH while starting (mos-unlock)"),
             get_remote_unlock, set_remote_unlock, system=True, live=False, choices=onoff),
-    Setting("security.login_alerts", "alerts on SSH logins from somewhere new and SSH attacks (mos-logins)",
+    Setting("security.login_alerts", N_("alerts on SSH logins from somewhere new and SSH attacks (mos-logins)"),
             lambda: login_setting("login_alerts", True), lambda v: None, choices=onoff, runtime=True),
-    Setting("security.auto_disconnect", "disconnect by itself when someone unknown logs in with SSH",
+    Setting("security.auto_disconnect", N_("disconnect by itself when someone unknown logs in with SSH"),
             lambda: login_setting("auto_disconnect", False), lambda v: None, choices=onoff, runtime=True,
             live=False),
-    Setting("graphics.driver", "graphics driver: auto, nvidia or open (applies at the next start)",
+    Setting("graphics.driver", N_("graphics driver: auto, nvidia or open (applies at the next start)"),
             get_gpu, to_system("gpu"), system=True, rebuild=True, live=False, choices=["auto", "nvidia", "open"]),
 ]
 BY_KEY = {s.key: s for s in SETTINGS}
@@ -502,8 +509,9 @@ def setting(key):
     s = BY_KEY.get(key)
     if not s:
         near = [k for k in BY_KEY if key.split(".")[-1] in k]
-        raise c.UsageError(f"no setting {key}" + (f" (did you mean {', '.join(near)}?)" if near else
-                                                 " (mos-config list shows them)"))
+        if near:
+            raise c.UsageError(T("no setting {key} (did you mean {keys}?)").format(key=key, keys=', '.join(near)))
+        raise c.UsageError(T("no setting {key} (mos-config list shows them)").format(key=key))
     return s
 
 
@@ -558,11 +566,11 @@ def change(s, value):
 # signing in to hotel/café networks, VPNs. Changed only when you ask.
 NM_VPN_DIR = "/etc/NetworkManager/VPN"  # a .name file per VPN plugin installed
 # VPN kinds nmcli can import from a file: (what it is, how to recognize it).
-IMPORTS = {"wireguard": "a WireGuard file (.conf)", "openvpn": "an OpenVPN file (.ovpn)",
-           "vpnc": "a Cisco VPN file (.pcf)"}
+IMPORTS = {"wireguard": N_("a WireGuard file (.conf)"), "openvpn": N_("an OpenVPN file (.ovpn)"),
+           "vpnc": N_("a Cisco VPN file (.pcf)")}
 PROBE = "http://neverssl.com"  # plain http: a sign-in page catches it
-INTERNET = {"full": "yes", "portal": "sign in needed (mos-config network signin)",
-            "limited": "no (only the local network)", "none": "no", "unknown": "not checked"}
+INTERNET = {"full": N_("yes"), "portal": N_("sign in needed (mos-config network signin)"),
+            "limited": N_("no (only the local network)"), "none": N_("no"), "unknown": N_("not checked")}
 
 
 def nm_split(line):
@@ -608,8 +616,8 @@ def net_status():
 def net_summary(st):
     """One line: HomeWiFi (Wi-Fi 82%, 192.168.1.23), or not connected."""
     if not st["device"]:
-        return "not connected"
-    kind = {"wifi": "Wi-Fi", "ethernet": "wired", "gsm": "mobile", "bt": "Bluetooth"}.get(st["type"], st["type"])
+        return T("not connected")
+    kind = {"wifi": "Wi-Fi", "ethernet": T("wired"), "gsm": T("mobile"), "bt": "Bluetooth"}.get(st["type"], st["type"])
     if st["signal"] is not None:
         kind += f" {st['signal']}%"
     return f"{st['connection']} ({kind}" + (f", {st['address']})" if st["address"] else ")")
@@ -617,8 +625,8 @@ def net_summary(st):
 
 def vpn_summary(st):
     if st["vpn_on"]:
-        return "on: " + ", ".join(st["vpn_on"])
-    return "off" if st["vpns"] else "none set up"
+        return T("on: {names}").format(names=", ".join(st["vpn_on"]))
+    return T("off") if st["vpns"] else T("none set up")
 
 
 def wifi_networks():
@@ -662,23 +670,24 @@ def wifi_connect(ssid, password=None):
         code, out = c.run("nmcli", "--wait", "45", "device", "wifi", "connect", ssid, timeout=60)
         c.log("config", f"network: join Wi-Fi {ssid}" + ("" if code == 0 else " (failed)"))
         if code != 0:
-            raise c.Failed(nm_error(out, "could not connect"))
+            raise c.Failed(nm_error(out, T("could not connect")))
         return
     security = next((r[1] for r in nm_rows("SSID,SECURITY", "device", "wifi", "list", "--rescan", "no")
                      if len(r) == 2 and r[0] == ssid), "")
     if "802.1X" in security or ("WPA" not in security and security not in ("", "--")):
-        raise c.Failed(f"{ssid} needs more than a password ({security}): use Other network (nmtui)")
+        raise c.Failed(T("{network} needs more than a password ({security}): use Other network (nmtui)").format(
+            network=ssid, security=security))
     uuid, new = wifi_profile(ssid), False
     if not uuid:
         dev = next((r[0] for r in nm_rows("DEVICE,TYPE", "device") if len(r) == 2 and r[1] == "wifi"), None)
         if not dev:
-            raise c.Failed("no Wi-Fi here")
+            raise c.Failed(T("no Wi-Fi here"))
         mgmt = "sae" if "WPA3" in security and "WPA2" not in security and "WPA1" not in security else "wpa-psk"
         code, out = c.run("nmcli", "connection", "add", "type", "wifi", "ifname", dev, "con-name", ssid,
                           "ssid", ssid, "wifi-sec.key-mgmt", mgmt)
         m = re.search(r"\(([0-9a-f-]{36})\)", out)
         if code != 0 or not m:
-            raise c.Failed(nm_error(out, "could not add the network"))
+            raise c.Failed(nm_error(out, T("could not add the network")))
         uuid, new = m.group(1), True
     run_dir = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
     secret_file = os.path.join(run_dir, f"mos-wifi-{os.getpid()}")
@@ -697,7 +706,7 @@ def wifi_connect(ssid, password=None):
     if code != 0:
         if new:  # don't remember a wrong password
             c.run("nmcli", "connection", "delete", "uuid", uuid)
-        raise c.Failed(nm_error(out, "could not connect"))
+        raise c.Failed(nm_error(out, T("could not connect")))
 
 
 def portal_url():
@@ -729,7 +738,7 @@ def start(*cmd):
 
 def open_url(url):
     if not os.environ.get("DISPLAY") or not c.have("xdg-open"):
-        raise c.Failed(f"no desktop here: open {url} in a browser")
+        raise c.Failed(T("no desktop here: open {url} in a browser").format(url=url))
     start("xdg-open", url)
 
 
@@ -764,10 +773,11 @@ def vpn_import(path):
     not turn itself on at the next start: mos-config network vpn on NAME."""
     path = os.path.expanduser(path)
     if not os.path.isfile(path):
-        raise c.Failed(f"no such file: {path}")
+        raise c.Failed(T("no such file: {path}").format(path=path))
     kind, kinds = vpn_kind(path), vpn_kinds()
     if kind not in kinds:
-        raise c.Failed(f"not a file {c.NAME} can import ({', '.join(IMPORTS[k] for k in kinds)})")
+        raise c.Failed(T("not a file {name} can import ({kinds})").format(
+            name=c.NAME, kinds=', '.join(T(IMPORTS[k]) for k in kinds)))
     tmp = None
     if kind == "wireguard":  # NetworkManager names the interface after the file: 15 letters at most
         tmp = tempfile.mkdtemp()
@@ -780,7 +790,7 @@ def vpn_import(path):
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
     if code != 0:
-        raise c.Failed(nm_error(out, "could not import it"))
+        raise c.Failed(nm_error(out, T("could not import it")))
     m = re.search(r"Connection '(.+)' \(([0-9a-f-]+)\)", out)
     if m:
         c.run("nmcli", "connection", "modify", m.group(2), "connection.autoconnect", "no")
@@ -792,16 +802,16 @@ def vpn_up(name):
     """Turn a VPN on; nmcli asks here for a password or code it needs (a terminal)."""
     import subprocess
     if name not in [n for n, _ in vpns()]:
-        raise c.UsageError(f"no VPN {name} (mos-config network vpn lists them)")
+        raise c.UsageError(T("no VPN {name} (mos-config network vpn lists them)").format(name=name))
     ask = ["--ask"] if sys.stdin.isatty() else []
     if subprocess.call(["nmcli", *ask, "connection", "up", "id", name]) != 0:
-        raise c.Failed(f"VPN {name} did not connect")
+        raise c.Failed(T("VPN {name} did not connect").format(name=name))
     c.log("config", f"network: VPN {name} on")
 
 
 def vpn_down(name):
     if name not in [n for n, _ in vpns()]:
-        raise c.UsageError(f"no VPN {name} (mos-config network vpn lists them)")
+        raise c.UsageError(T("no VPN {name} (mos-config network vpn lists them)").format(name=name))
     c.run("nmcli", "connection", "down", "id", name, check=True)
     c.log("config", f"network: VPN {name} off")
 
@@ -816,25 +826,26 @@ def vpn_add():
 
 
 def show_status(st):
-    rows = [("connection", net_summary(st))]
+    rows = [(T("connection"), net_summary(st))]
     if st["device"]:
-        rows.append(("device", st["device"]))
-    rows += [("internet", INTERNET.get(st["internet"], st["internet"])), ("vpn", vpn_summary(st))]
+        rows.append((T("device"), st["device"]))
+    internet = INTERNET.get(st["internet"])
+    rows += [(T("internet"), T(internet) if internet else st["internet"]), ("vpn", vpn_summary(st))]
     if st["vpns"]:
         rows.append(("vpns", ", ".join(st["vpns"])))
-    print("network")
+    print(T("network"))
     for k, v in rows:
-        print(f"  {k:<10}  {v}")
+        print(f"  {ui.pad(k, max(10, ui.cols(k)))}  {v}")
 
 
 def cmd_network(args):
     flags = [a for a in args if a.startswith("--")]
     args = [a for a in args if not a.startswith("--")]
     if {"-h", "--help", "help"} & set(flags + args):
-        print("\n".join(l for l in __doc__.splitlines() if "mos-config network" in l))
+        print("\n".join(l for l in T(__doc__).splitlines() if "mos-config network" in l))
         return
     if not c.have("nmcli"):
-        raise c.Failed("NetworkManager (nmcli) is not installed")
+        raise c.Failed(T("NetworkManager (nmcli) is not installed"))
     what = args[0] if args else "status"
     if what == "status" and len(args) <= 1:
         st = net_status()
@@ -845,7 +856,7 @@ def cmd_network(args):
     elif what == "wifi" and len(args) == 1:
         nets = wifi_networks()
         if not nets:
-            c.info("no Wi-Fi networks in reach (or no Wi-Fi here: mos-doctor network)")
+            c.info(T("no Wi-Fi networks in reach (or no Wi-Fi here: mos-doctor network)"))
         for ssid, sig, secured, on in nets:
             print(f"{'*' if on else ' '} {sig:>3}%  {'' if secured else 'open  '}{ssid}")
     elif what == "connect" and len(args) == 2:
@@ -855,23 +866,24 @@ def cmd_network(args):
         code = subprocess.call(["nmcli", *ask, "--wait", "45", "device", "wifi", "connect", args[1]])
         c.log("config", f"network: join Wi-Fi {args[1]}" + ("" if code == 0 else " (failed)"))
         if code:
-            raise c.Failed(f"not connected to {args[1]}")
+            raise c.Failed(T("not connected to {network}").format(network=args[1]))
     elif what in ("signin", "sign-in") and len(args) == 1:
         url = portal_url()
         open_url(url)
-        c.ok(f"opened {url}: sign in there")
+        c.ok(T("opened {url}: sign in there").format(url=url))
     elif what == "vpn" and len(args) == 1:
         for name, active in vpns():
             print(f"{name}  {'on' if active else 'off'}")
-        c.info("import: " + ", ".join(IMPORTS[k] for k in vpn_kinds()))
+        c.info(T("import: {kinds}").format(kinds=", ".join(T(IMPORTS[k]) for k in vpn_kinds())))
     elif what == "vpn" and len(args) == 3 and args[1] in ("on", "up", "off", "down"):
         (vpn_up if args[1] in ("on", "up") else vpn_down)(args[2])
-        c.ok(f"VPN {args[2]} {'on' if args[1] in ('on', 'up') else 'off'}")
+        on = args[1] in ("on", "up")
+        c.ok((T("VPN {name} on") if on else T("VPN {name} off")).format(name=args[2]))
     elif what == "vpn" and len(args) == 3 and args[1] == "import":
-        c.ok(f"VPN added: {vpn_import(args[2])} (turn it on: mos-config network vpn on NAME)")
+        c.ok(T("VPN added: {name} (turn it on: mos-config network vpn on NAME)").format(name=vpn_import(args[2])))
     elif what == "vpn" and args[1:] == ["add"]:
         if vpn_add():
-            c.ok("Network Connections opened: + adds a connection, then pick the kind of VPN")
+            c.ok(T("Network Connections opened: + adds a connection, then pick the kind of VPN"))
     else:
         raise c.UsageError("mos-config network [wifi | connect NAME | signin | vpn [on|off NAME | import FILE | add]]")
 
@@ -894,10 +906,11 @@ def cmd_list(args):
             group = g
         v = values[s.key]
         v = v if len(v) <= vwidth else v[: vwidth - 1] + "…"
-        tag = "  (system)" if s.system else ""
-        print(f"  {s.key:<{width}}  {v:<{vwidth}}  {s.help}{tag}")
+        tag = "  " + T("(system)") if s.system else ""
+        print(f"  {s.key:<{width}}  {v:<{vwidth}}  {T(s.help)}{tag}")
     if not c.installed():
-        print(f"\nLive USB: settings for the installed system (SSH, updates, ...) appear once {c.NAME} is installed.")
+        print("\n" + T("Live USB: settings for the installed system (SSH, updates, ...) appear once {name} is installed.")
+              .format(name=c.NAME))
 
 
 def cmd_get(args):
@@ -914,16 +927,16 @@ def cmd_set(args):
         raise c.UsageError("mos-config set KEY VALUE")
     s = setting(args[0])
     if not s.available():
-        raise c.Failed(f"{s.key} is for the installed system")
+        raise c.Failed(T("{key} is for the installed system").format(key=s.key))
     if len(args) == 1:
         ch = s.choices
-        print(f"{s.key}: {s.help}\nnow: {show(s.get(), s)}")
+        print(f"{s.key}: {T(s.help)}\n" + T("now: {value}").format(value=show(s.get(), s)))
         if isinstance(ch, list):
-            print("choices: " + ", ".join(ch))
+            print(T("choices: {values}").format(values=", ".join(ch)))
         elif ch is onoff:
-            print("choices: on, off")
+            print(T("choices: {values}").format(values="on, off"))
         if s.example:
-            print(f"example: mos-config set {s.key} {s.example}")
+            print(T("example: {command}").format(command=f"mos-config set {s.key} {s.example}"))
         return
     value = s.parse(args[1])
     pending = change(s, value)
@@ -933,13 +946,13 @@ def cmd_set(args):
 
 
 def rebuild(now):
-    if now and c.ask("Apply it now (rebuilds the system, a few minutes)?"):
+    if now and c.ask(T("Apply it now (rebuilds the system, a few minutes)?")):
         code = os.system("mos-rebuild")
         if code:
-            raise c.Failed("the rebuild failed; your previous system is still in the boot menu")
-        c.ok("applied")
+            raise c.Failed(T("the rebuild failed; your previous system is still in the boot menu"))
+        c.ok(T("applied"))
         return
-    c.info("saved in /etc/nixos/meccanicos.toml: run mos-rebuild to apply it")
+    c.info(T("saved in /etc/nixos/meccanicos.toml: run mos-rebuild to apply it"))
 
 
 def cmd_apply(args):
@@ -950,7 +963,7 @@ def cmd_apply(args):
         try:
             apply_keyboard(layout=kb["keyboard.layout"], switch=kb["keyboard.switch"])
         except c.Failed as e:
-            c.warn(f"keyboard: {e}")
+            c.warn(T("keyboard: {error}").format(error=e))
     if not c.installed():  # installed systems keep these themselves
         for key in ("time.zone", "power.charge_limit"):
             v = stored(data, key)
@@ -974,7 +987,7 @@ def cmd_export(args):
                 data.setdefault(group, {})[name] = v
     data.setdefault("dotfiles", {}).setdefault("include", DOTFILES)
     write_toml(path, data, HEADER)
-    c.ok(f"settings: {path}")
+    c.ok(T("settings: {file}").format(file=path))
     if "--dotfiles" in flags:
         export_dotfiles(os.path.dirname(path), data["dotfiles"]["include"], "--with-secrets" in flags)
 
@@ -1002,16 +1015,16 @@ def export_dotfiles(folder, include, secrets):
     if secrets:
         if not c.have("age"):
             os.unlink(out)
-            raise c.Failed("age is not installed, so secrets cannot be encrypted")
-        c.info("A password for the archive (it holds keys and passwords):")
+            raise c.Failed(T("age is not installed, so secrets cannot be encrypted"))
+        c.info(T("A password for the archive (it holds keys and passwords):"))
         if os.system(f"age -p -o '{out}.age' '{out}'") != 0:
             os.unlink(out)
-            raise c.Failed("not encrypted")
+            raise c.Failed(T("not encrypted"))
         os.unlink(out)
         out += ".age"
-    c.ok(f"dotfiles: {out} ({len(set(picked))} files)")
+    c.ok(T("dotfiles: {file} ({count} files)").format(file=out, count=len(set(picked))))
     for rel in skipped:
-        c.info(f"left out (a key or password): ~/{rel}")
+        c.info(T("left out (a key or password): {file}").format(file="~/" + rel))
 
 
 def cmd_import(args):
@@ -1028,12 +1041,12 @@ def cmd_import(args):
         if show(s.get()) != show(v):
             changes.append((s, v))
     if not changes:
-        c.ok("nothing to change")
+        c.ok(T("nothing to change"))
     else:
-        c.title("These settings will change:")
+        c.title(T("These settings will change:"))
         for s, v in changes:
             c.info(f"{s.key}: {show(s.get())} -> {show(v)}")
-        if not c.ask("Go ahead?"):
+        if not c.ask(T("Go ahead?")):
             return
         for s, v in changes:
             try:
@@ -1055,21 +1068,21 @@ def import_dotfiles(folder):
     if os.path.exists(enc):
         tmp = tempfile.mktemp(suffix=".tar.gz")
         if os.system(f"age -d -o '{tmp}' '{enc}'") != 0:
-            raise c.Failed("could not decrypt the dotfiles")
+            raise c.Failed(T("could not decrypt the dotfiles"))
         plain = tmp
     if not os.path.exists(plain):
-        raise c.Failed(f"no dotfiles.tar.gz next to the settings in {folder}")
+        raise c.Failed(T("no dotfiles.tar.gz next to the settings in {folder}").format(folder=folder))
     with tarfile.open(plain) as tar:
         members = [m for m in tar.getmembers() if m.isfile() and not m.name.startswith(("/", ".."))]
         clash = [m.name for m in members if os.path.exists(os.path.join(c.HOME, m.name))]
-        c.info(f"{len(members)} files; {len(clash)} replace yours (kept as NAME.bak)")
-        if c.ask("Restore them?"):
+        c.info(T("{count} files; {replaced} replace yours (kept as NAME.bak)").format(count=len(members), replaced=len(clash)))
+        if c.ask(T("Restore them?")):
             for m in members:
                 dst = os.path.join(c.HOME, m.name)
                 if os.path.exists(dst):
                     shutil.copy2(dst, dst + ".bak")
                 tar.extract(m, c.HOME, filter="data") if hasattr(tarfile, "data_filter") else tar.extract(m, c.HOME)
-            c.ok("dotfiles restored")
+            c.ok(T("dotfiles restored"))
     if tmp:
         os.unlink(tmp)
 
@@ -1080,13 +1093,13 @@ COMMANDS = {"list": cmd_list, "get": cmd_get, "set": cmd_set, "export": cmd_expo
 
 def main(argv):
     if argv and argv[0] in ("-h", "--help", "help"):
-        print(__doc__.strip())
+        print(T(__doc__).strip())
         return 0
     if not argv and sys.stdin.isatty() and sys.stdout.isatty():
         import config_tui
         return config_tui.main()
     cmd = argv[0] if argv else "list"
     if cmd not in COMMANDS:
-        raise c.UsageError(f"unknown command {cmd} (mos-config --help)")
+        raise c.UsageError(T("unknown command {command} (mos-config --help)").format(command=cmd))
     COMMANDS[cmd](argv[1:])
     return 0

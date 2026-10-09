@@ -24,18 +24,29 @@ import config as cfg
 # The look shared by MeccanicOS TUIs: MECCANICOS_PYLIB from the Nix wrapper, else scripts/lib.
 sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 import mos_tui as ui  # noqa: E402
+from mos_i18n import translator, N_  # noqa: E402
+
+T = translator("mos-config")
 
 MINUTES = ["never", "5", "10", "15", "20", "30", "45", "60", "90", "120"]
 PERCENT = ["off", "60", "70", "75", "80", "85", "90", "95"]
 OTHER = "other…"
 ENTER, ESC = ui.ENTER, ui.ESC
-KEYS = [("↑↓", "move"), ("Enter", "change"), ("e", "export"), ("i", "import"), ("d", "doctor"), ("r", "refresh"),
-        ("q", "quit")]
-NMTUI = "Other network (hidden, more options)…"
+KEYS = [("↑↓", T("move")), ("Enter", T("change")), ("e", T("export")), ("i", T("import")), ("d", T("doctor")),
+        ("r", T("refresh")), ("q", T("quit"))]
+NMTUI = T("Other network (hidden, more options)…")
+# The headings: the first part of the settings' names (display.scale -> Display).
+GROUPS = {"network": N_("Network"), "display": N_("Display"), "keyboard": N_("Keyboard"),
+          "touchpad": N_("Touchpad"), "power": N_("Power"), "sound": N_("Sound"), "clock": N_("Clock"),
+          "time": N_("Time"), "updates": N_("Updates"), "security": N_("Security"), "graphics": N_("Graphics")}
+# cfg.INTERNET without its explanation in brackets: the value of network.internet.
+INTERNET = {"full": N_("yes"), "portal": N_("sign in needed"), "limited": N_("no"), "none": N_("no"),
+            "unknown": N_("not checked")}
 
 
 class NetRow:
-    """A Network line: shown like a setting, but Enter runs act (nothing is saved)."""
+    """A Network line: shown like a setting, but Enter runs act (nothing is saved).
+    Its help is already translated (a setting's is translated where it is shown)."""
     system = rebuild = False
     choices = example = None
 
@@ -102,13 +113,19 @@ class App:
 
     def net_rows(self):
         return [
-            NetRow("network.connection", lambda: f"now: {cfg.net_summary(self.net)}; Enter: join a Wi-Fi network",
+            NetRow("network.connection",
+                   lambda: T("now: {status}; Enter: join a Wi-Fi network").format(status=cfg.net_summary(self.net)),
                    lambda: cfg.net_summary(self.net), self.wifi),
-            NetRow("network.internet", "Enter: open the sign-in page of a hotel, café or airport network",
-                   lambda: cfg.INTERNET.get(self.net["internet"], self.net["internet"]).split(" (")[0], self.signin),
-            NetRow("network.vpn", "Enter: turn a VPN on or off, add or import one",
+            NetRow("network.internet", T("Enter: open the sign-in page of a hotel, café or airport network"),
+                   self.internet, self.signin),
+            NetRow("network.vpn", T("Enter: turn a VPN on or off, add or import one"),
                    lambda: cfg.vpn_summary(self.net), self.vpn),
         ]
+
+    def internet(self):
+        """Is there internet: cfg.INTERNET's short form (the Enter help says the rest)."""
+        st = self.net["internet"]
+        return T(INTERNET[st]) if st in INTERNET else st
 
     # ---- drawing -------------------------------------------------------------------
     def put(self, y, x, text, attr=0):
@@ -119,11 +136,11 @@ class App:
         scr.erase()
         h, w = scr.getmaxyx()
         if h < 12 or w < 50:
-            self.put(0, 0, "Make the window larger.")
+            self.put(0, 0, T("Make the window larger."))
             scr.refresh()
             return
-        where = "live USB" if not c.installed() else ""
-        ui.bar(scr, 0, f"{c.NAME} settings", where)
+        where = T("live USB") if not c.installed() else ""
+        ui.bar(scr, 0, T("{name} settings").format(name=c.NAME), where)
         body = h - 6  # lines 2 .. h-5
         at = self.lines.index(("row", self.sel))
         if at < self.top:
@@ -131,32 +148,34 @@ class App:
         if at >= self.top + body:
             self.top = at - body + 1
         kw = max(len(s.key) for s in self.rows)
-        vw = min(26, max(len(v) for v in self.values.values()))
+        vw = min(26, max(ui.cols(v) for v in self.values.values()))
         for y, (kind, item) in enumerate(self.lines[self.top: self.top + body], start=2):
             if kind == "group":
-                self.put(y, 1, item.capitalize(), ui.attr(ui.HEADING))
+                self.put(y, 1, T(GROUPS[item]) if item in GROUPS else item.capitalize(), ui.attr(ui.HEADING))
             elif kind == "row":
                 s = self.rows[item]
                 v = self.values[s.key]
-                v = v if len(v) <= vw else v[: vw - 1] + "…"
+                v = v if ui.cols(v) <= vw else ui.fit(v, vw - 1) + "…"
                 mark = "*" if s.key in self.pending else " "
-                line = f"  {s.key:<{kw}}  {v:<{vw}}{mark}"
+                line = f"  {s.key:<{kw}}  {ui.pad(v, vw)}{mark}"
                 ui.row(scr, y, 1, w - 3, line, item == self.sel)
                 if mark != " " and item != self.sel:
-                    self.put(y, 1 + len(line) - 1, mark, ui.attr(ui.KEY))
+                    self.put(y, 1 + ui.cols(line) - 1, mark, ui.attr(ui.KEY))
         if self.top + body < len(self.lines):
             self.put(h - 5, w - 4, "↓", ui.attr(ui.DIM))
         s = self.rows[self.sel]
         tags = []
         if s.system:
-            tags.append("whole computer")
+            tags.append(T("whole computer"))
         if s.rebuild and c.installed():
-            tags.append("applied by a rebuild, when you leave")
+            tags.append(T("applied by a rebuild, when you leave"))
         self.put(h - 4, 1, "─" * (w - 3), ui.attr(ui.BORDER))
-        self.put(h - 3, 2, s.help[0].upper() + s.help[1:] + (f"  ({'; '.join(tags)})" if tags else ""), ui.attr(ui.DIM))
+        text = s.help if isinstance(s, NetRow) else T(s.help)
+        self.put(h - 3, 2, text[:1].upper() + text[1:] + (f"  ({'; '.join(tags)})" if tags else ""), ui.attr(ui.DIM))
         msg = self.msg
         if not msg and not c.installed():
-            msg = f"Settings for the installed system (SSH, updates, ...) appear once {c.NAME} is installed."
+            msg = T("Settings for the installed system (SSH, updates, ...) appear once {name} is installed.").format(
+                name=c.NAME)
         if self.msg:
             ui.message(scr, h - 2, 2, msg)
         else:
@@ -169,7 +188,7 @@ class App:
         """A list in a box; returns the chosen option or None (Esc)."""
         h, w = self.scr.getmaxyx()
         ph = min(len(opts) + 2, h - 2)
-        pw = min(max(len(o) for o in opts + [label]) + 8, w - 2)
+        pw = min(max(ui.cols(o) for o in opts + [label]) + 8, w - 2)
         win = curses.newwin(ph, pw, (h - ph) // 2, (w - pw) // 2)
         win.keypad(True)
         i = opts.index(current) if current in opts else 0
@@ -233,7 +252,7 @@ class App:
             result = None
         if pause is True or (pause == "failed" and result is None):
             try:
-                input("\nPress Enter to go back to the settings.")
+                input("\n" + T("Press Enter to go back to the settings."))
             except (EOFError, KeyboardInterrupt):
                 pass
         c.NO_PROMPT = True
@@ -252,7 +271,7 @@ class App:
             # sudo wants a password: ask for it on the terminal.
             pending = self.outside(f"{s.key} = {cfg.show(value, s)}", lambda: cfg.change(s, value), pause=False)
             if pending is None:
-                self.msg = f"✗ {s.key}: not changed"
+                self.msg = "✗ " + T("{setting}: not changed").format(setting=s.key)
                 return
         except (c.UsageError, OSError, ValueError, KeyError) as e:
             self.msg = f"✗ {s.key}: {e}"
@@ -262,7 +281,7 @@ class App:
         self.load()
         extra = plain(buf.getvalue())
         self.msg = f"✓ {s.key} = {self.values[s.key]}" + (f"  ({extra})" if extra else "") + \
-                   ("  — applied when you leave" if pending else "")
+                   ("  — " + T("applied when you leave") if pending else "")
 
     def edit(self):
         s = self.rows[self.sel]
@@ -283,7 +302,7 @@ class App:
             if opts and text is None:
                 return
             if text is None or text == OTHER:
-                hint = f" (e.g. {s.example})" if s.example else ""
+                hint = " " + T("(e.g. {example})").format(example=s.example) if s.example else ""
                 text = self.prompt(f"{s.key}{hint}", "" if cur == "-" or text == OTHER else cur)
                 if text is None:
                     return
@@ -304,118 +323,122 @@ class App:
 
     def wifi(self):
         if not any(r[1] == "wifi" for r in cfg.nm_rows("DEVICE,TYPE", "device")):
-            self.msg = "✗ no Wi-Fi here (a cable works; mos-doctor network checks why)"
+            self.msg = "✗ " + T("no Wi-Fi here (a cable works; mos-doctor network checks why)")
             return
-        self.flash("Looking for Wi-Fi networks…")
+        self.flash(T("Looking for Wi-Fi networks…"))
         nets = cfg.wifi_networks()
-        width = max([len(n[0]) for n in nets] + [10])
-        label = {f"{ssid:<{width}}  {sig:>3}%{'' if secured else '  open'}": (ssid, secured, on)
+        width = max([ui.cols(n[0]) for n in nets] + [10])
+        label = {f"{ui.pad(ssid, width)}  {sig:>3}%{'' if secured else '  ' + T('open')}": (ssid, secured, on)
                  for ssid, sig, secured, on in nets}
         current = next((k for k, v in label.items() if v[2]), None)
         opts = list(label) + [NMTUI]
+        disconnect = None
         if self.net and self.net["type"] == "wifi":
-            opts.append(f"Disconnect from {self.net['connection']}")
+            disconnect = T("Disconnect from {network}").format(network=self.net["connection"])
+            opts.append(disconnect)
         self.flash("")
-        pick = self.pick("Wi-Fi networks", opts, current)
+        pick = self.pick(T("Wi-Fi networks"), opts, current)
         if pick is None:
             return
         if pick == NMTUI:
-            self.outside("Network (nmtui)", lambda: os.system("nmtui connect"), pause=False)
+            self.outside(T("Network (nmtui)"), lambda: os.system("nmtui connect"), pause=False)
             return
-        if pick.startswith("Disconnect from "):
+        if pick == disconnect:
             c.run("nmcli", "device", "disconnect", self.net["device"], check=True)
-            self.msg = f"✓ disconnected from {self.net['connection']}"
+            self.msg = "✓ " + T("disconnected from {network}").format(network=self.net["connection"])
             return
         ssid, secured, on = label[pick]
         if on:
-            self.msg = f"✓ already connected to {ssid}"
+            self.msg = "✓ " + T("already connected to {network}").format(network=ssid)
             return
         password = None
         if secured and not cfg.wifi_profile(ssid):
-            password = self.prompt(f"Password for {ssid}", secret=True)
+            password = self.prompt(T("Password for {network}").format(network=ssid), secret=True)
             if not password:
                 return
-        self.flash(f"Connecting to {ssid}…")
+        self.flash(T("Connecting to {network}…").format(network=ssid))
         try:
             cfg.wifi_connect(ssid, password)
         except c.Failed:
             if password or not secured:
                 raise
             # Remembered, but its password changed: ask for the new one.
-            password = self.prompt(f"Password for {ssid}", secret=True)
+            password = self.prompt(T("Password for {network}").format(network=ssid), secret=True)
             if not password:
                 return
-            self.flash(f"Connecting to {ssid}…")
+            self.flash(T("Connecting to {network}…").format(network=ssid))
             cfg.wifi_connect(ssid, password)
-        self.msg = f"✓ connected to {ssid}"
+        self.msg = "✓ " + T("connected to {network}").format(network=ssid)
 
     def signin(self):
-        self.flash("Looking for the sign-in page…")
+        self.flash(T("Looking for the sign-in page…"))
         url = cfg.portal_url()
         cfg.open_url(url)
-        self.msg = f"✓ opened {url} in the browser: sign in there, then r to refresh"
+        self.msg = "✓ " + T("opened {url} in the browser: sign in there, then r to refresh").format(url=url)
 
     def vpn(self):
         have = cfg.vpns()
-        label = {f"{name}  ({'on' if on else 'off'})": (name, on) for name, on in have}
-        add = "Add a VPN (Network Connections)…"
-        imports = {f"Import {cfg.IMPORTS[k]}…": k for k in cfg.vpn_kinds()}
+        label = {(T("{vpn}  (on)") if on else T("{vpn}  (off)")).format(vpn=name): (name, on) for name, on in have}
+        add = T("Add a VPN (Network Connections)…")
+        imports = {T("Import {kind}…").format(kind=T(cfg.IMPORTS[k])): k for k in cfg.vpn_kinds()}
         pick = self.pick("VPN", list(label) + [add] + list(imports))
         if pick is None:
             return
         if pick in label:
             name, on = label[pick]
             if on:
-                self.flash(f"Disconnecting {name}…")
+                self.flash(T("Disconnecting {vpn}…").format(vpn=name))
                 cfg.vpn_down(name)
-                self.msg = f"✓ VPN {name} off"
+                self.msg = "✓ " + T("VPN {vpn} off").format(vpn=name)
             elif self.outside(f"VPN {name}", lambda: cfg.vpn_up(name) or True, pause="failed"):
-                self.msg = f"✓ VPN {name} on"
+                self.msg = "✓ " + T("VPN {vpn} on").format(vpn=name)
             else:
-                self.msg = f"✗ VPN {name} did not connect"
+                self.msg = "✗ " + T("VPN {vpn} did not connect").format(vpn=name)
         elif pick == add:
             if os.environ.get("DISPLAY") and c.have("nm-connection-editor"):
                 cfg.vpn_add()
-                self.msg = "✓ Network Connections opened: + adds one (then r to refresh)"
+                self.msg = "✓ " + T("Network Connections opened: + adds one (then r to refresh)")
             else:
-                self.outside("Add a VPN (nmtui)", cfg.vpn_add, pause=False)
+                self.outside(T("Add a VPN (nmtui)"), cfg.vpn_add, pause=False)
         else:
-            path = self.prompt("VPN file", "~/Downloads/")
+            path = self.prompt(T("VPN file"), "~/Downloads/")
             if not path:
                 return
-            self.msg = f"✓ VPN added: {cfg.vpn_import(path)} (Enter to turn it on)"
+            self.msg = "✓ " + T("VPN added: {vpn} (Enter to turn it on)").format(vpn=cfg.vpn_import(path))
 
     def export(self):
-        path = self.prompt("Export to", "~/mos-settings.toml")
+        path = self.prompt(T("Export to"), "~/mos-settings.toml")
         if not path:
             return
-        what = self.pick("Export", ["settings", "settings and dotfiles",
-                                    "settings, dotfiles and secrets (encrypted)"], "settings")
+        kinds = [T("settings"), T("settings and dotfiles"), T("settings, dotfiles and secrets (encrypted)")]
+        what = self.pick(T("Export"), kinds, kinds[0])
         if what is None:
             return
-        args = [os.path.expanduser(path)] + (["--dotfiles"] if "dotfiles" in what else []) + \
-               (["--with-secrets"] if "secrets" in what else [])
-        self.outside("Export", lambda: cfg.cmd_export(args))
+        n = kinds.index(what)  # 0 settings, 1 + dotfiles, 2 + secrets
+        args = [os.path.expanduser(path)] + (["--dotfiles"] if n >= 1 else []) + \
+               (["--with-secrets"] if n == 2 else [])
+        self.outside(T("Export"), lambda: cfg.cmd_export(args))
 
     def import_(self):
-        path = self.prompt("Import from", "~/mos-settings.toml")
+        path = self.prompt(T("Import from"), "~/mos-settings.toml")
         if not path:
             return
         path = os.path.expanduser(path)
         if not os.path.exists(path):
-            self.msg = f"✗ no such file: {path}"
+            self.msg = "✗ " + T("no such file: {file}").format(file=path)
             return
         args = [path]
         folder = os.path.dirname(os.path.abspath(path))
         if any(os.path.exists(os.path.join(folder, f)) for f in ("dotfiles.tar.gz", "dotfiles.tar.gz.age")):
-            if self.pick("Its dotfiles too?", ["yes", "no"], "no") == "yes":
+            yes, no = T("yes"), T("no")
+            if self.pick(T("Its dotfiles too?"), [yes, no], no) == yes:
                 args.append("--dotfiles")
-        self.outside("Import", lambda: cfg.cmd_import(args))
+        self.outside(T("Import"), lambda: cfg.cmd_import(args))
         self.load()
 
     def doctor(self):
         import doctor
-        self.outside("Configuration Doctor", lambda: doctor.main([]))
+        self.outside(T("Configuration Doctor"), lambda: doctor.main([]))
         self.load()
 
     def leave(self):
@@ -423,16 +446,18 @@ class App:
         if not self.pending:
             return True
         n = len(self.pending)
-        ans = self.pick(f"{n} change{'s need' if n > 1 else ' needs'} a rebuild",
-                        ["Rebuild now (a few minutes)", "Later (run mos-rebuild)", "Back to the settings"])
-        if ans is None or ans.startswith("Back"):
+        now, later, back = (T("Rebuild now (a few minutes)"), T("Later (run mos-rebuild)"),
+                            T("Back to the settings"))
+        ans = self.pick(T("{count} changes need a rebuild").format(count=n) if n > 1 else
+                        T("1 change needs a rebuild"), [now, later, back])
+        if ans is None or ans == back:
             return False
-        if ans.startswith("Rebuild"):
+        if ans == now:
             def go():
                 if os.system("mos-rebuild") != 0:
-                    raise c.Failed("the rebuild failed; your previous system is still in the boot menu")
-                c.ok("applied")
-            self.outside("Rebuilding", go)
+                    raise c.Failed(T("the rebuild failed; your previous system is still in the boot menu"))
+                c.ok(T("applied"))
+            self.outside(T("Rebuilding"), go)
         return True
 
     def run(self):
@@ -463,7 +488,7 @@ class App:
                 self.doctor()
             elif k == "r":
                 self.load()
-                self.msg = "refreshed"
+                self.msg = T("refreshed")
             elif k in ("q", ESC):
                 if self.leave():
                     return

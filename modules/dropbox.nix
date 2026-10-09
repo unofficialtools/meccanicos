@@ -4,6 +4,7 @@
 { pkgs, ... }:
 let
   inherit (import ./not-root.nix) notRoot;
+  tSh = import ./i18n-sh.nix pkgs;
   mos-dropbox = pkgs.writeShellApplication {
     name = "mos-dropbox";
     runtimeInputs = with pkgs; [
@@ -15,7 +16,7 @@ let
       systemd # journalctl
       # fusermount3 is the setuid wrapper in /run/wrappers/bin (already on PATH)
     ];
-    text = notRoot "mos-dropbox" + builtins.readFile ../scripts/mos-dropbox.sh;
+    text = tSh "mos-dropbox" + notRoot "mos-dropbox" + builtins.readFile ../scripts/mos-dropbox.sh;
   };
 in
 {

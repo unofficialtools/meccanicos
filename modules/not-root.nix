@@ -7,9 +7,10 @@
 #   notRoot' "mos-logins" [ "root" "watch" ]   (these first arguments may run as root)
 let
   check = name: ''
+    declare -F T >/dev/null || T() { printf '%s' "$1"; }
     if [ "$(id -u)" = 0 ] && [ -n "''${SUDO_USER:-}" ] && [ "''${SUDO_USER}" != root ]; then
-      echo "${name}: run it as yourself, without sudo: it asks for root itself when it needs to." >&2
-      echo "  (with sudo it would use root's settings and files, not yours)" >&2
+      echo "${name}: $(T 'run it as yourself, without sudo: it asks for root itself when it needs to.')" >&2
+      echo "  $(T "(with sudo it would use root's settings and files, not yours)")" >&2
       exit 1
     fi
   '';

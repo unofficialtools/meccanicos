@@ -10,10 +10,14 @@
 # text become a PDF with page numbers (typst).
 
 set -uo pipefail
+# Translations (scripts/lib/mos_i18n.sh); without them, English.
+# shellcheck source=/dev/null disable=SC2059
+declare -F T >/dev/null || . "${MOS_I18N_SH:-$(dirname "$0")/lib/mos_i18n.sh}" 2>/dev/null ||
+  { T() { printf '%s' "$1"; } && Tf() { local f=$1 && shift && printf -- "$f" "$@"; }; }
 
 usage() {
-    cat <<'EOF'
-Usage: print [options] FILE...
+    local help
+    help=$(T 'Usage: print [options] FILE...
 
   (no option)   choose a printer or "Save as PDF" from a menu, then print
   -d PRINTER    print on PRINTER without the menu
@@ -24,8 +28,8 @@ Usage: print [options] FILE...
 
 Printers are found on the network by themselves; add others in Print
 Settings (command bar: "Print Settings"). `lpstat -o` shows the queue,
-`cancel -a` empties it.
-EOF
+`cancel -a` empties it.')
+    printf '%s\n' "$help"
 }
 
 die() {
@@ -77,7 +81,7 @@ to_pdf() {
         local from
         case ${f,,} in
         *.docx) from=docx ;; *.odt) from=odt ;; *.rtf) from=rtf ;; *.csv) from=csv ;; *.tsv) from=tsv ;;
-        *) die "$f: open it in OnlyOffice and print from there (Ctrl+P)" ;;
+        *) die "$(Tf '%s: open it in OnlyOffice and print from there (Ctrl+P)' "$f")" ;;
         esac
         (cd "$(dirname -- "$f")" && pandoc -f "$from" "$f" -o "$out" --pdf-engine=typst \
             -V mainfont="Libertinus Serif" -V codefont="DejaVu Sans Mono") >/dev/null 2>&1
@@ -106,9 +110,9 @@ EOF
         *) ps2pdf "$f" "$out" >/dev/null 2>&1 ;;
         esac
         ;;
-    *) die "$f: don't know how to make a PDF of this ($(mime_of "$f"))" ;;
+    *) die "$(Tf "%s: don't know how to make a PDF of this (%s)" "$f" "$(mime_of "$f")")" ;;
     esac
-    [[ -s $out ]] || die "$f: could not convert it to PDF"
+    [[ -s $out ]] || die "$(Tf '%s: could not convert it to PDF' "$f")"
 }
 
 # NAME.pdf next to FILE, or NAME-2.pdf, NAME-3.pdf, ... if taken.
@@ -126,9 +130,9 @@ pdf_name() {
 
 save_pdf() {
     local f=$1 out
-    is_pdf "$f" && { echo "$f is already a PDF"; return 0; }
+    is_pdf "$f" && { Tf '%s is already a PDF\n' "$f"; return 0; }
     out=$(pdf_name "$f")
-    to_pdf "$f" "$out" && echo "Saved $out"
+    to_pdf "$f" "$out" && Tf 'Saved %s\n' "$out"
 }
 
 print_on() {
@@ -136,7 +140,7 @@ print_on() {
     kind=$(kind_of "$f")
     case $kind in
     pdf | direct | text) ;;
-    other) die "$f: can't print this kind of file ($(mime_of "$f"))" ;;
+    other) die "$(Tf "%s: can't print this kind of file (%s)" "$f" "$(mime_of "$f")")" ;;
     *)
         send="$TMP/$(basename -- "$f").pdf"
         to_pdf "$f" "$send" || return 1
@@ -154,13 +158,13 @@ printers() {
         [[ -n $p ]] || continue
         state=$(lpstat -p "$p" 2>/dev/null | head -n1)
         case $state in
-        *disabled*) state="  (paused)" ;;
+        *disabled*) state="  $(T '(paused)')" ;;
         *) state="" ;;
         esac
         if [[ $p == "$def" ]]; then
-            printf '0\t%s\tPrinter: %s  (default)%s\n' "$p" "$p" "$state"
+            printf '0\t%s\t%s%s\n' "$p" "$(Tf 'Printer: %s  (default)' "$p")" "$state"
         else
-            printf '1\t%s\tPrinter: %s%s\n' "$p" "$p" "$state"
+            printf '1\t%s\t%s%s\n' "$p" "$(Tf 'Printer: %s' "$p")" "$state"
         fi
     done < <(lpstat -e 2>/dev/null) | sort -s -k1,1n | cut -f2-
 }
@@ -169,11 +173,11 @@ menu() {
     local all_pdf=$1 entries choice
     entries=$(
         printers
-        ((all_pdf)) || printf '%s\t%s\n' "@pdf" "Save as PDF (next to the file)"
-        printf '%s\t%s\n' "@setup" "Add a printer… (Printers)"
+        ((all_pdf)) || printf '%s\t%s\n' "@pdf" "$(T 'Save as PDF (next to the file)')"
+        printf '%s\t%s\n' "@setup" "$(T 'Add a printer… (Printers)')"
     )
     choice=$(printf '%s\n' "$entries" | fzf --height=~12 --layout=reverse --border \
-        --with-nth=2 --delimiter='\t' --no-sort --prompt="Print $label to ❯ ") || exit 130
+        --with-nth=2 --delimiter='\t' --no-sort --prompt="$(Tf 'Print %s to ❯ ' "$label")") || exit 130
     printf '%s' "${choice%%$'\t'*}"
 }
 
@@ -181,40 +185,40 @@ dest="" copies=1
 while (($#)); do
     case $1 in
     -d)
-        [[ $# -ge 2 ]] || usage_error "-d needs a printer"
+        [[ $# -ge 2 ]] || usage_error "$(T '-d needs a printer')"
         dest=$2
         shift 2
         ;;
     --pdf) dest=@pdf; shift ;;
     -n)
-        [[ $# -ge 2 && $2 =~ ^[1-9][0-9]*$ ]] || usage_error "-n needs a number of copies"
+        [[ $# -ge 2 && $2 =~ ^[1-9][0-9]*$ ]] || usage_error "$(T '-n needs a number of copies')"
         copies=$2
         shift 2
         ;;
     -l | --list)
         out=$(printers | cut -f2)
-        if [[ -n $out ]]; then echo "$out"; else echo "No printers (add one in Print Settings)."; fi
+        if [[ -n $out ]]; then echo "$out"; else echo "$(T 'No printers (add one in Print Settings).')"; fi
         exit 0
         ;;
     -h | --help) usage; exit 0 ;;
     --) shift; break ;;
-    -*) usage_error "unknown option $1" ;;
+    -*) usage_error "$(Tf 'unknown option %s' "$1")" ;;
     *) break ;;
     esac
 done
-(($#)) || usage_error "missing FILE"
+(($#)) || usage_error "$(T 'missing FILE')"
 
 files=() all_pdf=1
 for f in "$@"; do
-    [[ -f $f ]] || die "$f: no such file"
+    [[ -f $f ]] || die "$(Tf '%s: no such file' "$f")"
     f=$(realpath -- "$f")
     files+=("$f")
     is_pdf "$f" || all_pdf=0
 done
-if ((${#files[@]} == 1)); then label=$(basename -- "${files[0]}"); else label="${#files[@]} files"; fi
+if ((${#files[@]} == 1)); then label=$(basename -- "${files[0]}"); else label=$(Tf '%s files' "${#files[@]}"); fi
 
 if [[ -z $dest ]]; then
-    [[ -t 0 && -t 1 ]] || die "no terminal for the menu (use -d PRINTER or --pdf)"
+    [[ -t 0 && -t 1 ]] || die "$(T 'no terminal for the menu (use -d PRINTER or --pdf)')"
     dest=$(menu "$all_pdf") || exit
     # "Add a printer…": the Printers screen, here, then the menu again.
     while [[ $dest == @setup ]]; do

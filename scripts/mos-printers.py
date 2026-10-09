@@ -28,6 +28,9 @@ import sys
 # The look shared by MeccanicOS TUIs: MECCANICOS_PYLIB from the Nix wrapper, else next to this file.
 sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 import mos_tui as ui  # noqa: E402
+from mos_i18n import translator, N_  # noqa: E402
+
+T = translator("mos-printers")
 
 ENV = dict(os.environ, LC_ALL="C")  # lpstat's words, to read them
 TESTPAGE = os.environ.get("MECCANICOS_TESTPAGE", "/run/current-system/sw/share/cups/data/testprint")
@@ -49,7 +52,7 @@ def run(cmd, admin=False, timeout=30):
         raise Failed(f"{cmd[0]}: {e}")
     if p.returncode != 0:
         lines = [l for l in (p.stderr or p.stdout).splitlines() if l.strip()]
-        raise Failed(re.sub(r"^\w+: ", "", lines[-1]) if lines else f"{cmd[0]} failed")
+        raise Failed(re.sub(r"^\w+: ", "", lines[-1]) if lines else T("{command} failed").format(command=cmd[0]))
     return p.stdout
 
 
@@ -130,7 +133,7 @@ def discover():
         scheme = d["uri"].split(":", 1)[0]
         if "://" not in d["uri"] or d["uri"].endswith("://") or scheme not in rank:
             continue
-        d["kind"] = "USB" if scheme == "usb" else "network"
+        d["kind"] = "USB" if scheme == "usb" else N_("network")
         key = (d["model"] or d["info"]).lower() or d["uri"]
         if key not in best or rank[scheme] < rank[best[key]["uri"].split(":", 1)[0]]:
             best[key] = d
@@ -212,7 +215,7 @@ def human(n):
 
 
 # ---- full screen ---------------------------------------------------------------------
-STATE = {"idle": "ready", "printing": "printing", "stopped": "stopped"}
+STATE = {"idle": N_("ready"), "printing": N_("printing"), "stopped": N_("stopped")}
 
 
 class App:
@@ -246,19 +249,19 @@ class App:
     def buttons(self):
         p = self.printer()
         if self.view == "queue":
-            return [("Cancel job", "c", self.cancel_one), ("Cancel all", "a", self.cancel_every),
-                    ("Back", "b", self.back), ("Quit", "q", None)]
+            return [(T("Cancel job"), "c", self.cancel_one), (T("Cancel all"), "a", self.cancel_every),
+                    (T("Back"), "b", self.back), (T("Quit"), "q", None)]
         if self.view == "found":
-            return [("Add", "a", self.add_found), ("Search again", "s", self.find),
-                    ("Back", "b", self.back), ("Quit", "q", None)]
-        btns = [("Add printers", "a", self.find)]
+            return [(T("Add"), "a", self.add_found), (T("Search again"), "s", self.find),
+                    (T("Back"), "b", self.back), (T("Quit"), "q", None)]
+        btns = [(T("Add printers"), "a", self.find)]
         if p:
-            btns += [("Make default", "d", self.make_default), ("Queue", "u", self.show_queue),
-                     ("Test page", "t", self.test)]
+            btns += [(T("Make default"), "d", self.make_default), (T("Queue"), "u", self.show_queue),
+                     (T("Test page"), "t", self.test)]
             if p["state"] == "stopped":
-                btns.append(("Resume", "e", self.resume))
-            btns.append(("Remove", "x", self.remove))
-        return btns + [("Quit", "q", None)]
+                btns.append((T("Resume"), "e", self.resume))
+            btns.append((T("Remove"), "x", self.remove))
+        return btns + [(T("Quit"), "q", None)]
 
     def say(self, msg, err=False):
         self.msg, self.err = msg, err
@@ -269,24 +272,25 @@ class App:
         s.erase()
         h, w = s.getmaxyx()
         if h < 12 or w < 60:
-            ui.put(s, 0, 0, "Make the window larger.")
+            ui.put(s, 0, 0, T("Make the window larger."))
             s.refresh()
             return
         p = self.printer()
-        title = {"printers": "Printers", "queue": f"Printers › {p['name'] if p else ''} › waiting to print",
-                 "found": "Printers › add a printer"}[self.view]
+        title = {"printers": T("Printers"),
+                 "queue": T("Printers › {printer} › waiting to print").format(printer=p["name"] if p else ""),
+                 "found": T("Printers › add a printer")}[self.view]
         ui.bar(s, 0, title)
         rows = self.rows()
         y = 2
         if self.view == "printers":
-            head = f"  {'':2}{'Printer':<26}{'State':<11}{'Jobs':<6}Where"
-            empty = "No printers yet. Press a to look for printers on the network and on USB."
+            head = f"  {'':2}{ui.pad(T('Printer'), 26)}{ui.pad(T('State'), 11)}{ui.pad(T('Jobs'), 6)}{T('Where')}"
+            empty = T("No printers yet. Press a to look for printers on the network and on USB.")
         elif self.view == "queue":
-            head = f"  {'Job':<22}{'From':<12}{'Size':<10}Sent"
-            empty = "Nothing is waiting to print."
+            head = f"  {ui.pad(T('Job'), 22)}{ui.pad(T('From'), 12)}{ui.pad(T('Size'), 10)}{T('Sent')}"
+            empty = T("Nothing is waiting to print.")
         else:
-            head = f"  {'Printer':<40}{'How':<10}Address"
-            empty = "No new printers found. Is it on, and on the same network (or plugged in)?"
+            head = f"  {ui.pad(T('Printer'), 40)}{ui.pad(T('How'), 10)}{T('Address')}"
+            empty = T("No new printers found. Is it on, and on the same network (or plugged in)?")
         ui.put(s, y, 0, head, ui.attr(ui.HEADING))
         ui.put(s, y + 1, 0, "─" * w, ui.attr(ui.BORDER))
         y += 2
@@ -298,13 +302,13 @@ class App:
         for i, r in enumerate(rows[top: top + list_h]):
             n = top + i
             if self.view == "printers":
-                state = STATE.get(r["state"], r["state"])
+                state = T(STATE[r["state"]]) if r["state"] in STATE else r["state"]
                 where = r["location"] or r["info"] or r["uri"]
-                line = f"  {'★' if r['default'] else ' '} {r['name'][:25]:<26}{state:<11}{self.counts.get(r['name'], 0):<6}{where}"
+                line = f"  {'★' if r['default'] else ' '} {r['name'][:25]:<26}{ui.pad(state, 11)}{self.counts.get(r['name'], 0):<6}{where}"
             elif self.view == "queue":
                 line = f"  {r['id'][:21]:<22}{r['user'][:11]:<12}{human(r['size']):<10}{r['when']}"
             else:
-                line = f"  {(r['model'] or r['info'])[:39]:<40}{r['kind']:<10}{r['uri']}"
+                line = f"  {(r['model'] or r['info'])[:39]:<40}{ui.pad(T(r['kind']), 10)}{r['uri']}"
             if n == cur:
                 ui.row(s, y + i, 0, w, line, True)
             else:
@@ -312,13 +316,15 @@ class App:
         # About the chosen printer
         info = ""
         if self.view == "printers" and p:
-            info = p["info"] + (f" — stopped: {p['reason']}" if p["state"] == "stopped" and p["reason"] else "")
-            info += "   ★ the default printer" if p["default"] else ""
+            info = p["info"] + (T(" — stopped: {reason}").format(reason=p["reason"])
+                                if p["state"] == "stopped" and p["reason"] else "")
+            info += T("   ★ the default printer") if p["default"] else ""
         ui.put(s, h - 5, 0, "─" * w, ui.attr(ui.BORDER))
         ui.put(s, h - 4, 2, info, ui.attr(ui.DIM))
         ui.buttons(s, h - 3, 1, [(l, k) for l, k, _ in self.buttons()], self.focus)
         ui.message(s, h - 2, 1, ("✗ " if self.err and not self.msg.startswith("✗") else "") + self.msg)
-        ui.keybar(s, h - 1, [("↑↓", "move"), ("←→", "button"), ("Enter", "press"), ("r", "reload"), ("q", "quit")])
+        ui.keybar(s, h - 1, [("↑↓", T("move")), ("←→", T("button")), ("Enter", T("press")), ("r", T("reload")),
+                             ("q", T("quit"))])
         s.refresh()
 
     def busy(self, msg):
@@ -342,7 +348,7 @@ class App:
 
     def make_default(self):
         p = self.printer()
-        self.act(set_default, p["name"], ok=f"{p['name']} is the default printer.")
+        self.act(set_default, p["name"], ok=T("{printer} is the default printer.").format(printer=p["name"]))
 
     def show_queue(self):
         self.view, self.focus = "queue", 0
@@ -355,47 +361,47 @@ class App:
 
     def test(self):
         p = self.printer()
-        self.act(test_page, p["name"], ok=f"Test page sent to {p['name']}.")
+        self.act(test_page, p["name"], ok=T("Test page sent to {printer}.").format(printer=p["name"]))
 
     def resume(self):
         p = self.printer()
-        self.act(resume, p["name"], ok=f"{p['name']} prints again.")
+        self.act(resume, p["name"], ok=T("{printer} prints again.").format(printer=p["name"]))
 
     def remove(self):
         p = self.printer()
-        if self.confirm(f"Remove the printer {p['name']}?", "Remove"):
-            self.act(remove, p["name"], ok=f"{p['name']} removed.")
+        if self.confirm(T("Remove the printer {printer}?").format(printer=p["name"]), T("Remove")):
+            self.act(remove, p["name"], ok=T("{printer} removed.").format(printer=p["name"]))
 
     def cancel_one(self):
         if not self.jobs:
-            return self.say("Nothing to cancel.")
+            return self.say(T("Nothing to cancel."))
         j = self.jobs[self.sel["queue"]]
-        self.act(cancel, [j["id"]], ok=f"{j['id']} cancelled.")
+        self.act(cancel, [j["id"]], ok=T("{job} cancelled.").format(job=j["id"]))
 
     def cancel_every(self):
         p = self.printer()
         if not self.jobs:
-            return self.say("Nothing to cancel.")
-        if self.confirm(f"Cancel everything waiting on {p['name']}?", "Cancel all"):
-            self.act(cancel_all, p["name"], ok="All cancelled.")
+            return self.say(T("Nothing to cancel."))
+        if self.confirm(T("Cancel everything waiting on {printer}?").format(printer=p["name"]), T("Cancel all")):
+            self.act(cancel_all, p["name"], ok=T("All cancelled."))
 
     def find(self):
         self.view, self.focus = "found", 0
-        self.busy("Looking for printers on the network and on USB (about 10 seconds)…")
+        self.busy(T("Looking for printers on the network and on USB (about 10 seconds)…"))
         try:
             self.found = discover()
         except Failed as e:
             self.found = []
             return self.say(f"✗ {e}", True)
         self.sel["found"] = 0
-        self.say(f"✓ {len(self.found)} new printer(s) found. a adds the chosen one." if self.found
-                 else "No new printers found.")
+        self.say("✓ " + T("{count} new printer(s) found. a adds the chosen one.").format(count=len(self.found))
+                 if self.found else T("No new printers found."))
 
     def add_found(self):
         if not self.found:
-            return self.say("Nothing to add: s searches again.")
+            return self.say(T("Nothing to add: s searches again."))
         d = self.found[self.sel["found"]]
-        self.busy(f"Adding {d['model'] or d['uri']}…")
+        self.busy(T("Adding {printer}…").format(printer=d["model"] or d["uri"]))
         try:
             name = add(d["uri"], dev=d)
         except Failed as e:
@@ -403,7 +409,7 @@ class App:
         self.view, self.focus = "printers", 0
         self.load()
         self.sel["printers"] = next((i for i, p in enumerate(self.printers) if p["name"] == name), 0)
-        self.say(f"✓ {name} added. t prints a test page.")
+        self.say("✓ " + T("{printer} added. t prints a test page.").format(printer=name))
 
     def press(self, i):
         btns = self.buttons()
@@ -437,7 +443,7 @@ class App:
                 self.back()
             elif k == "r":
                 self.load()
-                self.say("reloaded")
+                self.say(T("reloaded"))
             elif isinstance(k, str):
                 for i, (_, key, _) in enumerate(self.buttons()):
                     if k.lower() == key:
@@ -455,11 +461,11 @@ def usage_error(problem):
 
 def main(argv):
     if argv and argv[0] in ("-h", "--help", "help"):
-        print(__doc__.strip())
+        print(T(__doc__).strip())
         return 0
     if not argv:
         if not sys.stdout.isatty():
-            usage_error("the full-screen view needs a terminal")
+            usage_error(T("the full-screen view needs a terminal"))
         locale.setlocale(locale.LC_ALL, "")
         os.environ.setdefault("ESCDELAY", "25")
         curses.wrapper(lambda scr: (ui.init(), App(scr).run()))
@@ -469,28 +475,29 @@ def main(argv):
         if cmd == "list":
             ps = printers()
             if not ps:
-                print("No printers yet: mos-printers discover, then mos-printers add URI.")
+                print(T("No printers yet: mos-printers discover, then mos-printers add URI."))
             for p in ps:
-                print(f"{'*' if p['default'] else ' '} {p['name']:<26} {STATE.get(p['state'], p['state']):<9} {p['uri']}")
+                state = T(STATE[p["state"]]) if p["state"] in STATE else p["state"]
+                print(f"{'*' if p['default'] else ' '} {p['name']:<26} {ui.pad(state, 9)} {p['uri']}")
         elif cmd == "discover":
             for d in discover():
                 print(f"{d['uri']}\t{d['kind']}\t{d['model'] or d['info']}")
         elif cmd == "add":
             if not 1 <= len(args) <= 2:
-                usage_error("add needs URI [NAME]")
-            print(f"Added {add(args[0], args[1] if len(args) > 1 else None)}.")
+                usage_error(T("add needs URI [NAME]"))
+            print(T("Added {printer}.").format(printer=add(args[0], args[1] if len(args) > 1 else None)))
         elif cmd == "remove":
             if len(args) != 1:
-                usage_error("remove needs NAME")
+                usage_error(T("remove needs NAME"))
             remove(args[0])
         elif cmd == "default":
             if len(args) != 1:
-                usage_error("default needs NAME")
+                usage_error(T("default needs NAME"))
             set_default(args[0])
         elif cmd == "queue":
             js = jobs(args[0] if args else None)
             if not js:
-                print("Nothing is waiting to print.")
+                print(T("Nothing is waiting to print."))
             for j in js:
                 print(f"{j['id']:<24} {j['user']:<12} {human(j['size']):<10} {j['when']}")
         elif cmd == "cancel":
@@ -499,9 +506,9 @@ def main(argv):
             elif args:
                 cancel(args)
             else:
-                usage_error("cancel needs JOB... or --all")
+                usage_error(T("cancel needs JOB... or --all"))
         else:
-            usage_error(f"unknown command '{cmd}'")
+            usage_error(T("unknown command '{command}'").format(command=cmd))
     except Failed as e:
         print(f"mos-printers: {e}", file=sys.stderr)
         return 1

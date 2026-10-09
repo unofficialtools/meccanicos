@@ -6,10 +6,12 @@
 { pkgs, distro, ... }:
 let
   inherit (import ./not-root.nix) notRoot;
+  tSh = import ./i18n-sh.nix pkgs;
   src = ../scripts/mos;
   tool =
     name: prog:
     pkgs.writeShellScriptBin name ''
+      ${tSh name}
       ${notRoot name}
       export MECCANICOS_PYLIB=${../scripts/lib}
       export MECCANICOS_PROG=${prog} MECCANICOS_NAME=${pkgs.lib.escapeShellArg distro.name} MECCANICOS_ID=${distro.id}

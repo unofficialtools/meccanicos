@@ -32,6 +32,11 @@ import tempfile
 import threading
 import time
 
+sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import mos_tui as ui  # noqa: E402
+from mos_i18n import translator, N_  # noqa: E402
+T = translator("mos-tour")
+
 SAY = os.environ.get("MECCANICOS_TUTORIAL_SAY", "say")
 SAMPLES = os.environ.get("MECCANICOS_TUTORIAL_SAMPLES", "")
 NAME = os.environ.get("MECCANICOS_NAME", "MeccanicOS")
@@ -109,13 +114,19 @@ def prepare_samples():
 # ---- the steps -------------------------------------------------------------------
 # A step is a title, its bullets and a play(t) generator: it yields "wait
 # until" predicates made by the Tour (t.say, t.key, t.type, t.until, ...).
-# A bullet is "text", or ("text shown", "text spoken").
+# A bullet is "text", or ("text shown", "text spoken"); {name} is MeccanicOS.
 def step(title, bullets, play=None, mock=None):
     return {"title": title, "bullets": bullets, "play": play or talk, "mock": mock}
 
 
+def shown(bullet):
+    """The bullet as shown: translated (T)."""
+    return T(bullet[0] if isinstance(bullet, tuple) else bullet).format(name=NAME)
+
+
 def spoken(bullet):
-    return bullet[1] if isinstance(bullet, tuple) else bullet
+    """The bullet as spoken: always English (the voice speaks only English)."""
+    return (bullet[1] if isinstance(bullet, tuple) else bullet).format(name=NAME)
 
 
 def talk(t):
@@ -163,7 +174,7 @@ def command_bar(t):
 
 def desktop_menu(t):
     yield t.point(0)
-    yield t.click(960, 560, 3, "Right-click on the desktop")
+    yield t.click(960, 560, 3, T("Right-click on the desktop"))
     yield t.sleep(1.2)
     yield t.point(1)
     # Applications, the menu's last item (Up from the top wraps to it), opened.
@@ -236,10 +247,11 @@ def trash(t):
 
 
 def read_aloud(t):
+    # Read aloud by the English voice: English.
     text = f"Hello! This is {NAME}, reading aloud the text you copied."
     yield t.point(0)
     t.copy(text)
-    t.caption = f"Copied: “{text}”"
+    t.caption = T("Copied: “{text}”").format(text=text)
     yield t.sleep(2)
     yield t.point(1)
     if not (yield from t.command_bar("read clipboard")):
@@ -259,7 +271,7 @@ def nix_shell(t):
     yield t.point(0)
     yield t.point(1)
     yield from t.command("nix-shell -p cowsay")
-    t.caption = "Downloading cowsay…"
+    t.caption = T("Downloading cowsay…")
     yield t.until(lambda: ready() or not running("(^|/)nix-shell -p"), 300)
     if ready():
         yield t.point(2)
@@ -269,7 +281,7 @@ def nix_shell(t):
         yield from t.command("exit")
         yield t.point(4)
     else:
-        t.caption = "No internet: cowsay can't be downloaded now."
+        t.caption = T("No internet: cowsay can't be downloaded now.")
         yield t.sleep(3)
 
 
@@ -280,7 +292,7 @@ def folder_apps(t):
     yield t.point(0)
     yield from t.command("mkdir -p Tutorial/project && cd Tutorial/project")
     yield from t.command("apps install --here cowsay")
-    t.caption = "Getting cowsay for this folder…"
+    t.caption = T("Getting cowsay for this folder…")
     yield t.until(lambda: not running("mos-apps.py install"), 300)
     yield t.sleep(2)  # direnv loads it at the next prompt
     yield t.point(1)
@@ -326,7 +338,7 @@ def settings(t):
     yield t.sleep(1)
     yield t.key("Down", "↓  12h", win)
     yield t.key("Return", "Enter", win)
-    t.caption = "The clock in the top bar now shows 12-hour time."
+    t.caption = T("The clock in the top bar now shows 12-hour time.")
     yield t.sleep(3)
     yield t.key("Return", "Enter", win)  # and back
     yield t.sleep(0.8)
@@ -335,7 +347,7 @@ def settings(t):
     yield t.sleep(1)
     yield t.point(3)
     yield t.point(4)
-    yield t.key("q", "q  (quit)", win)
+    yield t.key("q", "q  " + T("(quit)"), win)
     yield t.until(lambda: win not in windows("^xfce4-terminal$"), 5)
     yield t.close(win)
 
@@ -410,7 +422,7 @@ def logins(t):
                                 stderr=subprocess.DEVNULL, start_new_session=True)
     except OSError:
         demo = None
-    t.caption = "An example alert: nothing happened, and nothing is changed."
+    t.caption = T("An example alert: nothing happened, and nothing is changed.")
     yield t.sleep(2)
     yield t.point(1)
     yield t.point(2)
@@ -434,147 +446,149 @@ def mock(t):
 
 
 def steps():
+    # What is shown is translated (N_ here, T where it is drawn); what is
+    # spoken stays in English: the Piper voice only speaks English.
     return [
-        step(f"Welcome to {NAME}", [
-            f"{NAME} is a Linux distribution.",
-            "It is designed to be lightweight, fast, secure and coherent.",
-            "It can run live from a USB drive, or it can be installed.",
-            "Installing it does not require a network connection.",
+        step(T("Welcome to {name}").format(name=NAME), [
+            N_("{name} is a Linux distribution."),
+            N_("It is designed to be lightweight, fast, secure and coherent."),
+            N_("It can run live from a USB drive, or it can be installed."),
+            N_("Installing it does not require a network connection."),
         ]),
         # installed.nix LUKS2 root + hibernation swap; drivers.nix firewall + avahi;
         # installed.nix openssh (publickey only); mos-install.py: ssh-keygen -t ed25519.
-        step(f"{NAME} is secure", [
-            "The whole disk is encrypted with LUKS, including hibernation data.",
-            "The firewall only allows printer discovery and SSH with keys.",
+        step(T("{name} is secure").format(name=NAME), [
+            N_("The whole disk is encrypted with LUKS, including hibernation data."),
+            N_("The firewall only allows printer discovery and SSH with keys."),
         ]),
         # nixpkgs (Repology: the largest repository); nixos-rebuild boot + rollback.
-        step(f"{NAME} is built on NixOS", [
-            f"{NAME} is based on a hardened NixOS.",
-            "NixOS has the largest collection of Linux packages.",
-            "NixOS guarantees a reproducible environment.",
-            "NixOS provides atomic upgrades: a failed upgrade changes nothing, and you can roll back.",
+        step(T("{name} is built on NixOS").format(name=NAME), [
+            N_("{name} is based on a hardened NixOS."),
+            N_("NixOS has the largest collection of Linux packages."),
+            N_("NixOS guarantees a reproducible environment."),
+            N_("NixOS provides atomic upgrades: a failed upgrade changes nothing, and you can roll back."),
         ]),
-        step("The command bar", [
-            ("Super + Space is the entry point to everything.", "Super plus Space is the entry point to everything."),
-            "For example, type browser to start the Web Browser.",
+        step(T("The command bar"), [
+            (N_("Super + Space is the entry point to everything."), "Super plus Space is the entry point to everything."),
+            N_("For example, type browser to start the Web Browser."),
         ], command_bar),
-        step("A desktop menu", [
-            f"{NAME} does not have a traditional start menu.",
-            "Right-click the desktop for a menu of your apps.",
+        step(T("A desktop menu"), [
+            N_("{name} does not have a traditional start menu."),
+            N_("Right-click the desktop for a menu of your apps."),
         ], desktop_menu),
         # packages.nix: OnlyOffice's entries (new document / spreadsheet /
         # presentation); vscodium.nix.
-        step("Office and code", [
-            "OnlyOffice writes documents, spreadsheets and presentations, in Microsoft Office's formats.",
-            ("Super + Space, then Word Processor: a new document.",
+        step(T("Office and code"), [
+            N_("OnlyOffice writes documents, spreadsheets and presentations, in Microsoft Office's formats."),
+            (N_("Super + Space, then Word Processor: a new document."),
              "Super plus Space, then type Word Processor, for a new document."),
-            ("Spreadsheet: a new spreadsheet.", "Then Spreadsheet, for a new spreadsheet."),
-            ("Presentations: a new presentation, in the same window.",
+            (N_("Spreadsheet: a new spreadsheet."), "Then Spreadsheet, for a new spreadsheet."),
+            (N_("Presentations: a new presentation, in the same window."),
              "And Presentations, for a new presentation, in the same window."),
-            ("VSCodium is the editor for code, with Nix, Git and web extensions ready.",
+            (N_("VSCodium is the editor for code, with Nix, Git and web extensions ready."),
              "V S Codium is the editor for code, with Nix, Git and web extensions ready."),
-            "Close them when you are done.",
+            N_("Close them when you are done."),
         ], office),
-        step("A terminal", [
-            ("Super + Space, then terminal, opens a terminal.",
+        step(T("A terminal"), [
+            (N_("Super + Space, then terminal, opens a terminal."),
              "Super plus Space, then type terminal, opens a terminal."),
-            "The next steps happen inside the terminal.",
+            N_("The next steps happen inside the terminal."),
         ], terminal),
-        step("Files: yazi", [
-            "yazi is a file manager for navigating your files.",
-            "The right side previews the file.",
-            "Select a file and press Enter to open it with the right app, the same as the open command.",
+        step(T("Files: yazi"), [
+            N_("yazi is a file manager for navigating your files."),
+            N_("The right side previews the file."),
+            N_("Select a file and press Enter to open it with the right app, the same as the open command."),
         ], yazi),
-        step("Open anything", [
-            "The open command opens any kind of file with the right app.",
+        step(T("Open anything"), [
+            N_("The open command opens any kind of file with the right app."),
         ], open_pdf),
-        step("Print to PDF", [
-            "The print command prints any file.",
-            "It lets you choose a printer, or save as PDF, right there.",
+        step(T("Print to PDF"), [
+            N_("The print command prints any file."),
+            N_("It lets you choose a printer, or save as PDF, right there."),
         ], print_pdf),
-        step("The trash", [
-            "The trash command moves a file or folder to the trash, instead of deleting it.",
-            "The trash-restore command brings it back.",
+        step(T("The trash"), [
+            N_("The trash command moves a file or folder to the trash, instead of deleting it."),
+            N_("The trash-restore command brings it back."),
         ], trash),
-        step("Reading aloud", [
-            f"Copy any text, and {NAME} can read it aloud.",
-            ("Press Super + Space and type Read Clipboard Aloud.", "Press Super plus Space and type Read Clipboard Aloud."),
+        step(T("Reading aloud"), [
+            N_("Copy any text, and {name} can read it aloud."),
+            (N_("Press Super + Space and type Read Clipboard Aloud."), "Press Super plus Space and type Read Clipboard Aloud."),
         ], read_aloud),
-        step("Any app, right now", [
-            "The nix-shell command lets you use packages without installing them.",
-            ("nix-shell -p cowsay creates a shell with the cowsay package in it.",
+        step(T("Any app, right now"), [
+            N_("The nix-shell command lets you use packages without installing them."),
+            (N_("nix-shell -p cowsay creates a shell with the cowsay package in it."),
              "nix shell, dash p, cow say, creates a shell with the cow say package in it."),
-            "Use it right away. Nothing outside the shell is affected.",
-            "When you exit the shell, the package is gone.",
-            "You can create nix shells for tools, compilers and libraries too.",
+            N_("Use it right away. Nothing outside the shell is affected."),
+            N_("When you exit the shell, the package is gone."),
+            N_("You can create nix shells for tools, compilers and libraries too."),
         ], nix_shell),
-        step("Apps for one folder", [
-            ("apps install --here gives one folder its own apps, such as a project's compilers and tools.",
+        step(T("Apps for one folder"), [
+            (N_("apps install --here gives one folder its own apps, such as a project's compilers and tools."),
              "apps install, dash dash here, gives one folder its own apps, such as a project's compilers and tools."),
-            "In that folder, and the folders inside it, they are ready in every terminal, and in VSCodium.",
-            "Leave the folder, and they are gone.",
-            ("Commit the .envrc file, and everyone working on the project gets the same tools.",
+            N_("In that folder, and the folders inside it, they are ready in every terminal, and in VSCodium."),
+            N_("Leave the folder, and they are gone."),
+            (N_("Commit the .envrc file, and everyone working on the project gets the same tools."),
              "Commit the dot env R C file, and everyone working on the project gets the same tools."),
         ], folder_apps),
         # config.py SETTINGS (live: no installed-only ones); export/import.
-        step("Settings in one place", [
-            ("Super + Space, then Configuration Management.",
+        step(T("Settings in one place"), [
+            (N_("Super + Space, then Configuration Management."),
              "Super plus Space, then type Configuration Management."),
-            "It shows the common settings in one place: screen, keyboard, touchpad, power, sound, clock and time zone.",
-            "Move to a setting and press Enter to change it.",
-            "Once installed, it also manages SSH, the firewall, updates and the graphics driver.",
-            "It can export your settings, and import them on another computer.",
+            N_("It shows the common settings in one place: screen, keyboard, touchpad, power, sound, clock and time zone."),
+            N_("Move to a setting and press Enter to change it."),
+            N_("Once installed, it also manages SSH, the firewall, updates and the graphics driver."),
+            N_("It can export your settings, and import them on another computer."),
         ], settings),
         # doctor.py: AREAS; fix() asks first; --report.
-        step("When something doesn't work", [
-            ("Super + Space, then Configuration Doctor.", "Super plus Space, then type Configuration Doctor."),
-            "It checks Wi-Fi and the internet, Bluetooth, sound, the screen and disk space.",
-            "It explains what is wrong and offers a fix, but it always asks first.",
-            "It can also save a report, to ask for help.",
+        step(T("When something doesn't work"), [
+            (N_("Super + Space, then Configuration Doctor."), "Super plus Space, then type Configuration Doctor."),
+            N_("It checks Wi-Fi and the internet, Bluetooth, sound, the screen and disk space."),
+            N_("It explains what is wrong and offers a fix, but it always asks first."),
+            N_("It can also save a report, to ask for help."),
         ], doctor),
         # mos-printers.py: list, discover + add, default, test page, queue + cancel.
-        step("Printers", [
-            ("Super + Space, then Printers.", "Super plus Space, then type Printers."),
-            "Add printers finds printers on the network and on USB, and adds the one you choose.",
-            "Pick the default printer, print a test page, or remove a printer.",
-            "Queue shows what is waiting to print, and cancels it.",
+        step(T("Printers"), [
+            (N_("Super + Space, then Printers."), "Super plus Space, then type Printers."),
+            N_("Add printers finds printers on the network and on USB, and adds the one you choose."),
+            N_("Pick the default printer, print a test page, or remove a printer."),
+            N_("Queue shows what is waiting to print, and cancels it."),
         ], mock, PRINTERS_MOCK),
         # mos-logins.py: the watcher's alerts (demo shows one), Disconnect.
-        step("Login alerts", [
-            f"{NAME} watches logins: an SSH login from somewhere new, or an attack, shows an alert like this one.",
-            "Its buttons block the address, stop SSH, or disconnect the computer.",
-            ("Super + Shift + Esc disconnects at once: remote sessions end and every network goes off.",
+        step(T("Login alerts"), [
+            N_("{name} watches logins: an SSH login from somewhere new, or an attack, shows an alert like this one."),
+            N_("Its buttons block the address, stop SSH, or disconnect the computer."),
+            (N_("Super + Shift + Esc disconnects at once: remote sessions end and every network goes off."),
              "Super plus Shift plus Escape disconnects at once: remote sessions end and every network goes off."),
-            "Logins, in the command bar, shows who is connected and who tried. Alerts never flood you.",
+            N_("Logins, in the command bar, shows who is connected and who tried. Alerts never flood you."),
         ], logins),
-        step("Managing apps", [
-            ("Super + Space: Apps Manager.", "Super plus Space, then type Apps Manager."),
-            "The Apps Manager lists your apps, uninstalls and upgrades them, and finds and installs new ones.",
-            "It also lets you try a new app in a nix shell, without installing it.",
+        step(T("Managing apps"), [
+            (N_("Super + Space: Apps Manager."), "Super plus Space, then type Apps Manager."),
+            N_("The Apps Manager lists your apps, uninstalls and upgrades them, and finds and installs new ones."),
+            N_("It also lets you try a new app in a nix shell, without installing it."),
         ], mock, APPS_MOCK),
-        step("A persistent home", [
-            f"If you run {NAME} from a USB drive without installing it,",
-            "you can keep your files and settings on the same drive, encrypted.",
-            ("Super + Space: USB Vault, then Keep my files and settings on this stick.",
+        step(T("A persistent home"), [
+            N_("If you run {name} from a USB drive without installing it,"),
+            N_("you can keep your files and settings on the same drive, encrypted."),
+            (N_("Super + Space: USB Vault, then Keep my files and settings on this stick."),
              "Super plus Space, then type USB Vault, and choose Keep my files and settings on this stick."),
-            "The next time you boot, your files are there, and your computer was not touched.",
+            N_("The next time you boot, your files are there, and your computer was not touched."),
         ], mock, HOME_MOCK),
-        step(f"Installing {NAME}", [
-            f"If you choose to install {NAME} on your computer,",
-            "click the Install icon: all the choices are on a single form.",
-            f"It erases the disk and copies {NAME} to it, encrypted.",
+        step(T("Installing {name}").format(name=NAME), [
+            N_("If you choose to install {name} on your computer,"),
+            N_("click the Install icon: all the choices are on a single form."),
+            N_("It erases the disk and copies {name} to it, encrypted."),
         ], mock, INSTALL_MOCK),
-        step("Keyboard shortcuts", [
-            ("Super + Space, then shortcuts, lists every shortcut.",
+        step(T("Keyboard shortcuts"), [
+            (N_("Super + Space, then shortcuts, lists every shortcut."),
              "Super plus Space, then type shortcuts, lists every shortcut."),
-            ("Alt + F7 moves a window and Alt + F8 resizes it: then the mouse or the arrow keys, and Enter.",
+            (N_("Alt + F7 moves a window and Alt + F8 resizes it: then the mouse or the arrow keys, and Enter."),
              "Alt plus F7 moves a window, and Alt plus F8 resizes it: then the mouse or the arrow keys, and Enter."),
         ], shortcuts),
-        step("That's it", [
-            ("Super + Space starts everything.", "Super plus Space starts everything."),
-            ("Type shortcuts there to see every shortcut.", "Type shortcuts there to see every shortcut."),
-            "This video is on your desktop, to watch again.",
-            f"Enjoy {NAME}!",
+        step(T("That's it"), [
+            (N_("Super + Space starts everything."), "Super plus Space starts everything."),
+            (N_("Type shortcuts there to see every shortcut."), "Type shortcuts there to see every shortcut."),
+            N_("This video is on your desktop, to watch again."),
+            N_("Enjoy {name}!"),
         ]),
     ]
 
@@ -627,130 +641,166 @@ def mock_ansi(line, width):
         return f"{esc(k)}{text}{base}"
 
     out = base + _TOKEN.sub(token, line)
-    pad = width - len(mock_plain(line))
+    pad = width - ui.cols(mock_plain(line))
     return out + (" " * pad if on_bar else "") + "\033[0m"
 
 
 def _box(title, rows, inner=62):
     """A popup's frame around rows (with markup), as the tools draw them."""
-    top = f"  ┌─ #{title}# " + "─" * (inner - len(title) - 3) + "┐"
-    body = [f"  │ {r}" + " " * (inner - 1 - len(mock_plain(r))) + "│" for r in rows]
+    top = f"  ┌─ #{title}# " + "─" * (inner - ui.cols(title) - 3) + "┐"
+    body = [f"  │ {r}" + " " * (inner - 1 - ui.cols(mock_plain(r))) + "│" for r in rows]
     return [top, *body, "  └" + "─" * inner + "┘"]
 
+
+# The previews' words are translated; key names, names and data are not.
+def _col(text, width):
+    """text and spaces up to width columns (at least one space): a table column."""
+    return text + " " * max(1, width - ui.cols(text))
+
+
+def _buttons(*labels, focus=0):
+    """A row of buttons, the focused one first unless focus says otherwise."""
+    return " " + "  ".join(f"[[{b}]]" if i == focus else f"[{b}]" for i, b in enumerate(labels))
+
+
+def _keys(*pairs):
+    """The key bar: (key, what it does), ..."""
+    return "~ " + "   ".join(f"«{k}» {what}" for k, what in pairs)
+
+
+_RULE = "─" * 70
+_LIST_KEYS = _keys(("↑↓", T("move")), ("←→", T("button")), ("Enter", T("press")), ("Tab", T("switch list")), ("q", T("quit")))
+_PRINTER_KEYS = _keys(("↑↓", T("move")), ("←→", T("button")), ("Enter", T("press")), ("r", T("reload")), ("q", T("quit")))
+_VAULT_KEYS = _keys(("↑↓", T("move")), ("Enter", T("choose")), ("r", T("reload")), ("q", T("quit")))
 
 APPS_MOCK = {
     "title": "Apps Manager",
     0: ["= Apps Manager", "",
-        " <<Installed (14)>> [Search]", "",
-        "#  App            Version   Status#",
-        "──────────────────────────────────────────────────────────────────────",
-        ">  vlc            3.0.21    installed",
-        "   brave          1.96.59   comes with MeccanicOS: Brave Web Browser",
-        "   onlyoffice     9.1.0     comes with MeccanicOS: Office Documents (OnlyOffice)",
-        "   celluloid      0.29      comes with MeccanicOS: Video Player (Celluloid)",
-        "", "──────────────────────────────────────────────────────────────────────",
-        " [[Uninstall]]  [Update]  [Update all]  [Undo]  [Search]  [Quit]",
-        ". Live USB: apps you install last until you shut down.",
-        "~ «↑↓» move   «←→» button   «Enter» press   «Tab» switch list   «q» quit"],
+        " <<" + T("Installed ({count})").format(count=14) + ">> [" + T("Search") + "]", "",
+        "#  " + _col(T("App"), 15) + _col(T("Version"), 10) + T("Status") + "#",
+        _RULE,
+        ">  vlc            3.0.21    " + T("installed"),
+        "   brave          1.96.59   " + T("comes with MeccanicOS: {app}").format(app="Brave Web Browser"),
+        "   onlyoffice     9.1.0     " + T("comes with MeccanicOS: {app}").format(app="Office Documents (OnlyOffice)"),
+        "   celluloid      0.29      " + T("comes with MeccanicOS: {app}").format(app="Video Player (Celluloid)"),
+        "", _RULE,
+        _buttons(T("Uninstall"), T("Update"), T("Update all"), T("Undo"), T("Search"), T("Quit")),
+        ". " + T("Live USB: apps you install last until you shut down."),
+        _LIST_KEYS],
     2: ["= Apps Manager", "",
-        " [Installed (14)] <<Search>>", "",
-        " #Search:# {inkscape                                                  }", "",
-        "#  App                 Version   What it is#",
-        "──────────────────────────────────────────────────────────────────────",
+        " [" + T("Installed ({count})").format(count=14) + "] <<" + T("Search") + ">>", "",
+        " #" + T("Search:") + "# {inkscape" + " " * 50 + "}", "",
+        "#  " + _col(T("App"), 20) + _col(T("Version"), 10) + T("What it is") + "#",
+        _RULE,
+        # Descriptions come from the packages, in English.
         ">  inkscape            1.4.2     Vector graphics editor",
         "   inkscape-with-ext   1.4.2     Inkscape with its extensions",
-        "", "──────────────────────────────────────────────────────────────────────",
-        " [[Install]]  [Try it]  [New search]  [Back]  [Quit]",
-        "✓ 9 apps found. i installs, t tries without installing.",
-        "~ «↑↓» move   «←→» button   «Enter» press   «Tab» switch list   «q» quit"],
+        "", _RULE,
+        _buttons(T("Install"), T("Try it"), T("New search"), T("Back"), T("Quit")),
+        "✓ " + T("{count} apps found. i installs, t tries without installing.").format(count=9),
+        _LIST_KEYS],
 }
 
 HOME_MOCK = {  # scripts/usb-vault-menu.py
     "title": "USB Vault",
-    0: ["= USB Vault — encrypted storage on your boot USB stick", "",
-        ". Stick: /dev/sdb (SanDisk Ultra, 64G, Ventoy)", ". Home: none", ". Vaults: none", "",
-        "──────────────────────────────────────────────────────────────────────",
-        ">   Keep my files and settings on this stick      ",
-        "    Create a vault (a locked folder)",
-        "    Open the USB stick's files",
-        "    Quit", "", "",
-        ". Recommended: everything you do is kept, encrypted; asks for its password at start-up",
-        "~ «↑↓» move   «Enter» choose   «r» reload   «q» quit"],
-    2: ["= USB Vault — encrypted storage on your boot USB stick", "",
-        *_box("Keep my files and settings", [
-            "«Room for:»        {{16G" + " " * 36 + "}}",
-            "Password:        {" + "•" * 24 + " " * 15 + "}",
-            "Password again:  {" + "•" * 24 + " " * 15 + "}",
+    0: ["= USB Vault — " + T("encrypted storage on your boot USB stick"), "",
+        ". " + T("Stick: {stick}").format(stick="/dev/sdb (SanDisk Ultra, 64G, Ventoy)"),
+        ". " + T("Home: none"), ". " + T("Vaults: none"), "",
+        _RULE,
+        ">   " + T("Keep my files and settings on this stick") + "      ",
+        "    " + T("Create a vault (a locked folder)"),
+        "    " + T("Open the USB stick's files"),
+        "    " + T("Quit"), "", "",
+        ". " + T("Recommended: everything you do is kept, encrypted; asks for its password at start-up"),
+        _VAULT_KEYS],
+    2: ["= USB Vault — " + T("encrypted storage on your boot USB stick"), "",
+        *_box(T("Keep my files and settings"), [
+            "«" + T("Room for:") + "»" + " " * max(1, 17 - ui.cols(T("Room for:"))) + "{{16G" + " " * 36 + "}}",
+            _col(T("Password:"), 17) + "{" + "•" * 24 + " " * 15 + "}",
+            _col(T("Password again:"), 17) + "{" + "•" * 24 + " " * 15 + "}",
             "",
-            "((Everything you do from now on is kept on this stick.))",
-            "((At every start you'll be asked for this password.))",
+            "((" + T("Everything you do from now on is kept on this stick.") + "))",
+            "((" + T("At every start you'll be asked for this password.") + "))",
             "",
-            " " * 38 + "[Next]  [Cancel]",
+            " " * 38 + "[" + T("Next") + "]  [" + T("Cancel") + "]",
         ]),
-        "", "", "~ «↑↓» move   «Enter» choose   «r» reload   «q» quit"],
-    3: ["", f"  Password for your saved {NAME} home (Enter to skip): ****", "", "  ...", "",
-        "✓ Welcome back: your files and settings are here."],
+        "", "", _VAULT_KEYS],
+    3: ["", "  " + T("Password for your saved {name} home (Enter to skip):").format(name=NAME) + " ****", "", "  ...", "",
+        "✓ " + T("Welcome back: your files and settings are here.")],
 }
 
 PRINTERS_MOCK = {  # scripts/mos-printers.py
-    "title": "Printers",
-    0: ["= Printers", "",
-        "#    Printer                   State      Jobs  Where#",
-        "──────────────────────────────────────────────────────────────────────",
-        ">  ★ Office_Laser              ready      0     2nd floor",
-        "     Kitchen_Inkjet            ready      0     HP ENVY 6000 series",
+    "title": T("Printers"),
+    0: ["= " + T("Printers"), "",
+        "#    " + _col(T("Printer"), 26) + _col(T("State"), 11) + _col(T("Jobs"), 6) + T("Where") + "#",
+        _RULE,
+        ">  ★ Office_Laser              " + _col(T("ready"), 11) + "0     2nd floor",
+        "     Kitchen_Inkjet            " + _col(T("ready"), 11) + "0     HP ENVY 6000 series",
         "", "", "",
-        "──────────────────────────────────────────────────────────────────────",
-        ". Brother HL-L2350DW series   ★ the default printer",
-        " [[Add printers]]  [Make default]  [Queue]  [Test page]  [Remove]  [Quit]", "",
-        "~ «↑↓» move   «←→» button   «Enter» press   «r» reload   «q» quit"],
-    1: ["= Printers › add a printer", "",
-        "#  Printer                                 How       Address#",
-        "──────────────────────────────────────────────────────────────────────",
-        ">  Canon PIXMA G3270                       network   ipps://Canon-G3270.local:443/ipp/print",
+        _RULE,
+        ". Brother HL-L2350DW series   ★ " + T("the default printer"),
+        _buttons(T("Add printers"), T("Make default"), T("Queue"), T("Test page"), T("Remove"), T("Quit")), "",
+        _PRINTER_KEYS],
+    1: ["= " + T("Printers") + " › " + T("add a printer"), "",
+        "#  " + _col(T("Printer"), 40) + _col(T("How"), 10) + T("Address") + "#",
+        _RULE,
+        ">  Canon PIXMA G3270                       " + _col(T("network"), 10) + "ipps://Canon-G3270.local:443/ipp/print",
         "   Epson ET-2850 Series                    USB       usb://EPSON/ET-2850%20Series",
         "", "", "",
-        "──────────────────────────────────────────────────────────────────────", "",
-        " [[Add]]  [Search again]  [Back]  [Quit]",
-        "✓ 2 new printer(s) found. a adds the chosen one.",
-        "~ «↑↓» move   «←→» button   «Enter» press   «r» reload   «q» quit"],
-    2: ["= Printers", "",
-        "#    Printer                   State      Jobs  Where#",
-        "──────────────────────────────────────────────────────────────────────",
-        "   ★ Office_Laser              ready      0     2nd floor",
-        ">    Kitchen_Inkjet            printing   2     HP ENVY 6000 series",
-        "     Canon_PIXMA_G3270         ready      0     Canon PIXMA G3270",
+        _RULE, "",
+        _buttons(T("Add"), T("Search again"), T("Back"), T("Quit")),
+        "✓ " + T("{count} new printer(s) found. a adds the chosen one.").format(count=2),
+        _PRINTER_KEYS],
+    2: ["= " + T("Printers"), "",
+        "#    " + _col(T("Printer"), 26) + _col(T("State"), 11) + _col(T("Jobs"), 6) + T("Where") + "#",
+        _RULE,
+        "   ★ Office_Laser              " + _col(T("ready"), 11) + "0     2nd floor",
+        ">    Kitchen_Inkjet            " + _col(T("printing"), 11) + "2     HP ENVY 6000 series",
+        "     Canon_PIXMA_G3270         " + _col(T("ready"), 11) + "0     Canon PIXMA G3270",
         "", "",
-        "──────────────────────────────────────────────────────────────────────",
+        _RULE,
         ". HP ENVY 6000 series",
-        " [Add printers]  [Make default]  [Queue]  [[Test page]]  [Remove]  [Quit]",
-        "✓ Test page sent to Kitchen_Inkjet.",
-        "~ «↑↓» move   «←→» button   «Enter» press   «r» reload   «q» quit"],
-    3: ["= Printers › Kitchen_Inkjet › waiting to print", "",
-        "#  Job                   From        Size      Sent#",
-        "──────────────────────────────────────────────────────────────────────",
+        _buttons(T("Add printers"), T("Make default"), T("Queue"), T("Test page"), T("Remove"), T("Quit"), focus=3),
+        "✓ " + T("Test page sent to {printer}.").format(printer="Kitchen_Inkjet"),
+        _PRINTER_KEYS],
+    3: ["= " + T("Printers") + " › Kitchen_Inkjet › " + T("waiting to print"), "",
+        "#  " + _col(T("Job"), 22) + _col(T("From"), 12) + _col(T("Size"), 10) + T("Sent") + "#",
+        _RULE,
         ">  Kitchen_Inkjet-41     live        1.2 MB    Tue 06 Oct 2026 10:41:02",
         "   Kitchen_Inkjet-42     live        84.0 KB   Tue 06 Oct 2026 10:41:30",
         "", "", "",
-        "──────────────────────────────────────────────────────────────────────", "",
-        " [[Cancel job]]  [Cancel all]  [Back]  [Quit]", "",
-        "~ «↑↓» move   «←→» button   «Enter» press   «r» reload   «q» quit"],
+        _RULE, "",
+        _buttons(T("Cancel job"), T("Cancel all"), T("Back"), T("Quit")), "",
+        _PRINTER_KEYS],
 }
 
+
+def _field(mark, label, value):
+    """An installer row: its mark (" ", ">" or "."), label and value."""
+    return mark + " " + _col(label, 17) + value
+
+
 INSTALL_MOCK = {  # scripts/mos-install.py
-    "title": f"Install {NAME}",
-    0: [f"= {NAME} installer", "",
-        "  Country          United States", "  Language         English (US)", "  Time zone        America/Chicago",
-        "  Keyboard         English (US)", "  Wi-Fi network    (none — set up later)", "  Full name        Ada Lovelace",
-        "  Username         ada", "  Password         ••••••••", "  Disk password    ••••••••••••••••",
-        "> Target disk      Samsung SSD 970, 500 GB",
-        ". Filesystem       ext4 on LUKS2 (encrypted), EFI boot", "",
-        "                         [  Install now  ]", "", "",
-        "~ «↑↓» move   «Enter» change   «Tab» next   «Ctrl-C» quit"],
-    2: [f"= {NAME} installer", "",
-        "✓ 1/8  Partitioning the disk", "✓ 2/8  Encrypting (LUKS2)", "✓ 3/8  Creating filesystems",
-        f"✓ 4/8  Copying {NAME} to disk (no download needed)", "  5/8  Language, keyboard, time zone, screen",
-        ".  6/8  Creating user ada", ".  7/8  Saving your configuration to /etc/nixos", ".  8/8  Finishing"],
+    "title": T("Install {name}").format(name=NAME),
+    0: ["= " + T("{name} installer").format(name=NAME), "",
+        _field(" ", T("Country"), T("United States")), _field(" ", T("Language"), T("English (US)")),
+        _field(" ", T("Time zone"), "America/Chicago"),
+        _field(" ", T("Keyboard"), T("English (US)")), _field(" ", T("Wi-Fi network"), T("(none — set up later)")),
+        _field(" ", T("Full name"), "Ada Lovelace"),
+        _field(" ", T("Username"), "ada"), _field(" ", T("Password"), "••••••••"),
+        _field(" ", T("Disk password"), "••••••••••••••••"),
+        _field(">", T("Target disk"), "Samsung SSD 970, 500 GB"),
+        _field(".", T("Filesystem"), T("ext4 on LUKS2 (encrypted), EFI boot")), "",
+        " " * 25 + "[  " + T("Install now") + "  ]", "", "",
+        _keys(("↑↓", T("move")), ("Enter", T("change")), ("Tab", T("next")), ("Ctrl-C", T("quit")))],
+    2: ["= " + T("{name} installer").format(name=NAME), "",
+        "✓ 1/8  " + T("Partitioning the disk"), "✓ 2/8  " + T("Encrypting (LUKS2)"),
+        "✓ 3/8  " + T("Creating filesystems"),
+        "✓ 4/8  " + T("Copying {name} to disk (no download needed)").format(name=NAME),
+        "  5/8  " + T("Language, keyboard, time zone, screen"),
+        ".  6/8  " + T("Creating user {user}").format(user="ada"),
+        ".  7/8  " + T("Saving your configuration to {path}").format(path="/etc/nixos"),
+        ".  8/8  " + T("Finishing")],
 }
 
 # ---- voice -------------------------------------------------------------------------
@@ -844,7 +894,7 @@ def init_colors():
 def wrap(text, width):
     lines, line = [], ""
     for word in text.split():
-        if len(line) + len(word) + 1 > width:
+        if ui.cols(line) + ui.cols(word) + 1 > width:
             lines.append(line)
             line = word
         else:
@@ -940,7 +990,7 @@ class Tour:
         b = self.step["bullets"][n]
         wait = self.say(spoken(b))
         if self.cues:
-            self.cue(b[0] if isinstance(b, tuple) else b, spoken(b))
+            self.cue(shown(b), spoken(b))
         return wait
 
     def hold(self, start, end):
@@ -1111,7 +1161,7 @@ class Tour:
     def show_mock(self, screens):
         """Open the preview window: `watch` shows the file write_mock writes."""
         pages = [v for k, v in screens.items() if isinstance(k, int)]
-        self.mock_w = max(len(mock_plain(l)) for p in pages for l in p) + 2
+        self.mock_w = max(ui.cols(mock_plain(l)) for p in pages for l in p) + 2
         rows = max(len(p) for p in pages) + 2
         self.mock_file = os.path.join(self.voice.dir, "preview.txt")
         self.mock = pages[0]
@@ -1148,40 +1198,41 @@ class Tour:
         def put(y, x, t, a=0):
             if 0 <= y < h and x < w:
                 try:
-                    s.addstr(y, x, t[: w - x - (1 if y == h - 1 else 0)], a)
+                    s.addstr(y, x, ui.fit(t, w - x - (1 if y == h - 1 else 0)), a)
                 except curses.error:
                     pass
 
-        bar = f" {NAME} tour   {self.i + 1}/{len(self.steps)}"
-        state = "" if self.cues else "paused" if self.paused else ("voice on" if self.voice.on else "voice off")
-        put(0, 0, bar.ljust(w), cp(2) | curses.A_BOLD)
-        put(0, max(0, w - len(state) - 1), state, cp(2))
+        bar = " " + T("{name} tour").format(name=NAME) + f"   {self.i + 1}/{len(self.steps)}"
+        state = "" if self.cues else T("paused") if self.paused else (T("voice on") if self.voice.on else T("voice off"))
+        put(0, 0, ui.pad(bar, w), cp(2) | curses.A_BOLD)
+        put(0, max(0, w - ui.cols(state) - 1), state, cp(2))
         put(2, 2, self.step["title"], cp(3) | curses.A_BOLD)
         y = 4
         for n, b in enumerate(self.step["bullets"]):
-            text = b[0] if isinstance(b, tuple) else b
+            text = shown(b)
             attr = cp(4) | curses.A_BOLD if n == self.current else (cp(1) if n < self.current else cp(6))
             for k, line in enumerate(wrap(text, w - 6)):
                 put(y, 2, ("• " if k == 0 else "  ") + line, attr)
                 y += 1
         if self.mock:
             y += 1
-            boxw = min(w - 4, max(len(mock_plain(l)) for l in self.mock) + 2)
+            boxw = min(w - 4, max(ui.cols(mock_plain(l)) for l in self.mock) + 2)
             for line in self.mock:
                 if y >= h - 3:
                     break
                 attr = cp(8) | curses.A_BOLD if line.startswith(">") else cp(7)
-                put(y, 2, (" " + mock_plain(line)).ljust(boxw), attr)
+                put(y, 2, ui.pad(" " + mock_plain(line), boxw), attr)
                 y += 1
-            put(min(y, h - 3), 2, " preview — nothing is changed ".rjust(boxw), cp(6))
+            note = " " + T("preview — nothing is changed") + " "
+            put(min(y, h - 3), 2, " " * max(0, boxw - ui.cols(note)) + note, cp(6))
         if self.caption:
             put(h - 3, 2, self.caption, cp(5) | curses.A_BOLD)
-        keys = [] if self.cues else [("Space", "pause"), ("←/→", "step"), ("R", "replay"), ("M", "voice"), ("Q", "quit")]
+        keys = [] if self.cues else [("Space", T("pause")), ("←/→", T("step")), ("R", T("replay")), ("M", T("voice")), ("Q", T("quit"))]
         x = 1
         for k, label in keys:
             put(h - 1, x, k, cp(4) | curses.A_BOLD)
-            put(h - 1, x + len(k) + 1, label, cp(6))
-            x += len(k) + len(label) + 4
+            put(h - 1, x + ui.cols(k) + 1, label, cp(6))
+            x += ui.cols(k) + ui.cols(label) + 4
         s.refresh()
 
     def loop(self):
@@ -1229,10 +1280,10 @@ def keep_on_top():
 
 def main(argv):
     if argv and argv[0] in ("-h", "--help"):
-        print(__doc__.strip())
+        print(T(__doc__).strip())
         return 0
     if not sys.stdout.isatty():
-        sys.exit("mos-tour needs a terminal: mos-tour --window")
+        sys.exit(T("mos-tour needs a terminal: mos-tour --window"))
     cues = None
     if argv[:1] == ["--record"] and len(argv) > 1:
         cues, argv = argv[1], argv[2:]
@@ -1246,7 +1297,7 @@ def main(argv):
             subprocess.run(["wmctrl", "-x", "-a", "mos-tutorial"], capture_output=True, timeout=3)
         except (OSError, subprocess.SubprocessError):
             pass
-        print("The tutorial is already running.")
+        print(T("The tutorial is already running."))
         return 0
     prepare_samples()
     keep_on_top()

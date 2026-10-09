@@ -47,6 +47,9 @@ import time
 # The look shared by MeccanicOS TUIs: MECCANICOS_PYLIB from the Nix wrapper, else next to this file.
 sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 import mos_tui as ui  # noqa: E402
+from mos_i18n import translator, N_  # noqa: E402
+
+T = translator("mos-logins")
 
 SELF = os.environ.get("MECCANICOS_LOGINS_SELF") or os.path.abspath(sys.argv[0])
 STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "meccanicos", "logins.json")
@@ -64,8 +67,13 @@ RULES = [
     ("password-fail", re.compile(r"pam_unix\((?P<service>[^:]+):auth\): authentication failure.*?(?:\buser=(?P<user>\S+))?\s*$")),
     ("disk-fail", re.compile(r"Failed to activate with specified passphrase|No key available with this passphrase")),
 ]
-PLACES = {"xfce4-screensaver": "the lock screen", "lightdm": "the login screen", "login": "the console",
-          "sudo": "sudo", "su": "su", "polkit-1": "an administrator prompt"}
+PLACES = {"xfce4-screensaver": N_("the lock screen"), "lightdm": N_("the login screen"), "login": N_("the console"),
+          "polkit-1": N_("an administrator prompt")}  # else the service's own name (sudo, su, ...)
+
+
+def place(service):
+    """Where a password was typed, for people."""
+    return T(PLACES[service]) if service in PLACES else service
 
 
 def parse(entry):
@@ -183,7 +191,7 @@ def as_root(*args):
         return False, str(e)
     out = (p.stdout + p.stderr).strip()
     if p.returncode != 0 and "password is required" in out:
-        out = "needs an administrator: run it with sudo in a terminal"
+        out = T("needs an administrator: run it with sudo in a terminal")
     return p.returncode == 0, out
 
 
@@ -230,7 +238,7 @@ NFT = """table inet mos-logins {
 def root_main(args):
     """What needs root (sudo mos-logins root ...): blocking, SSH, networks."""
     if os.geteuid() != 0:
-        sys.exit("mos-logins root: run through sudo")
+        sys.exit("mos-logins root: " + T("run through sudo"))
     cmd, rest = (args[0], args[1:]) if args else ("", [])
 
     def nft(*a, check=True):
@@ -268,11 +276,11 @@ def root_main(args):
             minutes = int(rest[1]) if len(rest) > 1 else 60
             table()
             nft("add", "element", "inet", "mos-logins", s, f"{{ {ip} timeout {minutes}m }}")
-            print(f"{ip} blocked for {minutes} minutes")
+            print(T("{address} blocked for {minutes} minutes").format(address=ip, minutes=minutes))
         elif cmd == "unblock":
             ip, s = addr(rest[0])
             nft("delete", "element", "inet", "mos-logins", s, f"{{ {ip} }}", check=False)
-            print(f"{ip} unblocked")
+            print(T("{address} unblocked").format(address=ip))
         elif cmd == "blocked":
             for s in ("blocked4", "blocked6"):
                 p = nft("-j", "list", "set", "inet", "mos-logins", s, check=False)
@@ -284,20 +292,20 @@ def root_main(args):
                             left = e.get("expires", "") if isinstance(e, dict) else ""
                             print(f"{ip}\t{left}")
         elif cmd == "end-sessions":
-            print(f"{end_sessions()} remote session(s) ended")
+            print(T("{count} remote session(s) ended").format(count=end_sessions()))
         elif cmd == "stop-ssh":
             end_sessions()
             stop_ssh()
-            print("SSH stopped (until you start it, or the next start)")
+            print(T("SSH stopped (until you start it, or the next start)"))
         elif cmd == "start-ssh":
             subprocess.run(["systemctl", "start", "sshd.service"], check=True)
-            print("SSH started")
+            print(T("SSH started"))
         elif cmd == "disconnect":
             end_sessions()
             stop_ssh()
             subprocess.run(["nmcli", "networking", "off"])
             subprocess.run(["rfkill", "block", "all"])
-            print("Disconnected: remote sessions ended, SSH stopped, every network off")
+            print(T("Disconnected: remote sessions ended, SSH stopped, every network off"))
         elif cmd == "reconnect":
             subprocess.run(["rfkill", "unblock", "all"])
             subprocess.run(["nmcli", "networking", "on"])
@@ -305,9 +313,9 @@ def root_main(args):
             if os.path.exists(flag):
                 subprocess.run(["systemctl", "start", "sshd.service"])
                 os.remove(flag)
-            print("Reconnected")
+            print(T("Reconnected"))
         else:
-            sys.exit(f"mos-logins root: unknown {cmd!r}")
+            sys.exit("mos-logins root: " + T("unknown {command}").format(command=repr(cmd)))
     except (subprocess.CalledProcessError, ValueError, IndexError) as e:
         sys.exit(f"mos-logins: {e}")
     return 0
@@ -330,7 +338,8 @@ def remote_now():
             ["loginctl", "show-session", f[0], "-p", "Remote", "-p", "RemoteHost", "-p", "Name", "-p", "Service"],
             capture_output=True, text=True, env=ENV).stdout.splitlines() if "=" in l)
         if props.get("Remote") == "yes":
-            rows.append({"what": f"session {f[0]} ({props.get('Service', '')})", "who": props.get("Name", ""),
+            rows.append({"what": T("session {id} ({service})").format(id=f[0], service=props.get("Service", "")),
+                         "who": props.get("Name", ""),
                          "from": props.get("RemoteHost", "")})
     try:
         out = subprocess.run(["ss", "-tnH", "state", "established", "( sport = :22 )"],
@@ -342,7 +351,7 @@ def remote_now():
         if len(f) >= 4:
             peer = f[-1].rsplit(":", 1)[0].strip("[]")
             if not any(r["from"] == peer for r in rows):
-                rows.append({"what": "SSH connection", "who": "", "from": peer})
+                rows.append({"what": T("SSH connection"), "who": "", "from": peer})
     return rows
 
 
@@ -381,8 +390,9 @@ class Notifier:
                 self.open.add(topic)
         if muted:  # once, then quiet for an hour
             threading.Thread(target=self._show, daemon=True, args=(
-                f"muted:{kind}", "Many login alerts", "More happened this hour: these alerts are paused for an "
-                "hour. Open Logins (mos-logins) to see everything.", "normal", [("open", "Open Logins")])).start()
+                f"muted:{kind}", T("Many login alerts"), T("More happened this hour: these alerts are paused for an "
+                                                           "hour. Open Logins (mos-logins) to see everything."),
+                "normal", [("open", T("Open Logins"))])).start()
         return not muted
 
     def send(self, topic, title, body, urgency="normal", actions=(), on_action=None):
@@ -422,22 +432,23 @@ def summary(events, state):
     oks = [e for e in events if e["kind"] == "ssh-ok"]
     new = [e for e in oks if not known(state, e["ip"], e["key"])]
     if new:
-        lines.append(f"{len(new)} SSH login(s) from somewhere new: " +
-                     ", ".join(sorted({f"{e['user']}@{e['ip']}" for e in new})[:3]))
+        lines.append(T("{count} SSH login(s) from somewhere new: {who}").format(
+            count=len(new), who=", ".join(sorted({f"{e['user']}@{e['ip']}" for e in new})[:3])))
     elif oks:
-        lines.append(f"{len(oks)} SSH login(s) from known addresses")
-    by_place = collections.Counter(PLACES.get(e["service"], e["service"]) for e in events if e["kind"] == "password-fail")
-    for place, n in by_place.most_common():
-        first = min(e["time"] for e in events if e["kind"] == "password-fail" and PLACES.get(e["service"], e["service"]) == place)
-        lines.append(f"{n} wrong password(s) at {place} (from {when(first)})")
+        lines.append(T("{count} SSH login(s) from known addresses").format(count=len(oks)))
+    by_place = collections.Counter(place(e["service"]) for e in events if e["kind"] == "password-fail")
+    for where, n in by_place.most_common():
+        first = min(e["time"] for e in events if e["kind"] == "password-fail" and place(e["service"]) == where)
+        lines.append(T("{count} wrong password(s) at {place} (from {when})").format(count=n, place=where, when=when(first)))
     disk = [e for e in events if e["kind"] == "disk-fail"]
     if disk:
-        lines.append(f"The disk password was mistyped {len(disk)} time(s) at start-up ({when(disk[0]['time'])})")
+        lines.append(T("The disk password was mistyped {count} time(s) at start-up ({when})").format(
+            count=len(disk), when=when(disk[0]["time"])))
     if not lines:
         return ""
     fails = sum(e["kind"] == "ssh-fail" for e in events)
     if fails:
-        lines.append(f"Also {fails} failed SSH attempt(s): mos-logins lists them")
+        lines.append(T("Also {count} failed SSH attempt(s): mos-logins lists them").format(count=fails))
     return "\n".join(lines)
 
 
@@ -471,15 +482,20 @@ class Watcher:
         if ev["kind"] == "ssh-ok" and not known(self.state, ev["ip"], ev["key"]):
             if setting("auto_disconnect", False):
                 disconnect()
-                body = f"{ev['user']} logged in from {ev['ip']}. The computer was disconnected (auto_disconnect)."
-                self.notify.send(f"ok:{ev['ip']}", "Unknown SSH login: disconnected", body, "critical",
-                                 [("reconnect", "Reconnect"), ("open", "Open Logins")],
+                body = T("{user} logged in from {address}. The computer was disconnected (auto_disconnect).").format(
+                    user=ev["user"], address=ev["ip"])
+                self.notify.send(f"ok:{ev['ip']}", T("Unknown SSH login: disconnected"), body, "critical",
+                                 [("reconnect", T("Reconnect")), ("open", T("Open Logins"))],
                                  lambda c: reconnect() if c == "reconnect" else None)
                 return
-            body = (f"{ev['user']} logged in from {ev['ip']}" + (f" with key {ev['key'][:20]}…" if ev["key"] else "") +
-                    ": not an address or key seen before.")
-            self.notify.send(f"ok:{ev['ip']}", "Unknown SSH login", body, "critical",
-                             [("trust", "It's me"), ("end", "End remote sessions"), ("disconnect", "Disconnect")],
+            if ev["key"]:
+                body = T("{user} logged in from {address} with key {key}…: not an address or key seen before.").format(
+                    user=ev["user"], address=ev["ip"], key=ev["key"][:20])
+            else:
+                body = T("{user} logged in from {address}: not an address or key seen before.").format(
+                    user=ev["user"], address=ev["ip"])
+            self.notify.send(f"ok:{ev['ip']}", T("Unknown SSH login"), body, "critical",
+                             [("trust", T("It's me")), ("end", T("End remote sessions")), ("disconnect", T("Disconnect"))],
                              lambda c, ip=ev["ip"]: self.act(c, ip))
         elif ev["kind"] == "ssh-fail" and ev["ip"]:
             q = self.fails[ev["ip"]]
@@ -489,10 +505,16 @@ class Watcher:
             aimed = sum(u in self.mine for _, u in q)
             local = private(ev["ip"])
             if (local and len(q) >= 3) or aimed >= 5 or len(q) >= 20:
-                why = "from your own network" if local else ("trying your user name" if aimed else "many times")
-                body = f"{len(q)} failed SSH logins in 10 minutes from {ev['ip']}, {why}."
-                self.notify.send(f"attack:{ev['ip']}", "SSH attack", body, "critical",
-                                 [("block", "Block this address"), ("stop-ssh", "Stop SSH"), ("disconnect", "Disconnect")],
+                if local:
+                    body = T("{count} failed SSH logins in 10 minutes from {address}, from your own network.")
+                elif aimed:
+                    body = T("{count} failed SSH logins in 10 minutes from {address}, trying your user name.")
+                else:
+                    body = T("{count} failed SSH logins in 10 minutes from {address}, many times.")
+                body = body.format(count=len(q), address=ev["ip"])
+                self.notify.send(f"attack:{ev['ip']}", T("SSH attack"), body, "critical",
+                                 [("block", T("Block this address")), ("stop-ssh", T("Stop SSH")),
+                                  ("disconnect", T("Disconnect"))],
                                  lambda c, ip=ev["ip"]: self.act(c, ip))
         elif ev["kind"] == "disk-fail":
             pass  # reported in the summary at login (it happens before anyone is logged in)
@@ -516,8 +538,8 @@ class Watcher:
                     text = summary(self.during, self.state)
                     self.locked_since, self.during = None, []
                     if text and setting("login_alerts", True):
-                        self.notify.send(f"away:{int(time.time())}", "While you were away", text, "normal",
-                                         [("open", "Open Logins")])
+                        self.notify.send(f"away:{int(time.time())}", T("While you were away"), text, "normal",
+                                         [("open", T("Open Logins"))])
 
     def run(self):
         now = time.time()
@@ -527,7 +549,7 @@ class Watcher:
         past += [e for e in journal(boot=True) if e["kind"] == "disk-fail" and e["time"] < since]
         text = summary(past, self.state)
         if text and setting("login_alerts", True):
-            self.notify.send("login", "Since you last logged in", text, "normal", [("open", "Open Logins")])
+            self.notify.send("login", T("Since you last logged in"), text, "normal", [("open", T("Open Logins"))])
         threading.Thread(target=self.screen_lock, daemon=True).start()
         last_save = 0
         for ev in journal(follow=True):
@@ -545,9 +567,10 @@ def demo():
     """A sample alert, as the watcher shows one, closed after a while
     (MECCANICOS_LOGINS_DEMO_SECONDS, 12); its buttons do nothing."""
     p = subprocess.Popen(["notify-send", "-p", "-a", "Logins", "-i", "security-high", "-u", "critical",
-                          "--action=block=Block this address", "--action=stop-ssh=Stop SSH",
-                          "--action=disconnect=Disconnect", "SSH attack (example)",
-                          "14 failed SSH logins in 10 minutes from 192.168.1.66, from your own network."],
+                          "--action=block=" + T("Block this address"), "--action=stop-ssh=" + T("Stop SSH"),
+                          "--action=disconnect=" + T("Disconnect"), T("SSH attack (example)"),
+                          T("{count} failed SSH logins in 10 minutes from {address}, from your own network.").format(
+                              count=14, address="192.168.1.66")],
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     nid = p.stdout.readline().strip()  # printed at once; then it waits for a click
     time.sleep(float(os.environ.get("MECCANICOS_LOGINS_DEMO_SECONDS", "12")))
@@ -560,8 +583,8 @@ def demo():
 
 
 # ---- full screen ----------------------------------------------------------------------------
-NAMES = {"ssh-ok": "SSH login", "ssh-fail": "SSH attempt failed", "password-fail": "wrong password",
-         "disk-fail": "wrong disk password"}
+NAMES = {"ssh-ok": N_("SSH login"), "ssh-fail": N_("SSH attempt failed"), "password-fail": N_("wrong password"),
+         "disk-fail": N_("wrong disk password")}
 
 
 def history(days=7):
@@ -591,19 +614,19 @@ class App:
 
     def buttons(self):
         if self.view == "history":
-            return [("Block address", "b", self.block), ("Trust", "t", self.trust),
-                    ("Now", "n", lambda: self.go("now")), ("Quit", "q", None)]
+            return [(T("Block address"), "b", self.block), (T("Trust"), "t", self.trust),
+                    (T("Now"), "n", lambda: self.go("now")), (T("Quit"), "q", None)]
         if self.view == "blocked":
-            return [("Unblock", "u", self.unblock), ("Now", "n", lambda: self.go("now")), ("Quit", "q", None)]
-        return [("History", "h", lambda: self.go("history")), ("Blocked", "b", lambda: self.go("blocked")),
-                ("End remote sessions", "e", self.end),
-                ("Stop SSH", "s", self.stop_ssh) if self.ssh else ("Start SSH", "s", self.start_ssh),
-                ("Disconnect", "d", self.disconnect) if self.net else ("Reconnect", "c", self.reconnect),
-                ("Quit", "q", None)]
+            return [(T("Unblock"), "u", self.unblock), (T("Now"), "n", lambda: self.go("now")), (T("Quit"), "q", None)]
+        return [(T("History"), "h", lambda: self.go("history")), (T("Blocked"), "b", lambda: self.go("blocked")),
+                (T("End remote sessions"), "e", self.end),
+                (T("Stop SSH"), "s", self.stop_ssh) if self.ssh else (T("Start SSH"), "s", self.start_ssh),
+                (T("Disconnect"), "d", self.disconnect) if self.net else (T("Reconnect"), "c", self.reconnect),
+                (T("Quit"), "q", None)]
 
     def go(self, view):
         self.view, self.focus = view, 0
-        self.say("Reading the journal…" if view == "history" else "")
+        self.say(T("Reading the journal…") if view == "history" else "")
         self.draw()
         self.load()
         self.say("")
@@ -612,7 +635,7 @@ class App:
         self.msg, self.err = msg, err
 
     def done(self, ok, out):
-        self.say(("✓ " if ok else "✗ ") + (out.splitlines()[-1] if out else ("done" if ok else "failed")), not ok)
+        self.say(("✓ " if ok else "✗ ") + (out.splitlines()[-1] if out else (T("done") if ok else T("failed"))), not ok)
         self.load()
 
     def chosen(self):
@@ -622,15 +645,15 @@ class App:
     def block(self):
         e = self.chosen()
         if not e or not e.get("ip"):
-            return self.say("Choose a line with an address.")
+            return self.say(T("Choose a line with an address."))
         self.done(*as_root("block", e["ip"], "60"))
 
     def trust(self):
         e = self.chosen()
         if not e or not (e.get("ip") or e.get("key")):
-            return self.say("Choose a line with an address.")
+            return self.say(T("Choose a line with an address."))
         trust(e["key"] or e["ip"])
-        self.say(f"✓ {e['key'] or e['ip']} trusted: no alerts for it.")
+        self.say("✓ " + T("{address} trusted: no alerts for it.").format(address=e["key"] or e["ip"]))
 
     def unblock(self):
         ip = self.chosen()
@@ -638,20 +661,20 @@ class App:
             self.done(*as_root("unblock", ip))
 
     def end(self):
-        if ui.confirm(self.scr, "End every remote session (SSH)?", yes="End them"):
+        if ui.confirm(self.scr, T("End every remote session (SSH)?"), yes=T("End them")):
             self.done(*as_root("end-sessions"))
 
     def stop_ssh(self):
-        if ui.confirm(self.scr, "Stop SSH? Remote sessions end; nobody can log in remotely\nuntil you start it again.",
-                      yes="Stop SSH"):
+        if ui.confirm(self.scr, T("Stop SSH? Remote sessions end; nobody can log in remotely\nuntil you start it again."),
+                      yes=T("Stop SSH")):
             self.done(*as_root("stop-ssh"))
 
     def start_ssh(self):
         self.done(*as_root("start-ssh"))
 
     def disconnect(self):
-        if ui.confirm(self.scr, "Disconnect? Remote sessions end, SSH stops, every network\n(Wi-Fi, cable, Bluetooth) "
-                                "goes off and the screen locks.", yes="Disconnect"):
+        if ui.confirm(self.scr, T("Disconnect? Remote sessions end, SSH stops, every network\n(Wi-Fi, cable, Bluetooth) "
+                                  "goes off and the screen locks."), yes=T("Disconnect")):
             self.done(*disconnect())
 
     def reconnect(self):
@@ -662,20 +685,22 @@ class App:
         s.erase()
         h, w = s.getmaxyx()
         if h < 12 or w < 60:
-            ui.put(s, 0, 0, "Make the window larger.")
+            ui.put(s, 0, 0, T("Make the window larger."))
             s.refresh()
             return
-        state = f"SSH {'on' if self.ssh else 'off'} · network {'on' if self.net else 'OFF'}"
-        ui.bar(s, 0, {"now": "Logins › connected now", "history": "Logins › the last 7 days",
-                      "blocked": "Logins › blocked addresses"}[self.view], state)
+        state = (T("SSH on") if self.ssh else T("SSH off")) + " · " + (T("network on") if self.net else T("network OFF"))
+        ui.bar(s, 0, {"now": T("Logins › connected now"), "history": T("Logins › the last 7 days"),
+                      "blocked": T("Logins › blocked addresses")}[self.view], state)
         y = 2
         rows = self.rows()
         if self.view == "now":
-            head, empty = f"  {'What':<34}{'Who':<14}From", "Nobody is connected from another computer."
+            head = f"  {ui.pad(T('What'), 34)}{ui.pad(T('Who'), 14)}{T('From')}"
+            empty = T("Nobody is connected from another computer.")
         elif self.view == "history":
-            head, empty = f"  {'When':<16}{'What':<22}{'Who':<14}From", "Nothing in the last 7 days."
+            head = f"  {ui.pad(T('When'), 16)}{ui.pad(T('What'), 22)}{ui.pad(T('Who'), 14)}{T('From')}"
+            empty = T("Nothing in the last 7 days.")
         else:
-            head, empty = "  Address", "No address is blocked."
+            head, empty = "  " + T("Address"), T("No address is blocked.")
         ui.put(s, y, 0, head, ui.attr(ui.HEADING))
         ui.put(s, y + 1, 0, "─" * w, ui.attr(ui.BORDER))
         y += 2
@@ -687,12 +712,13 @@ class App:
         for i, r in enumerate(rows[top: top + list_h]):
             n = top + i
             if self.view == "now":
-                line, a = f"  {r['what'][:33]:<34}{r['who'][:13]:<14}{r['from']}", ui.attr(ui.NORMAL)
+                line, a = f"  {ui.pad(ui.fit(r['what'], 33), 34)}{r['who'][:13]:<14}{r['from']}", ui.attr(ui.NORMAL)
             elif self.view == "history":
-                what = NAMES.get(r["kind"], r["kind"])
+                what = T(NAMES[r["kind"]]) if r["kind"] in NAMES else r["kind"]
                 if r["kind"] == "password-fail":
-                    what += f" ({PLACES.get(r['service'], r['service'])})"
-                line = f"  {datetime.datetime.fromtimestamp(r['time']).strftime('%a %d %H:%M'):<16}{what[:21]:<22}{r['user'][:13]:<14}{r['ip']}"
+                    what += f" ({place(r['service'])})"
+                stamp = datetime.datetime.fromtimestamp(r["time"]).strftime("%a %d %H:%M")
+                line = f"  {ui.pad(stamp, 16)}{ui.pad(ui.fit(what, 21), 22)}{r['user'][:13]:<14}{r['ip']}"
                 bad = r["kind"] != "ssh-ok" or not known(self.state, r["ip"], r["key"])
                 a = ui.attr(ui.ERR if r["kind"] in ("password-fail", "disk-fail") or
                             (r["kind"] == "ssh-ok" and bad) else ui.DIM if r["kind"] == "ssh-fail" else ui.NORMAL)
@@ -705,7 +731,8 @@ class App:
         ui.put(s, h - 4, 0, "─" * w, ui.attr(ui.BORDER))
         ui.buttons(s, h - 3, 1, [(l, k) for l, k, _ in self.buttons()], self.focus)
         ui.message(s, h - 2, 1, ("✗ " if self.err and not self.msg.startswith("✗") else "") + self.msg)
-        ui.keybar(s, h - 1, [("↑↓", "move"), ("←→", "button"), ("Enter", "press"), ("r", "reload"), ("q", "quit")])
+        ui.keybar(s, h - 1, [("↑↓", T("move")), ("←→", T("button")), ("Enter", T("press")), ("r", T("reload")),
+                             ("q", T("quit"))])
         s.refresh()
 
     def run(self):
@@ -737,7 +764,7 @@ class App:
                 self.go("now")
             elif k == "r":
                 self.load()
-                self.say("reloaded")
+                self.say(T("reloaded"))
             elif isinstance(k, str):
                 for i, (_, key, fn) in enumerate(self.buttons()):
                     if k.lower() == key:
@@ -756,11 +783,11 @@ def usage_error(problem):
 
 def main(argv):
     if argv and argv[0] in ("-h", "--help", "help"):
-        print(__doc__.strip())
+        print(T(__doc__).strip())
         return 0
     if not argv:
         if not sys.stdout.isatty():
-            usage_error("the full-screen view needs a terminal")
+            usage_error(T("the full-screen view needs a terminal"))
         locale.setlocale(locale.LC_ALL, "")
         os.environ.setdefault("ESCDELAY", "25")
         curses.wrapper(lambda scr: (ui.init(), App(scr).run()))
@@ -783,38 +810,40 @@ def main(argv):
         state = load_state()
         evs = list(journal(since=time.time() - days * 86400))
         if not evs:
-            print(f"Nothing in the last {days} days.")
+            print(T("Nothing in the last {days} days.").format(days=days))
         for e in evs:
-            what = NAMES[e["kind"]] + (f" ({PLACES.get(e['service'], e['service'])})" if e["service"] else "")
-            mark = "" if e["kind"] != "ssh-ok" or known(state, e["ip"], e["key"]) else "  (new)"
-            print(f"{datetime.datetime.fromtimestamp(e['time']):%Y-%m-%d %H:%M}  {what:<34} {e['user']:<12} {e['ip']}{mark}")
+            what = T(NAMES[e["kind"]]) + (f" ({place(e['service'])})" if e["service"] else "")
+            mark = "" if e["kind"] != "ssh-ok" or known(state, e["ip"], e["key"]) else "  " + T("(new)")
+            what += " " * max(0, 34 - ui.cols(what))
+            print(f"{datetime.datetime.fromtimestamp(e['time']):%Y-%m-%d %H:%M}  {what} {e['user']:<12} {e['ip']}{mark}")
         return 0
     if cmd == "now":
         rows = remote_now()
-        print(f"SSH {'on' if ssh_on() else 'off'}, network {'on' if network_on() else 'off'}.")
+        print((T("SSH on") if ssh_on() else T("SSH off")) + ", " + (T("network on") if network_on() else T("network off")) + ".")
         if not rows:
-            print("Nobody is connected from another computer.")
+            print(T("Nobody is connected from another computer."))
         for r in rows:
-            print(f"{r['what']:<34} {r['who']:<12} {r['from']}")
+            what = r["what"] + " " * max(0, 34 - ui.cols(r["what"]))
+            print(f"{what} {r['who']:<12} {r['from']}")
         return 0
     if cmd == "trust":
         if len(args) != 1:
-            usage_error("trust needs an IP or a key (SHA256:...)")
+            usage_error(T("trust needs an IP or a key (SHA256:...)"))
         trust(args[0])
         return 0
     if cmd in ("block", "unblock", "blocked", "disconnect", "reconnect"):
         if cmd in ("block", "unblock") and not args:
-            usage_error(f"{cmd} needs an IP")
+            usage_error(T("{command} needs an IP").format(command=cmd))
         if cmd in ("block", "unblock"):
             try:
                 ipaddress.ip_address(args[0].split("%")[0])
             except ValueError:
-                usage_error(f"not an IP address: {args[0]}")
+                usage_error(T("not an IP address: {address}").format(address=args[0]))
         ok, out = disconnect() if cmd == "disconnect" else reconnect() if cmd == "reconnect" else as_root(cmd, *args)
         if out:
             print(out, file=sys.stdout if ok else sys.stderr)
         return 0 if ok else 1
-    usage_error(f"unknown command '{cmd}'")
+    usage_error(T("unknown command '{command}'").format(command=cmd))
 
 
 if __name__ == "__main__":

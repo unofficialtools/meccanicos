@@ -9,6 +9,7 @@
 }:
 let
   inherit (import ./not-root.nix) notRoot;
+  tSh = import ./i18n-sh.nix pkgs;
   # ---- Command bar ---------------------------------------------------------
   rofiTheme = pkgs.writeText "mos-ask.rasi" ''
     * {
@@ -61,7 +62,7 @@ let
       coreutils
       util-linux # setsid
     ];
-    text = notRoot "mos-ask" + ''
+    text = tSh "mos-ask" + notRoot "mos-ask" + ''
       export MECCANICOS_ASK_THEME=${rofiTheme}
       exec ${pkgs.bash}/bin/bash ${../scripts/mos-ask.sh} "$@"
     '';
@@ -76,7 +77,7 @@ let
       libnotify
       coreutils
     ];
-    text = notRoot "mos-screenshot" + builtins.readFile ../scripts/mos-screenshot.sh;
+    text = tSh "mos-screenshot" + notRoot "mos-screenshot" + builtins.readFile ../scripts/mos-screenshot.sh;
   };
 
   mos-hidpi = pkgs.writeShellApplication {
@@ -87,43 +88,10 @@ let
       gnugrep
       coreutils
     ];
-    text = notRoot "mos-hidpi" + builtins.readFile ../scripts/mos-hidpi.sh;
+    text = tSh "mos-hidpi" + notRoot "mos-hidpi" + builtins.readFile ../scripts/mos-hidpi.sh;
   };
 
   # ---- Cheat sheet ("shortcuts" in the command bar) -------------------------
-  keys = [
-    [ "Super+Space  ·  Alt+F2" "Command bar: apps, websites, commands, web search" ]
-    [ "shortcuts  (in the command bar)" "This cheat sheet" ]
-    [ "Ctrl+Alt+T" "Terminal" ]
-    [ "Super+E" "Files" ]
-    [ "Super+← / →" "Snap window to the left / right half" ]
-    [ "Alt+F10  ·  Alt+F9" "Maximize / restore  ·  minimize" ]
-    [ "Alt+F7  ·  Alt+F8" "Move · resize the window: mouse or arrows, click or Enter" ]
-    [ "Alt+F11" "Fullscreen" ]
-    [ "Alt+F4" "Close window" ]
-    [ "Alt+Tab" "Switch window (this workspace)" ]
-    [ "Super+Tab" "Next window of the same app" ]
-    [ "Ctrl+F1 … F4" "Go to workspace 1–4" ]
-    [ "Super+Shift+1 … 4" "Move window to workspace 1–4" ]
-    [ "Ctrl+Alt+D" "Show desktop" ]
-    [ "Ctrl+Alt+L" "Lock screen" ]
-    [ "Super+P" "Displays" ]
-    [ "Print  ·  Alt+Print  ·  Shift+Print" "Screenshot: screen · window · area (copied)" ]
-    [ "Super+V" "Clipboard history" ]
-    [ "Super+." "Emoji picker" ]
-    [ "Ctrl+Alt+Del" "Log out, restart, shut down" ]
-    [ "Super+Shift+Esc" "Disconnect: remote sessions end, networks off (Reconnect)" ]
-  ];
-  cheatSheet = pkgs.writeText "mos-keys.txt" (
-    lib.concatMapStringsSep "\n" (
-      k:
-      let
-        key = builtins.elemAt k 0;
-        pad = 40 - builtins.stringLength key;
-      in
-      key + lib.concatStrings (lib.genList (_: " ") (if pad > 1 then pad else 1)) + builtins.elemAt k 1
-    ) keys
-  );
   keysTheme = pkgs.writeText "mos-keys.rasi" ''
     @import "${rofiTheme}"
     * { font: "JetBrainsMono Nerd Font,DejaVu Sans Mono,monospace 13"; }
@@ -137,14 +105,45 @@ let
     element selected.normal { background-color: transparent; }
   '';
   mos-keys = pkgs.writeShellScriptBin "mos-keys" ''
+    ${tSh "mos-keys"}
     ${notRoot "mos-keys"}
     case "''${1-}" in
       "") ;;
-      -h | --help | help) printf '%s\n\n  %s\n' "mos-keys - show the keyboard shortcuts (also: shortcuts in the command bar; Esc closes)" "mos-keys   (no options)"; exit 0 ;;
-      *) echo "mos-keys: unknown option $1 (mos-keys --help)" >&2; exit 2 ;;
+      -h | --help | help) printf '%s\n\n  %s\n' "$(T 'mos-keys - show the keyboard shortcuts (also: shortcuts in the command bar; Esc closes)')" "$(T 'mos-keys   (no options)')"; exit 0 ;;
+      *) Tf 'mos-keys: unknown option %s (mos-keys --help)\n' "$1" >&2; exit 2 ;;
     esac
-    exec ${pkgs.rofi}/bin/rofi -dpi 0 -dmenu -no-custom -p "Keyboard shortcuts — Esc to close" \
-      -theme ${keysTheme} < ${cheatSheet} >/dev/null
+    # A shortcut, then what it does from column 41 (the key's length in
+    # bytes, LC_ALL=C, as the cheat sheet always had it).
+    row() {
+      local n=$((40 - ''${#1}))
+      [ "$n" -gt 1 ] || n=1
+      printf '%s%*s%s\n' "$1" "$n" "" "$2"
+    }
+    (
+      LC_ALL=C
+      row 'Super+Space  ·  Alt+F2' "$(T 'Command bar: apps, websites, commands, web search')"
+      row "shortcuts  $(T '(in the command bar)')" "$(T 'This cheat sheet')"
+      row 'Ctrl+Alt+T' "Terminal"
+      row 'Super+E' "$(T 'Files')"
+      row 'Super+← / →' "$(T 'Snap window to the left / right half')"
+      row 'Alt+F10  ·  Alt+F9' "$(T 'Maximize / restore  ·  minimize')"
+      row 'Alt+F7  ·  Alt+F8' "$(T 'Move · resize the window: mouse or arrows, click or Enter')"
+      row 'Alt+F11' "$(T 'Fullscreen')"
+      row 'Alt+F4' "$(T 'Close window')"
+      row 'Alt+Tab' "$(T 'Switch window (this workspace)')"
+      row 'Super+Tab' "$(T 'Next window of the same app')"
+      row 'Ctrl+F1 … F4' "$(T 'Go to workspace 1–4')"
+      row 'Super+Shift+1 … 4' "$(T 'Move window to workspace 1–4')"
+      row 'Ctrl+Alt+D' "$(T 'Show desktop')"
+      row 'Ctrl+Alt+L' "$(T 'Lock screen')"
+      row 'Super+P' "$(T 'Displays')"
+      row 'Print  ·  Alt+Print  ·  Shift+Print' "$(T 'Screenshot: screen · window · area (copied)')"
+      row 'Super+V' "$(T 'Clipboard history')"
+      row 'Super+.' "$(T 'Emoji picker')"
+      row 'Ctrl+Alt+Del' "$(T 'Log out, restart, shut down')"
+      row 'Super+Shift+Esc' "$(T 'Disconnect: remote sessions end, networks off (Reconnect)')"
+    ) | ${pkgs.rofi}/bin/rofi -dpi 0 -dmenu -no-custom -p "$(T 'Keyboard shortcuts — Esc to close')" \
+      -theme ${keysTheme} >/dev/null
   '';
 
   # ---- Shortcuts: XFCE defaults + ours --------------------------------------
@@ -228,30 +227,26 @@ let
       age
       git
     ];
-    text = notRoot "mos-passwords" + ''
+    text = tSh "mos-passwords" + notRoot "mos-passwords" + ''
       case "''${1-}" in
         "") ;;
-        -h | --help | help) printf '%s\n\n  %s\n' "mos-passwords - your passwords (gopass): lists them, then a shell with the common commands" "mos-passwords   (no options)"; exit 0 ;;
-        *) echo "mos-passwords: unknown option $1 (mos-passwords --help)" >&2; exit 2 ;;
+        -h | --help | help) printf '%s\n\n  %s\n' "$(T 'mos-passwords - your passwords (gopass): lists them, then a shell with the common commands')" "$(T 'mos-passwords   (no options)')"; exit 0 ;;
+        *) Tf 'mos-passwords: unknown option %s (mos-passwords --help)\n' "$1" >&2; exit 2 ;;
       esac
       if ! gopass ls >/dev/null 2>&1; then
-        echo "No password store yet. Creating one, encrypted with age:"
-        echo "choose a passphrase you will remember - it unlocks every password."
+        printf '%s\n' "$(T 'No password store yet. Creating one, encrypted with age:
+choose a passphrase you will remember - it unlocks every password.')"
         echo
-        gopass setup --crypto age --storage fs || { echo "Setup cancelled."; exec bash; }
+        gopass setup --crypto age --storage fs || { printf '%s\n' "$(T 'Setup cancelled.')"; exec bash; }
         echo
       fi
       gopass ls
-      cat <<'TIPS'
-
-        gopass show -c web/github     copy a password (clears after 45 s)
-        gopass generate web/github    new random password
-        gopass insert web/github      type one in        gopass edit web/github
-        gopass find github            search             gopass rm web/github
-        gopass otp web/github         one-time code (store "otpauth://..." in the entry)
-
-      Store: ~/.local/share/gopass/stores/root (keep it in the persistent home or a vault).
-      TIPS
+      printf '\n%s\n\n%s\n' "$(T '  gopass show -c web/github     copy a password (clears after 45 s)
+  gopass generate web/github    new random password
+  gopass insert web/github      type one in        gopass edit web/github
+  gopass find github            search             gopass rm web/github
+  gopass otp web/github         one-time code (store "otpauth://..." in the entry)')" \
+        "$(T 'Store: ~/.local/share/gopass/stores/root (keep it in the persistent home or a vault).')"
       exec bash
     '';
   };
@@ -269,24 +264,24 @@ let
       gawk
       gnused
     ];
-    text = ''
+    text = tSh "mos-about" + ''
       case "''${1-}" in
         "") ;;
-        -h | --help | help) printf '%s\n\n  %s\n' "mos-about - this computer's ${distro.name} build, NixOS, kernel, CPU, graphics, memory and disks" "mos-about   (no options)"; exit 0 ;;
-        *) echo "mos-about: unknown option $1 (mos-about --help)" >&2; exit 2 ;;
+        -h | --help | help) printf '%s\n\n  %s\n' "$(Tf "mos-about - this computer's %s build, NixOS, kernel, CPU, graphics, memory and disks" "${distro.name}")" "$(T 'mos-about   (no options)')"; exit 0 ;;
+        *) Tf 'mos-about: unknown option %s (mos-about --help)\n' "$1" >&2; exit 2 ;;
       esac
       t=$'\e[1;38;5;214m' k=$'\e[38;5;180m' r=$'\e[0m'
       row() { printf '  %s%-8s%s %s\n' "$k" "$1" "$r" "$2"; }
       iec() { numfmt --to=iec-i --suffix=B --format=%.1f "$1" | sed -E 's/([0-9])([KMGTP]?iB)$/\1 \2/'; }
 
       printf '\n  %s${distro.name}%s  ${homepage}\n\n' "$t" "$r"
-      where=installed
+      where=$(T 'installed')
       # shellcheck disable=SC1091
-      [ -n "$(. /etc/os-release; echo "''${IMAGE_VERSION:-}")" ] && where="live USB"
-      row ${distro.name} "built $(cat /etc/${distro.id}/version 2>/dev/null || echo "(unknown)"), $where"
-      row NixOS "$(nixos-version 2>/dev/null || echo "(unknown)")"
+      [ -n "$(. /etc/os-release; echo "''${IMAGE_VERSION:-}")" ] && where=$(T 'live USB')
+      row ${distro.name} "$(Tf 'built %s, %s' "$(cat /etc/${distro.id}/version 2>/dev/null || T '(unknown)')" "$where")"
+      row NixOS "$(nixos-version 2>/dev/null || T '(unknown)')"
       row Kernel "$(uname -r)"
-      row CPU "$(lscpu | sed -n 's/^Model name: *//p' | head -n1), $(nproc) threads"
+      row CPU "$(Tf '%s, %s threads' "$(lscpu | sed -n 's/^Model name: *//p' | head -n1)" "$(nproc)")"
       # Each graphics card's kernel driver, and mos-gpu-driver's choice for
       # NVIDIA cards (mos-doctor display shows the same).
       gfx=""
@@ -303,26 +298,26 @@ let
           0x15ad) vendor=VMware ;;
           0x80ee) vendor=VirtualBox ;;
         esac
-        drv="no driver"
+        drv=$(T 'no driver')
         if [ -L "$d/driver" ]; then drv=$(basename "$(readlink "$d/driver")"); fi
         gfx="''${gfx:+$gfx, }$drv ($vendor)"
       done
       case $(mos-gpu-driver 2>/dev/null || true) in
-        nvidia) gfx="''${gfx:-none found}; NVIDIA cards: nvidia, NVIDIA's own driver" ;;
-        open) gfx="''${gfx:-none found}; NVIDIA cards: nouveau, the open driver" ;;
+        nvidia) gfx=$(Tf "%s; NVIDIA cards: nvidia, NVIDIA's own driver" "''${gfx:-$(T 'none found')}") ;;
+        open) gfx=$(Tf '%s; NVIDIA cards: nouveau, the open driver' "''${gfx:-$(T 'none found')}") ;;
       esac
-      row Graphics "''${gfx:-none found} (mos-gpu-driver)"
+      row "$(T 'Graphics')" "''${gfx:-$(T 'none found')} (mos-gpu-driver)"
       read -r total avail < <(free -b | awk '/^Mem:/ {print $2, $7}')
-      row RAM "$(iec "$total"), $(iec "$avail") free"
+      row RAM "$(Tf '%s, %s free' "$(iec "$total")" "$(iec "$avail")")"
       # Every disk: its size, and how much of its mounted space is free.
       for d in $(lsblk -dnr -o NAME,TYPE | awk '$2 == "disk" && $1 !~ /^zram/ {print $1}'); do
         size=$(lsblk -dnb -o SIZE "/dev/$d")
         model=$(lsblk -dn -o MODEL "/dev/$d" | sed 's/ *$//')
         read -r fs av < <(lsblk -nbr -o FSSIZE,FSAVAIL "/dev/$d" | awk 'NF == 2 {s += $1; a += $2} END {print s + 0, a + 0}')
-        if [ "$fs" -gt 0 ]; then free="$((100 * av / fs))% free"; else free="not mounted"; fi
-        row Disk "$d  $(iec "$size")  $free''${model:+  ($model)}"
+        if [ "$fs" -gt 0 ]; then free=$(Tf '%s%% free' "$((100 * av / fs))"); else free=$(T 'not mounted'); fi
+        row "$(T 'Disk')" "$d  $(iec "$size")  $free''${model:+  ($model)}"
       done
-      printf '\n  Press any key to close.'
+      printf '\n  %s' "$(T 'Press any key to close.')"
       read -rsn1 || true
     '';
   };
@@ -359,6 +354,7 @@ let
   # Top bar CPU use: busy share of all cores since the previous call (every
   # 2 s; the first call averages since boot). Click: btop.
   mos-cpu = pkgs.writeShellScript "mos-cpu" ''
+    ${tSh "mos-cpu"}
     read -r _ user nice system idle iowait irq softirq steal _ </proc/stat
     total=$((user + nice + system + idle + iowait + irq + softirq + steal))
     busy=$((total - idle - iowait))
@@ -368,12 +364,13 @@ let
       dt=$((total - ptotal)) db=$((busy - pbusy))
     fi
     echo "$total $busy" >"$state"
-    printf '<txt>CPU %d%%</txt><txtclick>%s</txtclick><tool>CPU use, average over all cores (click: btop)</tool>\n' \
-      $(((100 * db + dt / 2) / dt)) ${lib.escapeShellArg btopWindow}
+    printf '<txt>CPU %d%%</txt><txtclick>%s</txtclick><tool>%s</tool>\n' \
+      $(((100 * db + dt / 2) / dt)) ${lib.escapeShellArg btopWindow} "$(T 'CPU use, average over all cores (click: btop)')"
   '';
   # Top bar "MeccanicOS" label (click: System Info).
   mos-label = pkgs.writeShellScript "mos-label" ''
-    printf '<txt>%s</txt><txtclick>%s</txtclick><tool>System Info</tool>\n' ${distro.name} ${lib.escapeShellArg aboutWindow}
+    ${tSh "mos-label"}
+    printf '<txt>%s</txt><txtclick>%s</txtclick><tool>%s</tool>\n' ${distro.name} ${lib.escapeShellArg aboutWindow} "$(T 'System Info')"
   '';
   terminalApps = [
     (termApp {
@@ -615,13 +612,14 @@ in
     Name=Keyboard tips
     NoDisplay=true
     Exec=${pkgs.writeShellScript "mos-welcome" ''
+      ${tSh "mos-welcome"}
       stamp="''${XDG_CONFIG_HOME:-$HOME/.config}/meccanicos/welcomed"
       [ -e "$stamp" ] && exit 0
       mkdir -p "''${stamp%/*}" && touch "$stamp"
       sleep 4
       ${pkgs.libnotify}/bin/notify-send -i input-keyboard -t 15000 \
-        "Welcome to MeccanicOS" \
-        "Super+Space: start anything.\nType shortcuts there for every keyboard shortcut."
+        "$(T 'Welcome to MeccanicOS')" \
+        "$(T 'Super+Space: start anything.\nType shortcuts there for every keyboard shortcut.')"
     ''}
   '';
 }
