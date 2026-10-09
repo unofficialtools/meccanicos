@@ -261,11 +261,12 @@ films it again in a VM (`modules/tutorial-recorder.nix`; KVM and internet).
 
 | Keys | Action |
 |---|---|
-| `Super+←/→` · `Super+↑` · `Super+↓` | snap left/right · maximize · minimize |
-| `Super+M` · `Super+R` | move · resize the window (arrow keys or mouse, then Enter) |
-| `Super+F` · `Super+Q` | fullscreen · close window |
-| `Super+1…4` · `Super+Shift+1…4` | go to / move window to workspace |
-| `Alt+Tab` · `Super+D` · `Super+L` · `Super+E` | switch window · desktop · lock · files |
+| `Super+←/→` · `Alt+F10` · `Alt+F9` | snap left/right · maximize · minimize |
+| `Alt+F7` · `Alt+F8` | move · resize the window (mouse or arrow keys, then click or Enter) |
+| `Alt+F11` · `Alt+F4` | fullscreen · close window |
+| `Ctrl+F1…F4` · `Super+Shift+1…4` | go to / move window to workspace |
+| `Alt+Tab` · `Super+Tab` | switch window (this workspace) · next window of the same app |
+| `Ctrl+Alt+D` · `Ctrl+Alt+L` · `Super+E` | desktop · lock · files |
 | `Super+V` · `Super+.` | clipboard history · emoji picker |
 | `Print` · `Alt+Print` · `Shift+Print` | screenshot screen · window · area (saved + copied) |
 | `Ctrl+Alt+T` · `Ctrl+Alt+Del` | terminal · log out / shut down |

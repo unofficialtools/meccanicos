@@ -153,7 +153,7 @@ def command_bar(t):
     t.hold(shown, time.time())
     if t.last:
         brave = t.last
-        yield t.key("super+q", "Super + Q", brave)
+        yield t.key("alt+F4", "Alt + F4", brave)
         start = time.time() + 0.3
         yield t.until(lambda: brave not in windows("brave"), 20)
         t.cut(start, time.time() - 0.2)
@@ -567,8 +567,8 @@ def steps():
         step("Keyboard shortcuts", [
             ("Super + Space, then shortcuts, lists every shortcut.",
              "Super plus Space, then type shortcuts, lists every shortcut."),
-            ("Super + M moves a window and Super + R resizes it: then the arrow keys, and Enter.",
-             "Super plus M moves a window, and Super plus R resizes it: then the arrow keys, and Enter."),
+            ("Alt + F7 moves a window and Alt + F8 resizes it: then the mouse or the arrow keys, and Enter.",
+             "Alt plus F7 moves a window, and Alt plus F8 resizes it: then the mouse or the arrow keys, and Enter."),
         ], shortcuts),
         step("That's it", [
             ("Super + Space starts everything.", "Super plus Space starts everything."),
@@ -1262,8 +1262,12 @@ def main(argv):
     # Closing the window (SIGHUP) or being stopped: silence, and close what
     # the tour opened.
     def stopped(signum, frame):
+        try:
+            curses.endwin()  # os._exit skips curses.wrapper's cleanup
+        except curses.error:
+            pass
         finish()
-        os._exit(0)
+        os._exit(130 if signum == signal.SIGINT else 0)
 
     for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, stopped)
@@ -1284,4 +1288,7 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:  # Ctrl+C: curses.wrapper has restored the terminal
+        sys.exit(130)

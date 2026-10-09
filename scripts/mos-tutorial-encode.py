@@ -153,4 +153,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 if __name__ == "__main__":
     if len(sys.argv) != 4:
         sys.exit(__doc__.strip())
-    main(*sys.argv[1:])
+    try:
+        main(*sys.argv[1:])
+    except KeyboardInterrupt:
+        sys.exit(130)

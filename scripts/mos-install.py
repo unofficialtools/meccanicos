@@ -997,7 +997,7 @@ def create_user(v):
         f"chown {u}:users {ssh}/id_ed25519 {ssh}/id_ed25519.pub"
     )
     print(f"    {u}: member of wheel (passwordless sudo). Root login is disabled.")
-    print(f"    SSH key: ~/.ssh/id_ed25519.pub")
+    print("    SSH key: ~/.ssh/id_ed25519.pub")
 
 
 def nix_str(s):
@@ -1068,8 +1068,11 @@ def main():
             return 0
     try:
         install(v)
-    except Exception as e:  # noqa: BLE001
-        print(f"\n\033[1;31mInstallation failed:\033[0m {e}\nFull log: {LOG}")
+    except (Exception, KeyboardInterrupt) as e:  # noqa: BLE001
+        if isinstance(e, KeyboardInterrupt):
+            print(f"\n\033[1;31mInstallation cancelled.\033[0m The disk is incomplete. Full log: {LOG}")
+        else:
+            print(f"\n\033[1;31mInstallation failed:\033[0m {e}\nFull log: {LOG}")
         run(["umount", "-R", TARGET], check=False, quiet=True)
         run(["cryptsetup", "close", MAPPER], check=False, quiet=True)
         input("\nPress Enter to close.")
@@ -1084,4 +1087,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:  # Ctrl+C: curses.wrapper has restored the terminal
+        sys.exit(130)

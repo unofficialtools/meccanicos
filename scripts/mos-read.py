@@ -298,4 +298,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:  # Ctrl+C: curses.wrapper has restored the terminal
+        sys.exit(130)
