@@ -23,7 +23,7 @@ runs:
       run: |
         sudo mkdir -p /mnt/nix /nix
         sudo mount --bind /mnt/nix /nix
-        sudo mkdir -p /nix/build && sudo chmod 1777 /nix/build
+        sudo mkdir -p /nix/build && sudo chmod 0755 /nix/build  # Nix refuses a world-writable build-dir
     - name: Enable KVM (for the VM tests)
       shell: bash
       run: |
