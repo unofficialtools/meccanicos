@@ -737,7 +737,7 @@ cmd_close() {
         ((${#open[@]})) || { info "No vault is open."; return; }
         for v in "${open[@]}"; do do_close "$v"; done
     fi
-    findmnt -n "$DATA_MNT" >/dev/null 2>&1 && umount "$DATA_MNT" 2>/dev/null || true
+    if findmnt -n "$DATA_MNT" >/dev/null 2>&1; then umount "$DATA_MNT" 2>/dev/null || true; fi
     [[ $GUI == 1 ]] && info "Vault locked. It is safe to remove the USB stick after shutdown."
     return 0
 }
