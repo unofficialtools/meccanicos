@@ -116,7 +116,7 @@
         in
         lib.nixosSystem {
           specialArgs = {
-            inherit distro etcNixos;
+            inherit distro;
             meccanicosRoot = root;
           };
           modules =
@@ -132,8 +132,7 @@
             ++ modules;
         };
 
-      # What the installer puts in /etc/nixos (and mos-upgrade, when it moves an
-      # older full copy of the repo to this layout): the flake.nix, and a
+      # What the installer puts in /etc/nixos: the flake.nix, and a
       # flake.lock pinned to this very commit, whose source the ISO carries, so
       # the installed system rebuilds offline. A build from uncommitted changes
       # has no commit to pin: then the first rebuild locks the latest release.
@@ -155,9 +154,14 @@
             {
               inputs = {
                 nixpkgs.url = "github:NixOS/nixpkgs/${repoLock.nodes.nixpkgs.original.ref}";
+                rigx = {
+                  url = "github:${repoLock.nodes.rigx.original.owner}/${repoLock.nodes.rigx.original.repo}";
+                  inputs.nixpkgs.follows = "nixpkgs";
+                };
                 meccanicos = {
                   url = "github:${github}/latest";
                   inputs.nixpkgs.follows = "nixpkgs";
+                  inputs.rigx.follows = "rigx";
                 };
               };
               outputs =
@@ -174,12 +178,13 @@
               root.inputs = {
                 meccanicos = "meccanicos";
                 nixpkgs = "nixpkgs";
+                rigx = "rigx";
               };
               inherit (repoLock.nodes) nixpkgs;
               meccanicos = {
                 inputs = {
                   nixpkgs = [ "nixpkgs" ];
-                  rigx = "rigx";
+                  rigx = [ "rigx" ];
                 };
                 locked = {
                   type = "github";
@@ -194,10 +199,7 @@
                 };
               };
               rigx = repoLock.nodes.rigx // {
-                inputs.nixpkgs = [
-                  "meccanicos"
-                  "nixpkgs"
-                ];
+                inputs.nixpkgs = [ "nixpkgs" ];
               };
             };
           };

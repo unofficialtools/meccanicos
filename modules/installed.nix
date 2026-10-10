@@ -9,7 +9,6 @@
   lib,
   pkgs,
   distro,
-  etcNixos,
   meccanicosRoot,
   ...
 }:
@@ -50,7 +49,7 @@ let
       pkgs.gnugrep
     ];
     text = ''
-      export MECCANICOS_ETC_NIXOS=${etcNixos} MECCANICOS_NAME=${lib.escapeShellArg distro.name}
+      export MECCANICOS_NAME=${lib.escapeShellArg distro.name}
     '' + builtins.readFile ../scripts/mos-upgrade.sh;
   };
 in

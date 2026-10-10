@@ -23,11 +23,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786696883,
-        "narHash": "sha256-ezqteoxs8lj3Hq1Q7zJuDCQaSJFo66lR2bL7cd+SoNI=",
+        "lastModified": 1791616981,
+        "narHash": "sha256-hPynIUMVKWbf9nymJa2PwwnBG41Vd33ZaTsBKave4Ps=",
         "owner": "unofficialtools",
         "repo": "rigx",
-        "rev": "efb02cb511f88a5b7698dc179000b43092f0759c",
+        "rev": "7fbc60dc2405385bfea7c0cce8006129005cfd1d",
         "type": "github"
       },
       "original": {

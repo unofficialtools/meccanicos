@@ -690,14 +690,13 @@ at its **latest release** (the `latest` tag, moved by each release), pinned in `
 | Clean-ups | automatic: old system versions and unused packages weekly (older than 30 days); crash dumps — only the newest is kept |
 
 Updates (`mos-upgrade`, and the weekly automatic ones) bring both the newest **MeccanicOS**
-release (tools, settings, fixes) and the newest **packages** of its NixOS release, as one
+release (tools, settings, fixes), the newest **packages** of its NixOS release and the newest
+rigx, as one
 rebuild: `nix flake update` in `/etc/nixos`, then `nixos-rebuild`. If the rebuild fails, the
 previous `flake.lock` is put back; the previous system stays in the boot menu. When a release
 moves to a newer NixOS (26.05 → 26.11), `mos-upgrade` follows it. Rebuilds without updating
 (`mos-rebuild`, a mos-config system setting) work offline: the source of the version you run
-stays on the disk. Systems installed before this layout (`/etc/nixos` a full copy of the
-repository) are moved to it by the first `mos-upgrade`: your files stay, the old copy is kept
-in `/etc/nixos.previous` (and put back if the build fails).
+stays on the disk.
 
 Closing the lid **suspends**, on battery and on power. With an external screen connected,
 closing the lid does nothing and you keep working on the external screen. Laptops switch
