@@ -3,7 +3,8 @@
 #
 #   ./start update              newer NixOS packages: refresh flake.lock, rebuild the ISO
 #   ./start iso                 build the ISO from flake.lock; copied to
-#                               dist/<name>-<build date>-…-<hash>.iso
+#                               dist/<name>-<build date>-…-<hash>.iso (older ones
+#                               there are removed: dist/ keeps only the newest)
 #   ./start vm [OPTIONS]        boot the ISO in QEMU, e.g. vm --cpus 4 --mem 8G
 #                               (all options: ./start vm --help)
 #   ./start tutorial-video      film the tutorial in a VM (KVM, internet; ~15 min)
@@ -50,6 +51,11 @@ build_iso() {
     else
         touch "$dest" # newest again, for burn
     fi
+    # dist/ keeps only the newest ISO.
+    local old
+    for old in dist/*.iso; do
+        [[ $old == "$dest" ]] || { echo "[iso] removing the older $old"; rm -f -- "$old"; }
+    done
     ls -lh "$dest"
 }
 
