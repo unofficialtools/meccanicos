@@ -40,8 +40,9 @@ TEMPLATE=$MECCANICOS_ETC_NIXOS/flake.nix
 GITHUB=$(sed -n 's|.*url = "github:\([^"]*\)/latest".*|\1|p' "$TEMPLATE") # owner/repo
 if [[ $EUID -ne 0 && $mode != check ]]; then exec sudo "$(readlink -f "$0")" "$@"; fi
 
-# /etc/nixos in the current layout (vs a full copy of the repository).
-thin() { grep -q 'meccanicos.lib.mkInstalled' "$DEST/flake.nix" 2>/dev/null; }
+# /etc/nixos in the current layout, vs a full copy of the repository (which
+# has modules/; its flake.nix mentions mkInstalled too, so that tells nothing).
+thin() { [[ -f $DEST/flake.nix && ! -d $DEST/modules ]]; }
 locked() { jq -r "$1 // empty" "$DEST/flake.lock" 2>/dev/null; }
 day() { [[ -n $1 ]] && date -d "@$1" +%F || echo "?"; }
 
@@ -73,7 +74,8 @@ if ! thin && [[ $mode != auto ]]; then
     migrated=1
 fi
 
-# Put things back as they were (the rebuild failed, or Ctrl+C).
+# Put things back as they were: on any way out but success (a failed
+# download or rebuild, an error, Ctrl+C).
 undo() {
     if ((migrated)); then
         rm -rf "$DEST"
@@ -84,21 +86,28 @@ undo() {
     fi
     return 0
 }
-trap 'echo; echo "Stopped: putting the previous $DEST back." >&2; undo; exit 130' INT TERM
+finished=0 # set once it worked; until then, any way out puts things back
+on_exit() {
+    if ((!finished)); then
+        echo "Putting the previous $DEST back." >&2
+        undo
+    fi
+}
+trap 'exit 130' INT TERM
+trap on_exit EXIT
 
 cp "$DEST/flake.nix" "$DEST/flake.nix.previous"
 cp "$DEST/flake.lock" "$DEST/flake.lock.previous" 2>/dev/null || rm -f "$DEST/flake.lock.previous"
 echo "Downloading the newest $NAME and NixOS packages..."
 if ! nix flake update --flake "$DEST"; then
-    undo
     echo "mos-upgrade: could not download the newest (offline?). Nothing changed." >&2
     exit 1
 fi
 
 # A release on a newer NixOS: follow it (its modules are written for it).
 if thin; then
-    src=$(nix flake archive --json "$DEST" | jq -r '.inputs.meccanicos.path')
-    want=$(jq -r '.nodes.nixpkgs.original.ref // empty' "$src/flake.lock")
+    src=$(nix flake archive --json "$DEST" | jq -r '.inputs.meccanicos.path // empty')
+    want=$(jq -r '.nodes.nixpkgs.original.ref // empty' "$src/flake.lock" 2>/dev/null || true)
     have=$(locked .nodes.nixpkgs.original.ref)
     if [[ -n $want && -n $have && $want != "$have" ]]; then
         echo "$NAME now uses NixOS ${want#nixos-} (was ${have#nixos-}): following it."
@@ -108,6 +117,7 @@ if thin; then
 fi
 
 if ((!migrated)) && cmp -s "$DEST/flake.lock" "$DEST/flake.lock.previous"; then
+    finished=1
     rm -f "$DEST/flake.nix.previous"
     echo "Already up to date: $NAME $(locked .nodes.meccanicos.locked.rev | cut -c1-7)."
     exit 0
@@ -117,6 +127,7 @@ how=switch
 [[ $mode == switch ]] || how=boot
 echo "Building the new system ($how)..."
 if nixos-rebuild "$how" --flake "$DEST#installed"; then
+    finished=1
     rm -f "$DEST/flake.nix.previous"
     echo
     new=$(locked .nodes.meccanicos.locked.rev | cut -c1-7)
@@ -128,7 +139,6 @@ if nixos-rebuild "$how" --flake "$DEST#installed"; then
     echo "Something wrong? Pick the previous entry in the boot menu when the computer starts."
 else
     echo >&2
-    echo "The new version did not build: putting the previous $DEST back." >&2
-    undo
+    echo "The new version did not build." >&2
     exit 1
 fi

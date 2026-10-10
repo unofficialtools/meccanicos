@@ -477,8 +477,13 @@ do_open() {
             die "Wrong passphrase, or $src is not a LUKS vault."
     fi
     mkdir -p "$mp"
-    if ! findmnt -n "$mp" >/dev/null 2>&1; then
-        mount "/dev/mapper/$name" "$mp"
+    if ! findmnt -n "$mp" >/dev/null 2>&1 && ! mount "/dev/mapper/$name" "$mp"; then
+        # The passphrase was right, but there is no filesystem inside: most
+        # likely a create-file/create-home that was stopped while formatting.
+        rmdir "$mp" 2>/dev/null || true
+        cryptsetup close "$name" || true
+        die "$(basename "$src") unlocks but holds no usable filesystem (was making it stopped
+part-way?). Locked again. If it never held files, delete it and create it again."
     fi
     chown "$(target_user):" "$mp" 2>/dev/null || true
     # mkfs's root-only lost+found: file managers say "Permission denied" on it
