@@ -15,10 +15,11 @@
   config,
   lib,
   pkgs,
+  meccanicosRoot,
   ...
 }:
 let
-  file = ../meccanicos.toml;
+  file = meccanicosRoot + "/meccanicos.toml"; # /etc/nixos (flake.nix: mkInstalled)
   s = if builtins.pathExists file then builtins.fromTOML (builtins.readFile file) else { };
   has = k: s ? ${k};
   lidAction = {

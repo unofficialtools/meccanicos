@@ -134,8 +134,17 @@ def discover():
         key = (d["model"] or d["info"]).lower() or d["uri"]
         if key not in best or rank[scheme] < rank[best[key]["uri"].split(":", 1)[0]]:
             best[key] = d
-    have = {p["uri"] for p in printers()}
-    return [d for d in best.values() if d["uri"] not in have]
+    return [d for d in best.values() if not added(d)]
+
+
+def added(dev, have=None):
+    """The printer of dev already has a queue: the same address, or one
+    cups-browsed set up by itself (implicitclass://, named after the model)."""
+    have = printers() if have is None else have
+    model = (dev["model"] or dev["info"]).lower()
+    return any(p["uri"] == dev["uri"] or
+               (model and p["uri"].startswith("implicitclass:") and model in (p["info"].lower(), p["name"].replace("_", " ").lower()))
+               for p in have)
 
 
 def queue_name(text):
@@ -321,9 +330,11 @@ class App:
         ui.keybar(s, h - 1, [("↑↓", "move"), ("←→", "button"), ("Enter", "press"), ("r", "reload"), ("q", "quit")])
         s.refresh()
 
-    def busy(self, msg):
+    def busy(self, msg, fn, *args, **kw):
+        """fn(*args, **kw) with a spinner and msg until it is done."""
         self.say(msg)
         self.draw()
+        return ui.wait(self.scr, msg, fn, *args, **kw)
 
     def confirm(self, question, yes):
         return ui.confirm(self.scr, question, yes=yes)
@@ -381,23 +392,25 @@ class App:
 
     def find(self):
         self.view, self.focus = "found", 0
-        self.busy("Looking for printers on the network and on USB (about 10 seconds)…")
         try:
-            self.found = discover()
+            self.found = self.busy("Looking for printers on the network and on USB (about 10 seconds)…", discover)
         except Failed as e:
             self.found = []
             return self.say(f"✗ {e}", True)
         self.sel["found"] = 0
-        self.say(f"✓ {len(self.found)} new printer(s) found. a adds the chosen one." if self.found
-                 else "No new printers found.")
+        if self.found:
+            self.say(f"✓ {len(self.found)} new printer(s) found. a adds the chosen one.")
+        elif self.printers:  # it may be there already, under the model's series name
+            self.say("No new printers found. Already added: " + ", ".join(p["name"] for p in self.printers))
+        else:
+            self.say("No printers found: is it on, and on the same network?")
 
     def add_found(self):
         if not self.found:
             return self.say("Nothing to add: s searches again.")
         d = self.found[self.sel["found"]]
-        self.busy(f"Adding {d['model'] or d['uri']}…")
         try:
-            name = add(d["uri"], dev=d)
+            name = self.busy(f"Adding {d['model'] or d['uri']}…", add, d["uri"], dev=d)
         except Failed as e:
             return self.say(f"✗ {e}", True)
         self.view, self.focus = "printers", 0

@@ -5,7 +5,12 @@
 #                                  your USB vault, ~/Dropbox/backup, …) or in the
 #                                  cloud: REMOTE:FOLDER, any rclone account you have
 #                                  (dropbox:backup after mos-dropbox login); asks
-#                                  for a backup password
+#                                  for a backup password, kept so automatic
+#                                  backups can run
+#   mos-backup init DEST --ask-password
+#                                  the same, but the password is kept nowhere:
+#                                  every command that opens the backup asks for
+#                                  it (for one-off backups; none automatic)
 #   mos-backup now               back up now
 #   mos-backup list              list snapshots
 #   mos-backup browse            get files back, full screen: pick a backup, browse
@@ -53,11 +58,29 @@ LAST="$CONF/backup.last"     # when the last backup finished (seconds)
 PRUNED="$CONF/backup.pruned" # when old data was last pruned (slow: weekly)
 MNT="$HOME/Backups"          # mos-backup mount
 
-load() {
+# Where the backup is (RESTIC_REPOSITORY), without its password.
+load_repo() {
     [[ -f $ENV ]] || { echo "No backup set up yet. Run: mos-backup init /path/to/folder" >&2; exit 1; }
     # shellcheck source=/dev/null
     . "$ENV"
-    export RESTIC_REPOSITORY RESTIC_PASSWORD_FILE="$PASSFILE"
+    export RESTIC_REPOSITORY
+}
+
+# Where it is and its password: the saved one, or (init --ask-password) asked
+# now and kept only in this command's memory (restic, and the browse window,
+# get it from RESTIC_PASSWORD).
+load() {
+    load_repo
+    if [[ -f $PASSFILE ]]; then
+        export RESTIC_PASSWORD_FILE="$PASSFILE"
+        return
+    fi
+    if [[ -z ${RESTIC_PASSWORD:-} ]]; then
+        [[ -t 0 ]] || { echo "This backup's password is not saved (init --ask-password): run mos-backup in a terminal." >&2; exit 4; }
+        read -r -s -p "Backup password: " RESTIC_PASSWORD
+        echo >&2
+    fi
+    export RESTIC_PASSWORD
 }
 
 excludes() {
@@ -102,8 +125,15 @@ age() {
 }
 
 cmd_init() {
-    local dest=${1:-}
-    [[ -n $dest ]] || { echo "usage: mos-backup init DEST" >&2; exit 2; }
+    local dest="" ask=0 a
+    for a in "$@"; do
+        case $a in
+            --ask-password) ask=1 ;;
+            -*) echo "usage: mos-backup init DEST [--ask-password]" >&2; exit 2 ;;
+            *) [[ -z $dest ]] || { echo "usage: mos-backup init DEST [--ask-password]" >&2; exit 2; }; dest=$a ;;
+        esac
+    done
+    [[ -n $dest ]] || { echo "usage: mos-backup init DEST [--ask-password]" >&2; exit 2; }
     local repo host remote remotes
     host=$(hostname)
     dest=${dest#rclone:}
@@ -126,11 +156,22 @@ cmd_init() {
     read -r -s -p "Backup password: " p1; echo
     read -r -s -p "Repeat password: " p2; echo
     [[ $p1 == "$p2" && ${#p1} -ge 8 ]] || { echo "Passwords differ or are shorter than 8 characters." >&2; exit 1; }
-    (umask 077; printf '%s' "$p1" >"$PASSFILE")
     (umask 077; printf 'RESTIC_REPOSITORY=%q\n' "$repo" >"$ENV")
+    if ((ask)); then
+        rm -f "$PASSFILE"
+        export RESTIC_PASSWORD=$p1
+        [[ -f $CONF/backup.nightly || -f $CONF/backup.hourly ]] && cmd_auto off
+    else
+        (umask 077; printf '%s' "$p1" >"$PASSFILE")
+    fi
     load
     if ! restic cat config >/dev/null 2>&1; then restic init; fi
-    echo "Backup ready at $repo. Run 'mos-backup now' (and 'mos-backup auto on' for nightly backups)."
+    if ((ask)); then
+        echo "Backup ready at $repo. Its password is not saved: 'mos-backup now' (and every"
+        echo "command that opens the backup) asks for it. No automatic backups."
+    else
+        echo "Backup ready at $repo. Run 'mos-backup now' (and 'mos-backup auto on' for nightly backups)."
+    fi
 }
 
 # now [--auto | --plugged]: --auto (the timer) tells only of failures;
@@ -138,6 +179,13 @@ cmd_init() {
 cmd_now() {
     local mode=${1:-manual}
     case $mode in manual | --auto | --plugged) ;; *) echo "usage: mos-backup now" >&2; exit 2 ;; esac
+    if [[ $mode != manual && ! -f $PASSFILE ]]; then
+        # No password to back up with by itself (init --ask-password): say so.
+        if [[ $mode == --plugged ]] && (($(age) >= 12 * 3600)); then
+            notify drive-removable-media "Backup disk plugged in" "Run mos-backup now in a terminal to back up (it asks for the password)."
+        fi
+        exit 0
+    fi
     load
     exec 9>"$CONF/backup.lock"
     flock -n 9 || { echo "A backup is already running." >&2; exit 0; }
@@ -265,6 +313,11 @@ cmd_auto() {
         hourly | off) ;;
         *) echo "usage: mos-backup auto on|hourly|off" >&2; exit 2 ;;
     esac
+    if [[ $mode != off && -f $ENV && ! -f $PASSFILE ]]; then
+        echo "Automatic backups need the password saved; this backup asks for it each time." >&2
+        echo "To save it: mos-backup init DEST again, without --ask-password (same DEST and password)." >&2
+        exit 1
+    fi
     mkdir -p "$CONF"
     rm -f "$CONF/backup.nightly" "$CONF/backup.hourly"
     [[ $mode == off ]] || : >"$CONF/backup.$mode"
@@ -293,7 +346,7 @@ schedule() {
 }
 
 cmd_status() {
-    load
+    load_repo
     echo "Destination: $RESTIC_REPOSITORY"
     echo "Automatic:   $(schedule)"
     if [[ $RESTIC_REPOSITORY == /run/media/* || $RESTIC_REPOSITORY == /media/* ]]; then
@@ -302,6 +355,11 @@ cmd_status() {
     local a
     a=$(age)
     if [[ -s $LAST ]]; then echo "Last backup: $((a / 3600)) h $((a % 3600 / 60)) min ago"; fi
+    if [[ ! -f $PASSFILE ]]; then
+        echo "Password:    not saved, asked each time (mos-backup list shows the backups)"
+        return 0
+    fi
+    export RESTIC_PASSWORD_FILE="$PASSFILE"
     timeout 60 restic snapshots --tag meccanicos --latest 1 2>/dev/null || echo "(destination not reachable right now)"
     timeout 60 restic stats --mode raw-data 2>/dev/null | grep -i 'total size' || true
     if [[ -t 1 ]]; then echo "Get files back: mos-backup browse (or versions FILE, or mount)"; fi
@@ -358,7 +416,7 @@ removable() {
 cmd_plugged() {
     sleep "${MOS_BACKUP_SETTLE:-5}" # udisks makes the folder, then mounts on it
     if [[ -f $ENV ]]; then
-        load
+        load_repo
         # Only for a backup on a plugged-in disk; cmd_now checks it is here and old.
         [[ $RESTIC_REPOSITORY == /run/media/* || $RESTIC_REPOSITORY == /media/* ]] || exit 0
         reachable || exit 0

@@ -23,7 +23,7 @@ see them: for those, plain `apps install`.
 
 Apps go into your own Nix profile (~/.nix-profile), from the same nixpkgs
 as the system. The apps that come with MeccanicOS are updated with the system
-(mos-update). Search uses search.nixos.org, or `nix search` if that is
+(mos-upgrade). Search uses search.nixos.org, or `nix search` if that is
 unreachable.
 """
 
@@ -692,14 +692,11 @@ class Manager:
         if not self.query.strip():
             return
 
-        def progress(note):
-            self.say(note)
-            self.draw()
-
         self.busy = True
-        progress(f"Searching for “{self.query}”…")
-        try:
-            self.results, note = search(self.query.strip(), progress)
+        self.say(f"Searching for “{self.query}”…")
+        self.draw()
+        try:  # search() only sets the note; ui.wait draws it with a spinner
+            self.results, note = ui.wait(self.scr, lambda: self.msg, search, self.query.strip(), self.say)
         finally:
             self.busy = False
         self.online = not note.startswith("No internet")
@@ -875,7 +872,8 @@ def main(argv):
     if cmd == "search":
         if not args:
             usage_error("search needs WORDS")
-        found, note = search(" ".join(args), lambda n: print(n, file=sys.stderr, flush=True))
+        with ui.spinning("Searching…") as progress:
+            found, note = search(" ".join(args), progress)
         if note:
             print(note, file=sys.stderr)
             if note.startswith("No internet"):

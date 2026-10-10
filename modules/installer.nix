@@ -5,7 +5,7 @@
   pkgs,
   distro,
   installedSystem,
-  flakeSource,
+  etcNixos,
   flakeCommit,
   ...
 }:
@@ -48,7 +48,7 @@ let
       export MECCANICOS_SYSTEM=${installedSystem}
       MECCANICOS_SYSTEM_DISK_BYTES=$(cat ${installedDiskBytes})
       export MECCANICOS_SYSTEM_DISK_BYTES
-      export MECCANICOS_FLAKE=${flakeSource}
+      export MECCANICOS_FLAKE=${etcNixos}
       export MECCANICOS_COMMIT=${flakeCommit}
       export MECCANICOS_NAME=${lib.escapeShellArg distro.name}
       export MECCANICOS_PYLIB=${../scripts/lib}

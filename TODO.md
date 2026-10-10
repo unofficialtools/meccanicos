@@ -6,7 +6,8 @@
       (no `VTOY_LINUX_REMOUNT`); `usb-vault stick`; VM test (`checks.ventoy`).
 
 ## Ideas
-- [x] Installed systems can follow the MeccanicOS repository: `mos-update`
+- [x] Installed systems follow the MeccanicOS repository's latest release: `mos-upgrade`
+      (`/etc/nixos` keeps only your files; `lib.mkInstalled` in `flake.nix`)
 - [ ] Optional btrfs with snapshots in the installer
 - [ ] Secure Boot (lanzaboote), making TPM unlock stronger
 - [ ] Localised installer texts

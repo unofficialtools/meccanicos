@@ -318,11 +318,17 @@ in
           machine.succeed("grep -q 'LC_TIME=it_IT.UTF-8' /etc/locale.conf")
           machine.succeed("readlink /etc/localtime | grep >/dev/null Europe/Rome")
           machine.succeed("test -f /etc/nixos/flake.nix -a -f /etc/nixos/local.nix -a -f /etc/nixos/hardware-configuration.nix")
+          # /etc/nixos: your files and a flake.nix taking the rest from the latest release
+          # (flake.nix: mkInstalled). Pinned to this ISO's commit, it evaluates offline
+          # (no flake.lock when the ISO was built from uncommitted changes).
+          machine.succeed("grep -q 'meccanicos.lib.mkInstalled' /etc/nixos/flake.nix")
+          machine.fail("test -e /etc/nixos/modules")
+          machine.succeed("test ! -e /etc/nixos/flake.lock || nix eval --offline --raw /etc/nixos#nixosConfigurations.installed.config.system.build.toplevel.drvPath", timeout=900)
           machine.succeed("cryptsetup status cryptroot | grep >/dev/null LUKS2")
           machine.succeed("mos-unlock status")
           machine.succeed("systemctl list-timers | grep >/dev/null mos-auto-upgrade")
           # Updates: what can change and how to go back; what survives a restart.
-          machine.succeed("mos-updates status | grep >/dev/null 'mos-update --check'")
+          machine.succeed("mos-updates status | grep >/dev/null 'mos-upgrade --check'")
           machine.succeed("mos-updates status | grep >/dev/null 'running'")
           machine.succeed("usb-vault summary | grep >/dev/null 'installed system'")
           machine.screenshot("installed-login")

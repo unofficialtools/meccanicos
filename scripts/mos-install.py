@@ -8,7 +8,7 @@ GPT -> 1 GiB EFI + LUKS2 -> ext4, systemd-boot. No network needed.
 Environment (set by the Nix wrapper):
   MECCANICOS_SYSTEM   store path of the installed system's toplevel
   MECCANICOS_SYSTEM_DISK_BYTES  space it takes on the target (for the progress bar)
-  MECCANICOS_FLAKE    store path of the distro flake (copied to /etc/nixos)
+  MECCANICOS_FLAKE    store path of /etc/nixos's flake.nix (+ flake.lock), see mkInstalled
   MECCANICOS_NAME     distro name, e.g. "MeccanicOS"
   MECCANICOS_ISO_LABEL  volume label of the live USB (excluded from targets)
 Testing:
@@ -1073,12 +1073,13 @@ def write_nixos_config(v, s):
 }}
 """
     write("/etc/nixos/local.nix", local)
-    # The MeccanicOS version /etc/nixos came from (mos-update shows what changed).
-    write("/etc/nixos/.mos-commit", os.environ.get("MECCANICOS_COMMIT", "unknown") + "\n")
-    print("    /etc/nixos is a copy of the distro flake + local.nix with these choices.")
+    print("    /etc/nixos: local.nix with these choices; the rest comes from the MeccanicOS release.")
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
     if os.geteuid() != 0 and not TEST:
         print("Run as root (the mos-install wrapper does this for you).")
         return 1

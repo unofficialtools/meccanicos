@@ -4,9 +4,9 @@
   mos-updates           the full-screen view: check, update, go back
   mos-updates status    the same, as plain text
 
-System (MeccanicOS + NixOS), installed: mos-update --check shows what would
-change, mos-update updates (--boot: at the next restart), mos-upgrade
-refreshes the NixOS packages. Every update keeps the system before it:
+System (MeccanicOS + NixOS), installed: mos-upgrade --check shows what is
+newer, mos-upgrade brings the newest MeccanicOS release and NixOS packages
+(--boot: at the next restart). Every update keeps the system before it:
 "Go back" runs sudo nixos-rebuild switch --rollback, and older systems are
 in the boot menu. On the live USB the system is updated by writing a newer
 ISO to the stick; the vaults on it are kept.
@@ -132,6 +132,16 @@ def auto_updates():
     return True, last + ("" if result in ("", "success") else " (it failed: journalctl -u mos-auto-upgrade)")
 
 
+def meccanicos_commit():
+    """The MeccanicOS commit /etc/nixos/flake.lock is pinned to (older
+    installs: the full copy's .mos-commit)."""
+    try:
+        with open(os.path.join(NIXOS_DIR, "flake.lock")) as f:
+            return json.load(f)["nodes"]["meccanicos"]["locked"]["rev"][:7]
+    except (OSError, ValueError, KeyError, TypeError):
+        return read(os.path.join(NIXOS_DIR, ".mos-commit"))
+
+
 def nixpkgs_date():
     """When the NixOS packages in /etc/nixos/flake.lock were published."""
     try:
@@ -212,7 +222,7 @@ def report():
         current = os.path.realpath(ROOT + "/run/current-system")
         nxt = profile_gen(os.path.join(PROFILES, "system"))
         on, last = auto_updates()
-        commit = read(os.path.join(NIXOS_DIR, ".mos-commit"))
+        commit = meccanicos_commit()
         lines = [
             f"{NAME:<11} built {build()}" + (f", commit {commit}" if commit else ""),
             f"{'NixOS':<11} {nixos()}, packages from {nixpkgs_date()}",
@@ -224,16 +234,13 @@ def report():
             lines.append(f"{'Waiting':<11} a newer system is ready: restart to use it")
         lines.append("")
         lines += [
-            Action("Check for updates", ["mos-update", "--check"], f"what the newest {NAME} would change (changes nothing)"),
-            Action("Update now", ["mos-update"], f"download the newest {NAME} and switch to it",
-                   ask=f"Update to the newest {NAME} now?\nIt downloads it, rebuilds the system and switches to it.\n"
-                       "The system before stays in the boot menu.", yes="Update"),
-            Action("Update at next restart", ["mos-update", "--boot"], "the same, used from the next start",
+            Action("Check for updates", ["mos-upgrade", "--check"], f"yours and the newest {NAME} (changes nothing)"),
+            Action("Update now", ["mos-upgrade"], f"the newest {NAME} and NixOS packages, switched to now",
+                   ask=f"Update to the newest {NAME} and NixOS packages now?\nIt downloads them, rebuilds the "
+                       "system and switches to it.\nThe system before stays in the boot menu.", yes="Update"),
+            Action("Update at next restart", ["mos-upgrade", "--boot"], "the same, used from the next start",
                    ask=f"Update to the newest {NAME} at the next restart?\nIt downloads and builds it now; "
                        "your running system does not change.", yes="Update"),
-            Action("Refresh NixOS packages", ["mos-upgrade"], f"newer packages, same {NAME} (mos-upgrade)",
-                   ask=f"Get the newest NixOS packages and switch to them?\nSame {NAME}; "
-                       "the system before stays in the boot menu.", yes="Refresh"),
         ]
         sections.append((f"System ({NAME} + NixOS)", lines))
 
@@ -256,9 +263,9 @@ def report():
             undo.append(Action("Go back to the previous system", ["nixos-rebuild", "switch", "--rollback"],
                                f"switch to system {prev} (sudo nixos-rebuild switch --rollback)",
                                ask=f"Go back to system {prev} and switch to it now?\n"
-                                   "Your files in /etc/nixos stay as they are: the next update or\n"
-                                   "mos-rebuild builds them again (mos-update keeps the previous ones\n"
-                                   "in /etc/nixos.previous).", yes="Go back", sudo=True))
+                                   "/etc/nixos stays as it is: the next update or mos-rebuild\n"
+                                   "builds it again (flake.lock.previous there is the one before).",
+                                   yes="Go back", sudo=True))
         undo.append(Note("Older systems are also in the boot menu: pick one when the computer starts."))
         sections.append(("Undo — earlier systems", undo))
 

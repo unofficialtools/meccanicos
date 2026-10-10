@@ -9,6 +9,8 @@
   lib,
   pkgs,
   distro,
+  etcNixos,
+  meccanicosRoot,
   ...
 }:
 let
@@ -32,8 +34,25 @@ let
       done
     fi
   '';
-  # Written by `mos-unlock remote` (absent in the repo).
-  remoteUnlockKeys = ../remote-unlock-keys;
+  # Written by `mos-unlock remote` into /etc/nixos (flake.nix: mkInstalled's root).
+  remoteUnlockKeys = meccanicosRoot + "/remote-unlock-keys";
+
+  # mos-upgrade (also mos-update): the newest MeccanicOS release and NixOS
+  # packages, as one rebuild. Also run weekly by mos-auto-upgrade (--auto).
+  mos-upgrade = pkgs.writeShellApplication {
+    name = "mos-upgrade";
+    runtimeInputs = [
+      config.nix.package
+      config.system.build.nixos-rebuild
+      pkgs.jq
+      pkgs.coreutils
+      pkgs.gnused
+      pkgs.gnugrep
+    ];
+    text = ''
+      export MECCANICOS_ETC_NIXOS=${etcNixos} MECCANICOS_NAME=${lib.escapeShellArg distro.name}
+    '' + builtins.readFile ../scripts/mos-upgrade.sh;
+  };
 in
 {
   options.meccanicos.autoUpgrade = lib.mkOption {
@@ -238,7 +257,8 @@ in
   };
 
   # ---- Updating the installed system --------------------------------------
-  # /etc/nixos holds the distro flake + local.nix (your install-time choices).
+  # /etc/nixos holds your own files and a flake.nix taking the rest from the
+  # MeccanicOS repository's latest release (flake.nix: mkInstalled).
   environment.systemPackages = [
     (pkgs.writeShellApplication {
       name = "mos-unlock";
@@ -252,43 +272,18 @@ in
       ];
       text = builtins.readFile ../scripts/mos-unlock.sh;
     })
-    # Newest MeccanicOS from distro.repo (flake.nix), keeping local.nix & co.
-    (pkgs.writeShellApplication {
-      name = "mos-update";
-      runtimeInputs = [
-        pkgs.git
-        pkgs.rsync
-        pkgs.coreutils
-        pkgs.gnused
-        pkgs.gnugrep
-        config.system.build.nixos-rebuild
-      ];
-      text = ''
-        export MECCANICOS_REPO=''${MECCANICOS_REPO:-${distro.repo}}
-      '' + builtins.readFile ../scripts/mos-update.sh;
-    })
+    mos-upgrade
+    # The old name: the same command.
+    (pkgs.writeShellScriptBin "mos-update" ''exec ${mos-upgrade}/bin/mos-upgrade "$@"'')
     (pkgs.writeShellScriptBin "mos-rebuild" ''
-      # Apply changes made in /etc/nixos (packages.nix, local.nix, modules/…)
+      # Apply changes made in /etc/nixos (local.nix, meccanicos.toml, …)
       case "''${1-}" in
         -h | --help)
-          echo "mos-rebuild - apply the changes made in /etc/nixos (packages.nix, local.nix, modules/...)"
+          echo "mos-rebuild - apply the changes made in /etc/nixos (local.nix, meccanicos.toml, ...)"
           echo
           echo "  mos-rebuild [NIXOS-REBUILD OPTIONS]   sudo nixos-rebuild switch --flake /etc/nixos#installed ..."
           exit 0 ;;
       esac
-      exec sudo nixos-rebuild switch --flake /etc/nixos#installed "$@"
-    '')
-    (pkgs.writeShellScriptBin "mos-upgrade" ''
-      # Pull the newest packages for the pinned NixOS release, then rebuild
-      case "''${1-}" in
-        -h | --help)
-          echo "mos-upgrade - pull the newest packages for the pinned NixOS release, then rebuild"
-          echo
-          echo "  mos-upgrade [NIXOS-REBUILD OPTIONS]   nix flake update, then mos-rebuild ..."
-          exit 0 ;;
-      esac
-      set -e
-      sudo nix flake update --flake /etc/nixos
       exec sudo nixos-rebuild switch --flake /etc/nixos#installed "$@"
     '')
   ];
@@ -364,31 +359,21 @@ in
   };
 
   # ---- Automatic updates ----------------------------------------------------
-  # Weekly: update /etc/nixos/flake.lock and build the new system for the next
-  # boot (nothing changes under your feet). A notification asks you to restart.
+  # Weekly: the newest MeccanicOS release and NixOS packages (mos-upgrade
+  # --auto), built for the next boot: nothing changes under your feet. A
+  # notification asks you to restart.
   # Turn off in /etc/nixos/local.nix with:  meccanicos.autoUpgrade = false;
   systemd.services.mos-auto-upgrade = lib.mkIf config.meccanicos.autoUpgrade {
     description = "Update MeccanicOS (applied at next boot)";
     wants = [ "network-online.target" ];
     after = [ "network-online.target" ];
     unitConfig.ConditionACPower = true; # not on battery
-    path = [
-      config.nix.package
-      config.system.build.nixos-rebuild
-      pkgs.git
-      pkgs.coreutils
-    ];
     serviceConfig = {
       Type = "oneshot";
       Nice = 15;
       IOSchedulingClass = "idle";
+      ExecStart = "${mos-upgrade}/bin/mos-upgrade --auto";
     };
-    script = ''
-      cd /etc/nixos || exit 1
-      cp flake.lock flake.lock.previous 2>/dev/null || true
-      nix flake update --flake /etc/nixos
-      nixos-rebuild boot --flake /etc/nixos#installed
-    '';
   };
   systemd.timers.mos-auto-upgrade = lib.mkIf config.meccanicos.autoUpgrade {
     wantedBy = [ "timers.target" ];

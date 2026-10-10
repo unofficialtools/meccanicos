@@ -31,7 +31,7 @@
         vaultLabel = "MOS-VAULT"; # LUKS label of the encrypted USB partition
         dataLabel = "MOS-DATA"; # label of the plain USB partition holding .luks files (max 11 chars)
         homeLabel = "MOS-HOME"; # LUKS label of the persistent-home partition
-        repo = "https://github.com/unofficialtools/meccanicos"; # mos-update fetches new versions from here
+        repo = "https://github.com/unofficialtools/meccanicos"; # installed systems follow its latest release (mkInstalled)
       };
       # --------------------------------------------------------------------
 
@@ -98,46 +98,130 @@
         ./packages.nix
       ];
 
-      # Written by the installer on the target machine (absent in the repo).
-      localModules =
-        lib.optional (builtins.pathExists ./hardware-configuration.nix) ./hardware-configuration.nix
-        ++ lib.optional (builtins.pathExists ./local.nix) ./local.nix;
+      # ---- The installed system ------------------------------------------
+      # An installed computer's /etc/nixos holds only its own files (local.nix,
+      # hardware-configuration.nix, meccanicos.toml, remote-unlock-keys) and a
+      # small flake.nix (etcNixos below) that takes everything else from this
+      # repository at its latest release:
+      #   nixosConfigurations.installed = meccanicos.lib.mkInstalled { root = ./.; };
+      # So mos-upgrade (nix flake update + rebuild) brings the newest MeccanicOS
+      # and NixOS packages together. root: the folder with those files.
+      mkInstalled =
+        {
+          root,
+          modules ? [ ],
+        }:
+        let
+          mine = name: lib.optional (builtins.pathExists (root + "/${name}")) (root + "/${name}");
+        in
+        lib.nixosSystem {
+          specialArgs = {
+            inherit distro etcNixos;
+            meccanicosRoot = root;
+          };
+          modules =
+            common
+            ++ [
+              ./modules/installed.nix
+              ./modules/settings.nix
+              # Keep this source (and rigx's) on the disk: rebuilds then work offline.
+              { system.extraDependencies = [ self.outPath rigx.outPath ]; }
+            ]
+            ++ mine "hardware-configuration.nix"
+            ++ mine "local.nix"
+            ++ modules;
+        };
 
-      # The system installed to disk by `mos-install`. On an installed
-      # machine: sudo nixos-rebuild switch --flake /etc/nixos#installed
-      installed = lib.nixosSystem {
-        specialArgs = { inherit distro; };
-        modules = common ++ [
-          ./modules/installed.nix
-          ./modules/settings.nix
-        ] ++ localModules;
-      };
+      # What the installer puts in /etc/nixos (and mos-upgrade, when it moves an
+      # older full copy of the repo to this layout): the flake.nix, and a
+      # flake.lock pinned to this very commit, whose source the ISO carries, so
+      # the installed system rebuilds offline. A build from uncommitted changes
+      # has no commit to pin: then the first rebuild locks the latest release.
+      github = lib.removePrefix "https://github.com/" distro.repo; # owner/repo
+      repoLock = builtins.fromJSON (builtins.readFile ./flake.lock);
+      etcNixos =
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          owner = builtins.head (lib.splitString "/" github);
+          repo = lib.last (lib.splitString "/" github);
+          flake = ''
+            # ${distro.name} on this computer. Your own files are here: local.nix (your
+            # choices, edit freely), hardware-configuration.nix, meccanicos.toml
+            # (mos-config's system settings) and remote-unlock-keys (mos-unlock).
+            # Everything else comes from ${distro.repo}
+            # at its latest release, pinned in flake.lock.
+            #   mos-upgrade   the newest ${distro.name} and NixOS packages, then rebuild
+            #   mos-rebuild   apply changes made to the files here
+            {
+              inputs = {
+                nixpkgs.url = "github:NixOS/nixpkgs/${repoLock.nodes.nixpkgs.original.ref}";
+                meccanicos = {
+                  url = "github:${github}/latest";
+                  inputs.nixpkgs.follows = "nixpkgs";
+                };
+              };
+              outputs =
+                { meccanicos, ... }:
+                {
+                  nixosConfigurations.installed = meccanicos.lib.mkInstalled { root = ./.; };
+                };
+            }
+          '';
+          lock = {
+            version = 7;
+            root = "root";
+            nodes = {
+              root.inputs = {
+                meccanicos = "meccanicos";
+                nixpkgs = "nixpkgs";
+              };
+              inherit (repoLock.nodes) nixpkgs;
+              meccanicos = {
+                inputs = {
+                  nixpkgs = [ "nixpkgs" ];
+                  rigx = "rigx";
+                };
+                locked = {
+                  type = "github";
+                  inherit owner repo;
+                  rev = self.rev;
+                  inherit (self) narHash lastModified;
+                };
+                original = {
+                  type = "github";
+                  inherit owner repo;
+                  ref = "latest";
+                };
+              };
+              rigx = repoLock.nodes.rigx // {
+                inputs.nixpkgs = [
+                  "meccanicos"
+                  "nixpkgs"
+                ];
+              };
+            };
+          };
+        in
+        pkgs.runCommand "${distro.id}-etc-nixos" { } (
+          ''
+            mkdir $out
+            cp ${pkgs.writeText "flake.nix" flake} $out/flake.nix
+          ''
+          + lib.optionalString (self ? rev) ''
+            cp ${pkgs.writeText "flake.lock" (builtins.toJSON lock)} $out/flake.lock
+          ''
+        );
+
+      # The system installed to disk by `mos-install`, prebuilt into the ISO
+      # (none of an installed computer's own files yet).
+      installed = mkInstalled { root = ./.; };
 
       # The live USB system, carrying the prebuilt installed system.
       live = lib.nixosSystem {
         specialArgs = {
           inherit distro buildDate buildTime;
           installedSystem = installed.config.system.build.toplevel;
-          # The flake the installer copies to /etc/nixos, without what is not
-          # the system: the web page (www/) and mos-usb (tools/). So neither is
-          # on the ISO, and changing them does not change it.
-          flakeSource = lib.cleanSourceWith {
-            src = self;
-            name = "source";
-            filter =
-              path: _type:
-              let
-                rel = lib.removePrefix "${toString self}/" (toString path);
-              in
-              !(
-                builtins.elem rel [
-                  "www"
-                  "tools"
-                ]
-                || lib.hasPrefix "www/" rel
-                || lib.hasPrefix "tools/" rel
-              );
-          };
+          inherit etcNixos;
           flakeCommit = self.shortRev or self.dirtyShortRev or "unknown";
         };
         modules = common ++ [
@@ -153,6 +237,9 @@
       nixosConfigurations = {
         inherit installed live recorder;
       };
+
+      # For an installed computer's /etc/nixos/flake.nix (see mkInstalled).
+      lib = { inherit mkInstalled; };
 
       packages.${system} = {
         iso = self.nixosConfigurations.live.config.system.build.isoImage; # nix build .#iso

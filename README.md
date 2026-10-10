@@ -429,7 +429,8 @@ mos-dropbox status | logout
 
 `mos` lists every `mos-*` command (each one answers `--help`).
 **Configuration Management** in the menu (`mos-config`) shows the common
-settings in one place — screen scale, keyboard layouts, touchpad, power, sound,
+settings in one place — screen scale, resolution and rotation (landscape or
+portrait), wallpaper, screensaver and lock, keyboard layouts, touchpad, power, sound,
 clock, time zone and, once installed, the lid, hibernation, updates, SSH and
 firewall ports, the graphics driver:
 
@@ -441,6 +442,8 @@ changes the one under the cursor (pick from a list, flip on/off, or type it),
 mos-config list                     # every setting and its value (--json too)
 mos-config set keyboard.layout us,it
 mos-config set power.lid            # without a value: what it does, the choices
+mos-config set display.rotation portrait
+mos-config set display.wallpaper ~/Pictures/beach.jpg
 mos-config export ~/stick/settings.toml --dotfiles   # take them to another computer…
 mos-config import ~/stick/settings.toml --dotfiles   # …and bring them back
 mos-config network                  # the connection, internet yes/no, VPNs
@@ -473,8 +476,8 @@ sound, the screen (including which graphics driver is used; details:
 shows everything that can change, in one place, and how to undo it:
 
 - **The system** (installed): the build you run, whether automatic updates are
-  on, and *Check for updates* (`mos-update --check`), *Update now* (`mos-update`),
-  *Update at next restart*, *Refresh NixOS packages* (`mos-upgrade`). Every
+  on, and *Check for updates* (`mos-upgrade --check`), *Update now* (`mos-upgrade`),
+  *Update at next restart* (`mos-upgrade --boot`). Every
   update keeps the system before it: *Go back to the previous system* lists them
   and switches back (`nixos-rebuild switch --rollback`); they are also in the
   boot menu. On the live USB, the system is updated by writing a newer ISO
@@ -666,14 +669,16 @@ in the configuration turns all of the above off.
 
 ## 7. Living with an installed system
 
-`/etc/nixos` is your copy of this flake plus `local.nix` (your installer choices) and `hardware-configuration.nix`.
+`/etc/nixos` holds only your own files — `local.nix` (your installer choices, edit freely),
+`hardware-configuration.nix`, `meccanicos.toml` (mos-config's system settings) and
+`remote-unlock-keys` — and a small `flake.nix` that takes everything else from this repository
+at its **latest release** (the `latest` tag, moved by each release), pinned in `flake.lock`.
 
 | Task | Command |
 |---|---|
-| Apply your edits (`packages.nix`, `local.nix`, …) | `mos-rebuild` |
+| Apply your edits (`local.nix`, …) | `mos-rebuild` |
 | Everything about updates, in one place | `mos-updates` (or **Updates** in the command bar) |
-| Update now | `mos-upgrade` (newer NixOS packages) |
-| New MeccanicOS version | `mos-update` (from the GitHub repository; `--check` shows what would change, `--boot` applies at the next restart) |
+| Update now | `mos-upgrade`: the newest MeccanicOS release and NixOS packages (`--check` shows yours and the newest, `--boot` applies at the next restart; `mos-update` is the same) |
 | Automatic updates | weekly in the background, applied at the next restart (notification); off with `mos-config set updates.auto off` |
 | SSH, firewall ports, lid, hibernation, graphics driver | `mos-config set security.ssh off`, `mos-config set security.tcp_ports 8080` … (`mos-config` lists them) |
 | Something isn't working | `mos-doctor` |
@@ -684,13 +689,15 @@ in the configuration turns all of the above off.
 | Unlock over SSH at boot (wired network) | `mos-unlock remote` (allows your `~/.ssh/authorized_keys`); then after each restart `ssh -p 2222 root@<machine>` and type the disk password. Off: `mos-unlock remove-remote` |
 | Clean-ups | automatic: old system versions and unused packages weekly (older than 30 days); crash dumps — only the newest is kept |
 
-Updates (`mos-upgrade`, and the weekly automatic ones) bring new **packages** (NixOS
-fixes, new app versions), not new **MeccanicOS** releases: `/etc/nixos` is a copy of MeccanicOS made
-at install time. `mos-update` brings it up to the latest MeccanicOS from the
-[repository](https://github.com/unofficialtools/meccanicos) (`repo` in `flake.nix`): it lists the
-files that change, keeps `local.nix`, `hardware-configuration.nix` and your remote-unlock
-keys, rebuilds and switches. The previous files are kept in `/etc/nixos.previous` (and put
-back if the build fails); the previous system stays in the boot menu.
+Updates (`mos-upgrade`, and the weekly automatic ones) bring both the newest **MeccanicOS**
+release (tools, settings, fixes) and the newest **packages** of its NixOS release, as one
+rebuild: `nix flake update` in `/etc/nixos`, then `nixos-rebuild`. If the rebuild fails, the
+previous `flake.lock` is put back; the previous system stays in the boot menu. When a release
+moves to a newer NixOS (26.05 → 26.11), `mos-upgrade` follows it. Rebuilds without updating
+(`mos-rebuild`, a mos-config system setting) work offline: the source of the version you run
+stays on the disk. Systems installed before this layout (`/etc/nixos` a full copy of the
+repository) are moved to it by the first `mos-upgrade`: your files stay, the old copy is kept
+in `/etc/nixos.previous` (and put back if the build fails).
 
 Closing the lid **suspends**, on battery and on power. With an external screen connected,
 closing the lid does nothing and you keep working on the external screen. Laptops switch

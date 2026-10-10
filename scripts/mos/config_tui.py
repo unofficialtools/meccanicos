@@ -63,6 +63,12 @@ def options(s):
         return [m for m in MINUTES if m == "never" or int(m) >= least] + [OTHER]
     if ch is cfg.percent_or_off:
         return PERCENT + [OTHER]
+    if s.key == "display.resolution":
+        return ["auto"] + cfg.screen()[1] or None
+    if s.key == "display.wallpaper":
+        return ["default"] + cfg.pictures() + [OTHER]  # other…: type a path
+    if s.key == "screensaver.show":
+        return ["blank", "random", *cfg.saver_themes()]
     if s.key in ("sound.output", "sound.input"):
         names = cfg.nodes("Sinks" if s.key == "sound.output" else "Sources").values()
         return list(dict.fromkeys(names)) or None
@@ -297,17 +303,19 @@ class App:
         self.apply(s, value)
 
     # ---- network (changed only here, when asked) ---------------------------------------
-    def flash(self, text):
-        """A note while something takes a few seconds."""
+    def flash(self, text, fn=None, *args):
+        """A note while something takes a few seconds: with fn, a spinner
+        until fn(*args) is done (its result is returned)."""
         self.msg = text
         self.draw()
+        if fn:
+            return ui.wait(self.scr, text, fn, *args, x=2)
 
     def wifi(self):
         if not any(r[1] == "wifi" for r in cfg.nm_rows("DEVICE,TYPE", "device")):
             self.msg = "✗ no Wi-Fi here (a cable works; mos-doctor network checks why)"
             return
-        self.flash("Looking for Wi-Fi networks…")
-        nets = cfg.wifi_networks()
+        nets = self.flash("Looking for Wi-Fi networks…", cfg.wifi_networks)
         width = max([len(n[0]) for n in nets] + [10])
         label = {f"{ssid:<{width}}  {sig:>3}%{'' if secured else '  open'}": (ssid, secured, on)
                  for ssid, sig, secured, on in nets}
@@ -323,7 +331,8 @@ class App:
             self.outside("Network (nmtui)", lambda: os.system("nmtui connect"), pause=False)
             return
         if pick.startswith("Disconnect from "):
-            c.run("nmcli", "device", "disconnect", self.net["device"], check=True)
+            self.flash(f"Disconnecting from {self.net['connection']}…",
+                       lambda: c.run("nmcli", "device", "disconnect", self.net["device"], check=True))
             self.msg = f"✓ disconnected from {self.net['connection']}"
             return
         ssid, secured, on = label[pick]
@@ -335,9 +344,8 @@ class App:
             password = self.prompt(f"Password for {ssid}", secret=True)
             if not password:
                 return
-        self.flash(f"Connecting to {ssid}…")
         try:
-            cfg.wifi_connect(ssid, password)
+            self.flash(f"Connecting to {ssid}…", cfg.wifi_connect, ssid, password)
         except c.Failed:
             if password or not secured:
                 raise
@@ -345,13 +353,11 @@ class App:
             password = self.prompt(f"Password for {ssid}", secret=True)
             if not password:
                 return
-            self.flash(f"Connecting to {ssid}…")
-            cfg.wifi_connect(ssid, password)
+            self.flash(f"Connecting to {ssid}…", cfg.wifi_connect, ssid, password)
         self.msg = f"✓ connected to {ssid}"
 
     def signin(self):
-        self.flash("Looking for the sign-in page…")
-        url = cfg.portal_url()
+        url = self.flash("Looking for the sign-in page…", cfg.portal_url)
         cfg.open_url(url)
         self.msg = f"✓ opened {url} in the browser: sign in there, then r to refresh"
 
@@ -366,8 +372,7 @@ class App:
         if pick in label:
             name, on = label[pick]
             if on:
-                self.flash(f"Disconnecting {name}…")
-                cfg.vpn_down(name)
+                self.flash(f"Disconnecting {name}…", cfg.vpn_down, name)
                 self.msg = f"✓ VPN {name} off"
             elif self.outside(f"VPN {name}", lambda: cfg.vpn_up(name) or True, pause="failed"):
                 self.msg = f"✓ VPN {name} on"

@@ -32,6 +32,25 @@ need_remote() { have_remote || die "not connected to Dropbox yet: run  mos-dropb
 is_mounted() { mountpoint -q "$DIR" 2>/dev/null; }
 sync_state() { cat "$SYNC_STATE" 2>/dev/null || echo off; }
 
+# Run a command with a spinner and a note on stderr until it is done (for
+# quiet waits on the network); just the note when stderr is not a terminal.
+spin() {
+    local note=$1 pid i=0 rc=0
+    shift
+    if [[ ! -t 2 ]]; then echo "$note" >&2; "$@"; return; fi
+    local f=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+    [[ ${TERM:-} == linux ]] && f=("|" / - "\\") # no braille in the console font
+    "$@" &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+        printf '\r\033[K%s %s' "${f[i++ % ${#f[@]}]}" "$note" >&2
+        sleep 0.1
+    done
+    wait "$pid" || rc=$?
+    printf '\r\033[K' >&2
+    return "$rc"
+}
+
 login() {
     if have_remote && [[ ${1:-} != --force ]]; then
         echo "Already connected to Dropbox (mos-dropbox logout first to use another account)."
@@ -68,7 +87,7 @@ mount_it() {
         die "$DIR is your synced copy ($(sync_state)); to mount instead, first: mos-dropbox logout or move it"
     mkdir -p "$DIR"
     [[ -z $(ls -A "$DIR") ]] || die "$DIR is not empty; mount needs an empty folder (MECCANICOS_DROPBOX_DIR=... to use another)."
-    rclone mount "$REMOTE:" "$DIR" --vfs-cache-mode full --daemon
+    spin "Connecting to Dropbox..." rclone mount "$REMOTE:" "$DIR" --vfs-cache-mode full --daemon
     echo "Dropbox is mounted at $DIR  (mos-dropbox unmount to stop)."
 }
 
@@ -86,6 +105,7 @@ sync_once() {
     mkdir -p "$DIR" "$STATE"
     local first=()
     [[ -e $STATE/resynced ]] || first=(--resync)
+    [[ -t 2 ]] && first+=(--stats 5s --stats-one-line) # by hand: show it is working
     flock -n "$STATE/lock" rclone bisync "$REMOTE:" "$DIR" "${first[@]}" \
         --create-empty-src-dirs --resilient --recover --conflict-resolve newer --verbose ||
         return 1

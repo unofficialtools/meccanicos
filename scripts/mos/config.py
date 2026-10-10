@@ -197,6 +197,204 @@ def set_scale(v):
     c.run("mos-hidpi", *(["--force"] if v == "auto" else ["--scale", v]), check=True)
 
 
+# display.resolution -- the main screen's mode, through xrandr. Xfce does not
+# keep it, so it lives in settings.toml and `mos-config apply` sets it at login.
+def screen():
+    """(output, [modes], current mode, preferred mode) of the main screen."""
+    out, modes, now, best = None, [], None, None
+    for line in c.output("xrandr", "--query").splitlines():
+        if m := re.match(r"(\S+) connected( primary)?", line):
+            if out and not m.group(2):
+                break  # the first connected screen, unless a later one is primary
+            out, modes, now, best = m.group(1), [], None, None
+        elif out and (m := re.match(r"\s+(\d+x\d+)\S*\s+(.*)", line)):
+            if m.group(1) not in modes:
+                modes.append(m.group(1))
+            now = m.group(1) if "*" in m.group(2) else now
+            best = m.group(1) if "+" in m.group(2) else best
+    return out, modes, now, best
+
+
+def get_resolution():
+    out, _, now, best = screen()
+    if not out:
+        return None
+    return "auto" if now == best else now
+
+
+def resolution_choice(text):
+    _, modes, _, _ = screen()
+    if text == "auto" or text in modes:
+        return text
+    raise c.UsageError("auto, or one of " + ", ".join(modes) if modes else "no screen found (xrandr)")
+
+
+def set_resolution(v):
+    out, _, _, _ = screen()
+    if not out:
+        raise c.Failed("no screen found (xrandr)")
+    c.run("xrandr", "--output", out, *(["--auto"] if v == "auto" else ["--mode", v]), check=True)
+    c.run("mos-hidpi")  # the text size follows the new width, when it is on auto
+
+
+# display.rotation -- landscape (wide) or portrait (tall), each also upside down.
+# xrandr turns from the panel's own orientation, which is tall on many tablets.
+ROTATIONS = ["landscape", "portrait", "landscape-flipped", "portrait-flipped"]
+TURNS = ["normal", "left", "inverted", "right"]  # each a quarter turn more (xrandr)
+
+
+def turns(native_wide):
+    """{rotation: xrandr turn} for a panel that is wide or tall by itself."""
+    if native_wide:
+        return dict(zip(ROTATIONS, ["normal", "left", "inverted", "right"]))
+    return dict(zip(ROTATIONS, ["right", "normal", "left", "inverted"]))
+
+
+def native_wide(mode):
+    w, h = map(int, mode.split("x"))
+    return w >= h
+
+
+def get_rotation():
+    out, _, _, best = screen()
+    if not out or not best:
+        return None
+    m = re.search(rf"^{re.escape(out)} connected (?:primary )?\S+ (\w+)? ?\(", c.output("xrandr", "--query"), re.M)
+    turn = (m.group(1) if m and m.group(1) in TURNS else None) or "normal"
+    return {t: r for r, t in turns(native_wide(best)).items()}[turn]
+
+
+def set_rotation(v):
+    out, _, _, best = screen()
+    if not out or not best:
+        raise c.Failed("no screen found (xrandr)")
+    c.run("xrandr", "--output", out, "--rotate", turns(native_wide(best))[v], check=True)
+    # Touchscreens and pens report positions on the panel: tell them it turned.
+    for dev in c.output("xinput", "list", "--id-only").split():
+        info = c.output("xinput", "list", "--long", dev)
+        if "slave  pointer" in info and ("mode: direct" in info.lower() or
+                                         re.search(r"pen|stylus", info.splitlines()[0], re.I)):
+            c.run("xinput", "map-to-output", dev, out)
+    c.run("mos-hidpi")  # the text size follows the new width, when it is on auto
+
+
+# display.wallpaper -- xfdesktop's picture, on every screen and workspace.
+DEFAULT_WALLPAPER = f"/etc/{os.environ.get('MECCANICOS_ID', 'meccanicos')}/wallpaper.png"
+PICTURES = (".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif", ".bmp", ".heic")
+
+
+def wallpaper_props():
+    """Every screen x workspace image property: the ones xfdesktop made,
+    plus one per connected screen and workspace (a new screen has none yet)."""
+    props = {p for p in c.output("xfconf-query", "-c", "xfce4-desktop", "-l").splitlines()
+             if p.endswith("/last-image")}
+    n = int(xfconf_get("xfwm4", "/general/workspace_count") or 1)
+    for line in c.output("xrandr", "--query").splitlines():
+        if m := re.match(r"(\S+) connected", line):
+            props |= {f"/backdrop/screen0/monitor{m.group(1)}/workspace{w}/last-image" for w in range(n)}
+    return sorted(props)
+
+
+def get_wallpaper():
+    for p in c.output("xfconf-query", "-c", "xfce4-desktop", "-l").splitlines():
+        if p.endswith("/last-image"):
+            img = xfconf_get("xfce4-desktop", p)
+            return "default" if not img or img == DEFAULT_WALLPAPER else img.replace(c.HOME, "~", 1)
+    return "default"
+
+
+def wallpaper_choice(text):
+    if text == "default":
+        return text
+    path = os.path.abspath(os.path.expanduser(text))
+    if not os.path.isfile(path):
+        raise c.UsageError(f"no file {text} (a picture, or default)")
+    if not path.lower().endswith(PICTURES):
+        raise c.UsageError(f"{text} is not a picture ({', '.join(PICTURES)})")
+    return path.replace(c.HOME, "~", 1)
+
+
+def set_wallpaper(v):
+    img = DEFAULT_WALLPAPER if v == "default" else os.path.expanduser(v)
+    for p in wallpaper_props():
+        xfconf_set("xfce4-desktop", p, "string", img)
+
+
+def pictures():
+    """Pictures to offer as a wallpaper: ~/Pictures (not its subfolders)."""
+    folder = os.path.join(c.HOME, "Pictures")
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.lower().endswith(PICTURES))
+    except OSError:
+        return []
+    return [f"~/Pictures/{n}" for n in names[:30]]
+
+
+# screensaver -- xfce4-screensaver (what the screen shows when idle, and the lock).
+SAVER = "xfce4-screensaver"
+
+
+def saver_themes():
+    """{name: id} of the installed animations (screensavers-<desktop file>)."""
+    found = {}
+    for d in (os.environ.get("XDG_DATA_DIRS") or "/run/current-system/sw/share").split(":"):
+        for f in glob.glob(os.path.join(d, "applications", "screensavers", "*.desktop")):
+            name = os.path.basename(f)[:-8].removeprefix("xfce-").replace("personal-", "")
+            found.setdefault(name, "screensavers-" + os.path.basename(f)[:-8])
+    return found
+
+
+def get_saver_after():
+    if xfconf_get(SAVER, "/saver/enabled") == "false" or xfconf_get(SAVER, "/saver/idle-activation/enabled") == "false":
+        return 0
+    return int(xfconf_get(SAVER, "/saver/idle-activation/delay") or 5)
+
+
+def set_saver_after(m):
+    xfconf_set(SAVER, "/saver/enabled", "bool", "true" if m else "false")
+    xfconf_set(SAVER, "/saver/idle-activation/enabled", "bool", "true" if m else "false")
+    if m:
+        xfconf_set(SAVER, "/saver/idle-activation/delay", "int", m)
+
+
+def get_saver_show():
+    mode = xfconf_get(SAVER, "/saver/mode") or "0"
+    if mode == "1":
+        return "random"
+    if mode == "2":
+        ids = {v: k for k, v in saver_themes().items()}
+        first = (xfconf_get(SAVER, "/saver/themes/list") or "").split("\n")[-1].strip()
+        return ids.get(first, "blank")
+    return "blank"
+
+
+def saver_show_choice(text):
+    if text in ("blank", "random") or text in saver_themes():
+        return text
+    raise c.UsageError("one of " + ", ".join(["blank", "random", *saver_themes()]))
+
+
+def set_saver_show(v):
+    if v in ("blank", "random"):
+        xfconf_set(SAVER, "/saver/mode", "int", 0 if v == "blank" else 1)
+        return
+    c.run("xfconf-query", "-c", SAVER, "-p", "/saver/themes/list", "-n", "-t", "string", "-s",
+          saver_themes()[v], "--force-array", check=True)
+    xfconf_set(SAVER, "/saver/mode", "int", 2)
+
+
+def get_saver_lock():
+    return xfconf_get(SAVER, "/lock/enabled") != "false" and \
+        xfconf_get(SAVER, "/lock/saver-activation/enabled") != "false"
+
+
+def set_saver_lock(on):
+    xfconf_set(SAVER, "/lock/enabled", "bool", "true" if on else "false")
+    xfconf_set(SAVER, "/lock/saver-activation/enabled", "bool", "true" if on else "false")
+    if on:
+        xfconf_set(SAVER, "/lock/saver-activation/delay", "int", 0)  # locked as soon as it starts
+
+
 # security.login_alerts / auto_disconnect -- read by mos-logins' watcher
 # straight from settings.toml (remember() writes them there).
 def login_setting(name, default):
@@ -432,6 +630,18 @@ def get_gpu():
 SETTINGS = [
     Setting("display.scale", "size of text on screen (auto: from the screen's width; icons stay)", get_scale,
             set_scale, choices=["auto"] + SCALE_STEPS),
+    Setting("display.resolution", "the main screen's resolution (auto: its best)", get_resolution,
+            set_resolution, choices=resolution_choice, runtime=True, example="1920x1080"),
+    Setting("display.rotation", "landscape or portrait (also -flipped: upside down)", get_rotation,
+            set_rotation, choices=ROTATIONS, runtime=True),
+    Setting("display.wallpaper", "the desktop picture (a file, or default)", get_wallpaper, set_wallpaper,
+            choices=wallpaper_choice, example="~/Pictures/beach.jpg"),
+    Setting("screensaver.after", "start the screensaver after this many idle minutes (never)",
+            get_saver_after, set_saver_after, choices=minutes, example="10"),
+    Setting("screensaver.show", "what it shows: blank, random, or one animation", get_saver_show,
+            set_saver_show, choices=saver_show_choice, example="floaters"),
+    Setting("screensaver.lock", "lock the screen when the screensaver starts (asks the password)",
+            get_saver_lock, set_saver_lock, choices=onoff),
     Setting("keyboard.layout", "keyboard layouts, first is the default (us, us,it, ...)",
             get_layout, lambda v: apply_keyboard(layout=v), choices=layout_choice, runtime=True, example="us,it"),
     Setting("keyboard.switch", "keys that switch between layouts", get_switch,
@@ -857,7 +1067,9 @@ def cmd_network(args):
         if code:
             raise c.Failed(f"not connected to {args[1]}")
     elif what in ("signin", "sign-in") and len(args) == 1:
-        url = portal_url()
+        from config_tui import ui  # mos_tui, found the way config_tui finds it
+        with ui.spinning("Looking for the sign-in page…"):
+            url = portal_url()
         open_url(url)
         c.ok(f"opened {url}: sign in there")
     elif what == "vpn" and len(args) == 1:
@@ -945,6 +1157,18 @@ def rebuild(now):
 def cmd_apply(args):
     """At login: what lives only in settings.toml."""
     data = mine()
+    res = stored(data, "display.resolution")
+    if res and res != "auto":
+        try:
+            set_resolution(resolution_choice(res))
+        except (c.Failed, c.UsageError) as e:  # another screen now: its own best
+            c.warn(f"display.resolution: {e}")
+    rot = stored(data, "display.rotation")
+    if rot and rot != get_rotation():
+        try:
+            set_rotation(rot)
+        except c.Failed as e:
+            c.warn(f"display.rotation: {e}")
     kb = {k: stored(data, k) for k in ("keyboard.layout", "keyboard.switch")}
     if any(kb.values()):
         try:

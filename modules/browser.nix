@@ -21,6 +21,9 @@ let
         "--enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxZeroCopyGL"
         # No "Restore pages?" after a live USB is switched off without quitting.
         "--hide-crash-restore-bubble"
+        # No welcome tour ("Set Brave as default?", import bookmarks): on the
+        # live USB every start would be a first run.
+        "--no-first-run"
       ]
       # No keyring: with no login password there is nothing to unlock it, and
       # the "choose a password for the new keyring" prompt would come up instead.
@@ -131,6 +134,10 @@ in
     # Every start is a new tab: the tabs of last time are not brought back.
     environment.etc."brave/policies/managed/startup.json".text = builtins.toJSON {
       RestoreOnStartup = 5; # open the New Tab page
+    };
+    # Brave is already the default (below): no "Set Brave as default?" prompt.
+    environment.etc."brave/policies/managed/default-browser.json".text = builtins.toJSON {
+      DefaultBrowserSettingEnabled = false;
     };
 
     # Links clicked in other apps go straight to Brave.

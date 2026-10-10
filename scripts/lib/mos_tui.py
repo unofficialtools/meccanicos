@@ -11,13 +11,19 @@ else on the screen is.
   button     " Label " light on grey, its shortcut letter orange
   field      an input: light on grey (selected while typed in)
   dim        help and notes;  ok ✓ green;  err ✗ red;  border teal-grey
+  spinner    orange, on the message line while waiting (network, slow tools):
+             wait() in a full-screen view, spinning() on a plain terminal
 
 Without colours (a plain console): selected is reverse video, bars too.
 Used by apps, usb-vault menu, mos-config, mos-install, mos-read and mos-backup browse;
 the wrappers put this folder on PYTHONPATH.
 """
 
+import contextlib
 import curses
+import os
+import sys
+import threading
 
 NORMAL, BAR, BAR_KEY, HEADING, KEY, SELECTED, BUTTON, BUTTON_KEY, FIELD, DIM, OK, ERR, BORDER = range(1, 14)
 
@@ -213,3 +219,71 @@ def confirm(scr, question, yes="Yes", no="Cancel", title="Are you sure?", defaul
             return False
         elif k == "y":
             return True
+
+
+# ---- waiting ---------------------------------------------------------------------
+def frames():
+    """Spinner frames: braille dots, or |/-\\ on the Linux console (no braille in its font)."""
+    return "|/-\\" if os.environ.get("TERM") == "linux" else "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+def wait(win, text, fn, *args, x=1, **kw):
+    """Run fn(*args, **kw) in a thread with a spinner and text on the message
+    line (second from the bottom) until it is done; returns what fn returns,
+    raises what it raised. fn must not draw. text can be a function, for a
+    note that changes while it runs."""
+    done = {}
+
+    def work():
+        try:
+            done["value"] = fn(*args, **kw)
+        except BaseException as e:  # noqa: B036 - handed to the caller
+            done["error"] = e
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    spin, i = frames(), 0
+    while t.is_alive():
+        h, w = win.getmaxyx()
+        note = text() if callable(text) else text
+        put(win, h - 2, x, f"{spin[i % len(spin)]} {note}".ljust(w - x - 1), attr(KEY))
+        win.refresh()
+        i += 1
+        t.join(0.1)
+    if "error" in done:
+        raise done["error"]
+    return done.get("value")
+
+
+@contextlib.contextmanager
+def spinning(text):
+    """On a plain terminal: a spinner and text on stderr while the block runs
+    (the text once, without the spinner, when stderr is not a terminal).
+    Yields a function that changes the text. Programs that show their own
+    progress (nix, git without --quiet) don't need it."""
+    now = [text]
+
+    def note(t):
+        now[0] = t
+        if not sys.stderr.isatty():
+            print(t, file=sys.stderr, flush=True)
+    if not sys.stderr.isatty():
+        print(text, file=sys.stderr, flush=True)
+        yield note
+        return
+    stop = threading.Event()
+
+    def turn():
+        spin, i = frames(), 0
+        while not stop.wait(0.1 if i else 0):
+            sys.stderr.write(f"\r\033[K{spin[i % len(spin)]} {now[0]}")
+            sys.stderr.flush()
+            i += 1
+    t = threading.Thread(target=turn, daemon=True)
+    t.start()
+    try:
+        yield note
+    finally:
+        stop.set()
+        t.join()
+        sys.stderr.write("\r\033[K")
+        sys.stderr.flush()

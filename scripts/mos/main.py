@@ -45,8 +45,7 @@ COMMANDS = [
     ]),
     ("System", [
         ("mos-updates", "updates in one place: system and apps, and how to go back"),
-        ("mos-update", "update to the newest MeccanicOS"),
-        ("mos-upgrade", "newer packages, same MeccanicOS"),
+        ("mos-upgrade", "update to the newest MeccanicOS and NixOS packages (also mos-update)"),
         ("mos-rebuild", "apply changes made in /etc/nixos"),
         ("mos-install", "install MeccanicOS on this computer (live USB)"),
         ("mos-gpu-driver", "which graphics driver this computer uses"),

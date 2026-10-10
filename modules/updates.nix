@@ -1,5 +1,5 @@
 # Updates: one place for what can change and how to undo it
-# (scripts/mos-updates.py). The system (mos-update, mos-upgrade, automatic
+# (scripts/mos-updates.py). The system (mos-upgrade, automatic
 # updates and going back to an earlier system, from modules/installed.nix;
 # on the live USB: how to write a newer ISO) and your apps (apps update /
 # apps undo). It only runs those commands, after asking.

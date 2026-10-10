@@ -118,16 +118,35 @@ space() {
 # --------------------------------------------------------- find the stick ----
 # The Ventoy partition we were booted from ("" when not booted through Ventoy).
 # Ventoy serves the ISO as /dev/mapper/ventoy, a map of the ISO file's sectors
-# on that partition. USB_VAULT_VENTOY=/dev/sdX1 overrides.
+# on that partition. When not booted from a stick at all (installed system, or
+# a live session from elsewhere), a plugged-in Ventoy stick is used instead.
+# USB_VAULT_VENTOY=/dev/sdX1 overrides.
 ventoy_part() {
     if [[ -n ${USB_VAULT_VENTOY:-} ]]; then
         echo "$USB_VAULT_VENTOY"
         return
     fi
-    [[ -e /dev/mapper/ventoy ]] || return 0
     local dev
-    dev=$(dmsetup deps -o devname ventoy 2>/dev/null | sed -n 's/.*(\([^)]*\)).*/\1/p' | head -n1)
-    [[ -n $dev && -b /dev/$dev ]] && echo "/dev/$dev"
+    if [[ -e /dev/mapper/ventoy ]]; then
+        dev=$(dmsetup deps -o devname ventoy 2>/dev/null | sed -n 's/.*(\([^)]*\)).*/\1/p' | head -n1)
+        [[ -n $dev && -b /dev/$dev ]] && echo "/dev/$dev"
+        return 0
+    fi
+    findmnt -n /iso >/dev/null 2>&1 && return 0
+    [[ -n $(blkid -t LABEL="$ISO_LABEL" -o device 2>/dev/null || true) ]] && return 0
+    plugged_ventoy_part
+}
+
+# The Ventoy partition of a plugged-in Ventoy stick: labelled "Ventoy", with a
+# "VTOYEFI" partition on the same disk.
+plugged_ventoy_part() {
+    local dev disk
+    while read -r dev; do
+        [[ -b $dev ]] || continue
+        disk=/dev/$(lsblk -dno PKNAME "$dev" 2>/dev/null)
+        lsblk -lno LABEL "$disk" 2>/dev/null | grep -qx VTOYEFI && { echo "$dev"; return 0; }
+    done < <(blkid -t LABEL=Ventoy -o device 2>/dev/null || true)
+    return 0
 }
 is_ventoy() { [[ -n $(ventoy_part) ]]; }
 
@@ -361,8 +380,29 @@ mount_ventoy() {
     mount_data "/dev/mapper/$VENTOY_MAP"
 }
 
+# The stick was pulled out (and maybe plugged back in under another name)
+# while its data area was mounted: the old mount only gives I/O errors and
+# shows files that are not there. Close the vault files opened from it and let
+# go of it, so it is mounted again from the stick as it is now.
+drop_stale_mount() {
+    local src m loop
+    src=$(findmnt -n -o SOURCE "$DATA_MNT" 2>/dev/null) || return 0
+    [[ -b $src ]] && return 0
+    for m in /dev/mapper/usbvault-*; do
+        [[ -e $m ]] || continue
+        loop=$(cryptsetup status "$(basename "$m")" 2>/dev/null | awk '$1 == "device:" {print $2}')
+        [[ $loop == /dev/loop* ]] || continue
+        [[ $(losetup -n -O BACK-FILE "$loop" 2>/dev/null) == "$DATA_MNT"/* ]] || continue
+        umount -l "$m" 2>/dev/null || true
+        cryptsetup close "$(basename "$m")" 2>/dev/null || true
+    done
+    umount -l "$DATA_MNT" 2>/dev/null || true
+    echo "  (the USB stick was unplugged: let go of its old mount)" >&2
+}
+
 # Mount the stick's data area (data partition, or Ventoy partition). Prints DATA_MNT.
 mount_data_partition() {
+    drop_stale_mount
     if ! findmnt -n "$DATA_MNT" >/dev/null 2>&1; then
         local vp dev
         vp=$(ventoy_part)
@@ -460,8 +500,8 @@ do_close() {
 
 # Create LUKS2 + ext4 on $1 (device or file), mount it.
 format_vault() {
-    local src=$1 label=${2:-$VAULT_LABEL} pass name
-    pass=$(new_passphrase)
+    local src=$1 label=${2:-$VAULT_LABEL} pass=${3:-} name
+    [[ -n $pass ]] || pass=$(new_passphrase)
     local label_args=()
     [[ -b $src ]] && label_args=(--label "$label")
     echo "Encrypting (LUKS2, argon2id)..."
@@ -590,7 +630,9 @@ stick_status() {
     if is_ventoy; then
         local vp d
         vp=$(ventoy_part)
-        echo "Boot USB : $disk  ($(lsblk -dno MODEL,SIZE "$disk" 2>/dev/null | xargs)), booted through Ventoy"
+        local how="booted through Ventoy"
+        [[ -e /dev/mapper/ventoy ]] || how="a Ventoy stick"
+        echo "Boot USB : $disk  ($(lsblk -dno MODEL,SIZE "$disk" 2>/dev/null | xargs)), $how"
         echo "Ventoy   : $vp ($(blkid -p -o value -s LABEL "$vp" 2>/dev/null || echo no label))"
         if mount_data_partition >/dev/null 2>&1; then
             d=$(data_dir)
@@ -665,6 +707,23 @@ Only free space after the live system is used; nothing existing is erased." || e
     write_map "$disk"
 }
 
+# Reserve BYTES for a new container file. exFAT (the data and Ventoy
+# partitions) has no sparse files: a write far into a file first fills
+# everything before it with zeros, in one step that cannot be interrupted, so
+# formatting would sit silent for as long as writing the whole file takes (an
+# hour for 128G on a USB stick). Write the zeros now instead, with progress;
+# Ctrl+C works here.
+allocate_file() {
+    local path=$1 bytes=$2
+    if [[ $(findmnt -n -o FSTYPE --target "$(dirname "$path")" 2>/dev/null) != exfat ]]; then
+        fallocate -l "$bytes" "$path" 2>/dev/null || truncate -s "$bytes" "$path"
+        return
+    fi
+    echo "Writing $(human "$bytes") to the stick (exFAT needs the whole file written:"
+    echo "about a minute per 2 GB on a typical USB stick; Ctrl+C stops it)..."
+    dd if=/dev/zero of="$path" bs=4M iflag=count_bytes count="$bytes" status=progress conv=fsync
+}
+
 cmd_create_file() {
     local size=4G name=vault.luks data_size=0 path=""
     while (($#)); do case $1 in
@@ -709,9 +768,13 @@ Only free space after the live system is used; nothing existing is erased." || e
     local freeb
     freeb=$(df --output=avail -B1 "$(dirname "$path")" | tail -n1)
     ((bytes < freeb)) || die "Not enough space: want $(human "$bytes"), have $(human "$freeb")."
+    local pass
+    pass=$(new_passphrase) # before allocating, so a typo leaves nothing behind
     echo "Allocating $(human "$bytes") for $path ..."
-    fallocate -l "$bytes" "$path" 2>/dev/null || truncate -s "$bytes" "$path"
-    format_vault "$path"
+    trap 'rm -f -- "$path"' EXIT # a half-made vault file is useless
+    allocate_file "$path" "$bytes"
+    format_vault "$path" "$VAULT_LABEL" "$pass"
+    trap - EXIT
 }
 
 cmd_open() {
@@ -784,13 +847,14 @@ Your files and settings (browser, desktop, documents) will be kept
 on the stick. At every start-up you'll be asked for its password; leave the
 password empty to start a fresh session instead." || exit 1
     local pass
+    pass=$(new_passphrase) # before allocating, so a typo leaves nothing behind
     if ((as_file)); then
         echo "Allocating $(human $((show * 512)))..."
-        fallocate -l $((show * 512)) "$target" 2>/dev/null || truncate -s $((show * 512)) "$target"
+        trap 'rm -f -- "$target"' EXIT # a half-made home file is useless
+        allocate_file "$target" $((show * 512))
     else
         target=$(append_partition "$disk" "$size" 83)
     fi
-    pass=$(new_passphrase)
     echo "Encrypting (LUKS2, argon2id)..."
     printf '%s' "$pass" | cryptsetup luksFormat -q --type luks2 --label "$HOME_LABEL" --key-file=- "$target"
     printf '%s' "$pass" | cryptsetup open --key-file=- "$target" mos-home-new
@@ -805,6 +869,7 @@ password empty to start a fresh session instead." || exit 1
     chmod 700 /run/usb-vault/newhome
     umount /run/usb-vault/newhome
     cryptsetup close mos-home-new
+    trap - EXIT
     ((as_file)) || write_map "$disk"
     sync
     info "Persistent home created ($target).
@@ -846,8 +911,16 @@ backup_dir_check() {
 
 cmd_backup() {
     local dest=${1:-} disk out n=0 s z t l dev
+    (($# <= 1)) || usage "backup takes one folder (got $#: quote it, or don't use a wildcard)"
     backup_dir_check "$dest"
     disk=$(boot_disk)
+    if is_ventoy; then
+        mount_data_partition >/dev/null || die "Cannot mount the Ventoy partition."
+        if [[ ! -d $(data_dir) ]]; then
+            umount "$DATA_MNT" 2>/dev/null || true
+            die "Nothing to back up: no vaults on this Ventoy stick yet ($(data_dir) does not exist)."
+        fi
+    fi
     out="$dest/mos-usb-backup-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$out"
     echo "Locking vaults so the copy is consistent..."

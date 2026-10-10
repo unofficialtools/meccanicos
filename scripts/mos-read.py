@@ -46,6 +46,9 @@ def speakable(text):
 
 
 def get_text(argv):
+    if len(argv) > 1 and argv[1] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        sys.exit(0)
     if len(argv) > 1:
         if argv[1] == "-":
             text = sys.stdin.read()
