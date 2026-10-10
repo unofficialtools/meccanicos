@@ -32,11 +32,13 @@ export MECCANICOS_BUILD_TIME=${MECCANICOS_BUILD_TIME:-${now:8:4}}
 # Build, then copy the ISO to dist/ with the first 8 hex digits of its own
 # SHA-256 in the name: meccanicos-26.05-20261004-x86_64-linux-1a2b3c4d.iso
 build_iso() {
-    local attr=$1 start src hash dest
+    local attr=$1 start out src hash dest
     start=$(date +%s)
-    nix build ".#$attr" -L --impure
+    # No ./result link: in a synced folder (Dropbox) a link made on two
+    # computers turns into "result (… conflicted copy …)". dist/ has the ISO.
+    out=$(nix build ".#$attr" -L --impure --no-link --print-out-paths)
     echo "[iso] built in $((($(date +%s) - start) / 60)) min"
-    src=$(echo result/iso/*.iso)
+    src=$(echo "$out"/iso/*.iso)
     echo "[iso] hashing $src"
     hash=$(sha256sum "$src" | cut -c1-8)
     dest="dist/$(basename "$src" .iso)-$hash.iso"
