@@ -164,7 +164,12 @@ in
   # take effect at the next start. The script holds the name, so a rename
   # restarts it. Until a rebuild names it (local.nix or mos-config), the
   # prebuilt system uses the name picked in the installer
-  # (/etc/meccanicos/hostname).
+  # (/etc/meccanicos/hostname), in /etc/hostname too: systemd-hostnamed puts
+  # that one back whenever asked to set a name (NetworkManager does, at start).
+  # Each start (and the rebuild) links /etc/hostname to the system's again.
+  # NixOS points hostnamed at /etc/static/hostname (the system's, always):
+  # /etc/hostname is that same file, except while the installer's name holds.
+  systemd.services.systemd-hostnamed.environment.SYSTEMD_ETC_HOSTNAME = lib.mkForce "/etc/hostname";
   systemd.services.mos-hostname =
     let
       name = lib.escapeShellArg config.networking.hostName;
@@ -176,6 +181,7 @@ in
         "network-pre.target"
         "NetworkManager.service"
         "avahi-daemon.service"
+        "systemd-hostnamed.service"
       ];
       wants = [ "network-pre.target" ];
       unitConfig.DefaultDependencies = false;
@@ -193,6 +199,8 @@ in
           picked=$(tr -d '[:space:]' < /etc/meccanicos/hostname)
           if [ -n "$picked" ] && [ ${name} = ${lib.escapeShellArg distro.hostName} ]; then
             want=$picked
+            rm -f /etc/hostname
+            echo "$want" > /etc/hostname
           else
             rm -f /etc/meccanicos/hostname # a rebuild names it now
           fi
