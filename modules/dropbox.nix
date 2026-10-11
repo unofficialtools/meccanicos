@@ -21,8 +21,9 @@ in
 {
   environment.systemPackages = [ mos-dropbox ];
 
-  # Two-way sync every 5 minutes for users who ran `mos-dropbox sync`
-  # (and haven't paused it); for everyone else it exits at once.
+  # Two-way sync every 5 minutes, only for users who ran `mos-dropbox sync`:
+  # the timer is not wanted by default; `mos-dropbox sync`/`resume` enable it
+  # per user and `pause`/`logout` disable it again.
   systemd.user.services.mos-dropbox-sync = {
     description = "Sync ~/Dropbox (mos-dropbox)";
     serviceConfig = {
@@ -32,7 +33,6 @@ in
     };
   };
   systemd.user.timers.mos-dropbox-sync = {
-    wantedBy = [ "timers.target" ];
     timerConfig = {
       OnStartupSec = "2min";
       OnUnitActiveSec = "5min";

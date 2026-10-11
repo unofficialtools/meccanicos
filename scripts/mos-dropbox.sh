@@ -119,7 +119,17 @@ sync_on() {
     echo on >"$SYNC_STATE"
     echo "Syncing $DIR now (the first time copies everything; it can take a while)..."
     sync_once
+    timer on
     echo "Done. From now on it syncs every 5 minutes (mos-dropbox pause to stop)."
+}
+
+# The 5-minute timer runs only for users who sync: on with sync/resume,
+# off with pause/logout (it is not enabled for anyone by default).
+timer() {
+    local verb=enable
+    [[ $1 == on ]] || verb=disable
+    systemctl --user "$verb" --now "$UNIT.timer" >/dev/null 2>&1 ||
+        echo "mos-dropbox: could not $verb the $UNIT timer (systemctl --user $verb --now $UNIT.timer)" >&2
 }
 
 case ${1:-status} in
@@ -130,6 +140,7 @@ case ${1:-status} in
     pause)
         [[ $(sync_state) != off ]] || die "not syncing (mos-dropbox sync to start)."
         echo paused >"$SYNC_STATE"
+        timer off
         echo "Sync paused (mos-dropbox resume to continue)."
         ;;
     resume)
@@ -137,6 +148,7 @@ case ${1:-status} in
         echo on >"$SYNC_STATE"
         echo "Sync resumed; syncing now..."
         sync_once
+        timer on
         ;;
     tick) # run by the timer
         [[ $(sync_state) == on ]] && have_remote || exit 0
@@ -155,6 +167,7 @@ case ${1:-status} in
     logout)
         is_mounted && unmount_it
         rm -f "$SYNC_STATE" "$STATE/resynced"
+        timer off
         have_remote && rclone config delete "$REMOTE"
         echo "Logged out. Your files in $DIR stay where they are."
         ;;
