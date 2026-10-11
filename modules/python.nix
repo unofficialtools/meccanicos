@@ -30,4 +30,9 @@ let
 in
 {
   environment.systemPackages = [ python ];
+
+  # Bytecode caches go under ~/.cache/pycache (mirroring the source path)
+  # instead of a __pycache__ next to every module: none in synced folders
+  # (Dropbox, Syncthing) or git checkouts.
+  environment.sessionVariables.PYTHONPYCACHEPREFIX = "$HOME/.cache/pycache";
 }
