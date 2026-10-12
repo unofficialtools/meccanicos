@@ -98,7 +98,7 @@ let
     desktopName = "Read Clipboard Aloud (Piper)";
     comment = "Read the copied text aloud (offline voice); Space pauses, q stops";
     exec = "xfce4-terminal --class mos-read --title \"Read from clipboard\" --geometry 84x22 -x mos-read";
-    icon = "audio-volume-high";
+    icon = "mos-read";
     keywords = [
       "speak"
       "say"

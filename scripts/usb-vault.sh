@@ -98,6 +98,22 @@ z() {
     fi
 }
 
+# A desktop notification, as the desktop user: VAULT // NAME // UNLOCKED.
+# Nothing without a desktop session (the boot service, a text console).
+notify() {
+    [[ -n ${DBUS_SESSION_BUS_ADDRESS:-} ]] || return 0
+    if [[ $EUID -eq 0 && -n ${SUDO_USER:-} ]]; then
+        timeout 10 sudo -u "$SUDO_USER" --preserve-env=DISPLAY,XAUTHORITY,DBUS_SESSION_BUS_ADDRESS \
+            notify-send -a "USB Vault" "$@" 2>/dev/null || true
+    elif [[ $EUID -ne 0 ]]; then
+        timeout 10 notify-send -a "USB Vault" "$@" 2>/dev/null || true
+    fi
+}
+# The vault's name in notifications: VAULT for the partition, else the file's name.
+vault_label() {
+    if [[ -b $1 ]]; then echo VAULT; else basename "$1" .luks | tr '[:lower:]' '[:upper:]'; fi
+}
+
 human() { numfmt --to=iec --suffix=B "$1"; }
 
 # An installed system (vs the live USB): it has the flake in /etc/nixos.
@@ -489,6 +505,8 @@ part-way?). Locked again. If it never held files, delete it and create it again.
     # mkfs's root-only lost+found: file managers say "Permission denied" on it
     # (fsck makes it again if ever needed). Only removed while empty.
     rmdir "$mp/lost+found" 2>/dev/null || true
+    notify -i drive-harddisk-encrypted "VAULT // $(vault_label "$src") // UNLOCKED" \
+        "Mounted at ${mp/#$(target_home)/\~}. Lock it before unplugging the stick."
     info "Vault unlocked and mounted at $mp"
 }
 
@@ -500,6 +518,7 @@ do_close() {
     if findmnt -n "$mp" >/dev/null 2>&1; then umount "$mp" || die "Cannot unmount $mp (files still open?)"; fi
     rmdir "$mp" 2>/dev/null || true
     if [[ -e /dev/mapper/$name ]]; then cryptsetup close "$name"; fi
+    notify -i changes-prevent "VAULT // $(vault_label "$src") // LOCKED" "${mp/#$(target_home)/\~} is unmounted."
     echo "Locked $src"
 }
 

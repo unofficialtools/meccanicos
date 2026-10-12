@@ -63,7 +63,7 @@ let
     desktopName = "Installer"; # the desktop icon's name (also in the menu and command bar)
     comment = "Install ${distro.name} on this computer's disk";
     exec = "xfce4-terminal --class mos-install --title \"Install ${distro.name}\" --geometry 100x32 -x mos-install";
-    icon = "${../branding/install.svg}"; # steel plate, matches the metal theme
+    icon = "mos-install"; # branding/icons.py
     categories = [ "System" ];
   };
 in

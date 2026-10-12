@@ -381,7 +381,7 @@ class Notifier:
                 self.open.add(topic)
         if muted:  # once, then quiet for an hour
             threading.Thread(target=self._show, daemon=True, args=(
-                f"muted:{kind}", "Many login alerts", "More happened this hour: these alerts are paused for an "
+                f"muted:{kind}", "LOGINS // ALERTS PAUSED", "More happened this hour: these alerts are paused for an "
                 "hour. Open Logins (mos-logins) to see everything.", "normal", [("open", "Open Logins")])).start()
         return not muted
 
@@ -472,13 +472,13 @@ class Watcher:
             if setting("auto_disconnect", False):
                 disconnect()
                 body = f"{ev['user']} logged in from {ev['ip']}. The computer was disconnected (auto_disconnect)."
-                self.notify.send(f"ok:{ev['ip']}", "Unknown SSH login: disconnected", body, "critical",
+                self.notify.send(f"ok:{ev['ip']}", "LOGINS // UNKNOWN SSH LOGIN // DISCONNECTED", body, "critical",
                                  [("reconnect", "Reconnect"), ("open", "Open Logins")],
                                  lambda c: reconnect() if c == "reconnect" else None)
                 return
             body = (f"{ev['user']} logged in from {ev['ip']}" + (f" with key {ev['key'][:20]}…" if ev["key"] else "") +
                     ": not an address or key seen before.")
-            self.notify.send(f"ok:{ev['ip']}", "Unknown SSH login", body, "critical",
+            self.notify.send(f"ok:{ev['ip']}", "LOGINS // UNKNOWN SSH LOGIN", body, "critical",
                              [("trust", "It's me"), ("end", "End remote sessions"), ("disconnect", "Disconnect")],
                              lambda c, ip=ev["ip"]: self.act(c, ip))
         elif ev["kind"] == "ssh-fail" and ev["ip"]:
@@ -491,7 +491,7 @@ class Watcher:
             if (local and len(q) >= 3) or aimed >= 5 or len(q) >= 20:
                 why = "from your own network" if local else ("trying your user name" if aimed else "many times")
                 body = f"{len(q)} failed SSH logins in 10 minutes from {ev['ip']}, {why}."
-                self.notify.send(f"attack:{ev['ip']}", "SSH attack", body, "critical",
+                self.notify.send(f"attack:{ev['ip']}", "LOGINS // SSH ATTACK", body, "critical",
                                  [("block", "Block this address"), ("stop-ssh", "Stop SSH"), ("disconnect", "Disconnect")],
                                  lambda c, ip=ev["ip"]: self.act(c, ip))
         elif ev["kind"] == "disk-fail":
@@ -516,7 +516,7 @@ class Watcher:
                     text = summary(self.during, self.state)
                     self.locked_since, self.during = None, []
                     if text and setting("login_alerts", True):
-                        self.notify.send(f"away:{int(time.time())}", "While you were away", text, "normal",
+                        self.notify.send(f"away:{int(time.time())}", "LOGINS // WHILE YOU WERE AWAY", text, "normal",
                                          [("open", "Open Logins")])
 
     def run(self):
@@ -527,7 +527,7 @@ class Watcher:
         past += [e for e in journal(boot=True) if e["kind"] == "disk-fail" and e["time"] < since]
         text = summary(past, self.state)
         if text and setting("login_alerts", True):
-            self.notify.send("login", "Since you last logged in", text, "normal", [("open", "Open Logins")])
+            self.notify.send("login", "LOGINS // SINCE YOU LAST LOGGED IN", text, "normal", [("open", "Open Logins")])
         threading.Thread(target=self.screen_lock, daemon=True).start()
         last_save = 0
         for ev in journal(follow=True):
@@ -546,7 +546,7 @@ def demo():
     (MECCANICOS_LOGINS_DEMO_SECONDS, 12); its buttons do nothing."""
     p = subprocess.Popen(["notify-send", "-p", "-a", "Logins", "-i", "security-high", "-u", "critical",
                           "--action=block=Block this address", "--action=stop-ssh=Stop SSH",
-                          "--action=disconnect=Disconnect", "SSH attack (example)",
+                          "--action=disconnect=Disconnect", "LOGINS // SSH ATTACK // EXAMPLE",
                           "14 failed SSH logins in 10 minutes from 192.168.1.66, from your own network."],
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     nid = p.stdout.readline().strip()  # printed at once; then it waits for a click

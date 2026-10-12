@@ -446,8 +446,8 @@ in
       seen="''${XDG_CACHE_HOME:-$HOME/.cache}/meccanicos/update-notified"
       mkdir -p "''${seen%/*}"
       [ "$(cat "$seen" 2>/dev/null)" = "$next" ] && exit 0
-      notify-send -i system-software-update -t 0 "${distro.name} update ready" \
-        "Restart the computer to finish updating."
+      notify-send -i system-software-update -t 0 "UPDATE // READY" \
+        "Restart the computer to finish updating ${distro.name}."
       echo "$next" > "$seen"
     '';
   };

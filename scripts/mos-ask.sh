@@ -249,8 +249,21 @@ act() {
 # exactly what you typed, even when an app matches.
 popup() {
     local args=(-dpi 0 -dmenu -p "❯" -i -show-icons -no-fixed-num-lines -no-sort
-        -mesg "Enter: open   ·   Ctrl+Enter: use exactly what I typed   ·   / or ~ a folder   ·   !… run a command   ·   shortcuts: every key")
+        -mesg "Enter: open  ·  Ctrl+Enter: use exactly what I typed  ·  / or ~ a folder  ·  !… run a command  ·  shortcuts: every key")
     [[ -n $ROFI_THEME ]] && args+=(-theme "$ROFI_THEME")
+    [[ -n ${MECCANICOS_ASK_ICONS:-} ]] && args+=(-icon-theme "$MECCANICOS_ASK_ICONS")
+    # The header: the name and, under it, this computer and you; on the right
+    # session, storage, network, battery and vaults (the theme's textbox-name
+    # and textbox-status). The name's textbox is Pango markup.
+    local head machine status
+    if head=$(mos-status --header 2>/dev/null) && [[ $head == *$'\n'* ]]; then
+        machine=${head%%$'\n'*} status=${head#*$'\n'}
+        machine=${machine//&/\&amp;} machine=${machine//</\&lt;} machine=${machine//>/\&gt;}
+        machine=${machine//[\"\\]/\'} status=${status//[\"\\]/\'}
+        # One quoted string per -theme-str: rofi reads a string up to the last quote.
+        args+=(-theme-str "textbox-name { content: \"<b>${MECCANICOS_ASK_NAME:-MECCANICOS}</b>\\n<span size='small' foreground='#8b929a'>$machine</span>\"; }"
+            -theme-str "textbox-status { content: \"$status\"; }")
+    fi
     ranked_apps | while IFS=$'\t' read -r name icon; do
         printf '%s\0icon\x1f%s\n' "$name" "${icon:-application-x-executable}"
     done | rofi "${args[@]}"

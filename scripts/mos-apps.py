@@ -505,10 +505,10 @@ class Manager:
         cp = ui.attr
         # Title bar
         ui.bar(s, 0, "Apps Manager", "offline: search and installs need the internet" if not self.online else "")
-        # Tabs: the one shown is teal, as the bars
+        # Tabs: the one shown in amber on graphite (what is current), as the bars' keys
         x = 1
         for key, label, tab in (("1", f" Installed ({len(self.apps) + len(self.system)}) ", "installed"), ("2", " Search ", "search")):
-            attr = cp(ui.BAR) if self.tab == tab else cp(ui.BUTTON)
+            attr = cp(ui.BAR_KEY) if self.tab == tab else cp(ui.BUTTON)
             x0 = x
             x = self.add(2, x, label, attr)
             self.hits.append((2, x0, x, ("tab", tab)))

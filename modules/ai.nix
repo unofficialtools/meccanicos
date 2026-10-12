@@ -266,7 +266,7 @@ let
     name = "mos-ai";
     desktopName = "AI Chat (aichat)";
     comment = "Chat with the local AI (Ollama, offline); set up with mos-ai-setup";
-    icon = "user-available";
+    icon = "mos-ai"; # branding/icons.py
     exec = "xfce4-terminal --class mos-ai --title \"AI Chat\" --hold -x mos-ai";
     categories = [ "Utility" ];
   };

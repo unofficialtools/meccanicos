@@ -20,6 +20,7 @@ let
       lvm2 # dmsetup: mount the Ventoy partition alongside Ventoy's own map
       xdg-utils # "Open the USB stick's files"
       zenity
+      libnotify # notify-send: VAULT // NAME // UNLOCKED
       # sudo is NOT listed: the setuid one lives in /run/wrappers/bin (already on PATH)
     ];
     # Labels come from flake.nix so the ISO, the tool and udev agree.

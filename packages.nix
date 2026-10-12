@@ -129,7 +129,7 @@
       name = "mos-office-word";
       desktopName = "Word Processor (OnlyOffice)";
       comment = "Write a new document (.docx, .odt)";
-      icon = "x-office-document";
+      icon = "mos-office-word";
       exec = "onlyoffice-desktopeditors --new:word";
       categories = [ "Office" ];
     })
@@ -137,7 +137,7 @@
       name = "mos-office-cell";
       desktopName = "Spreadsheet (OnlyOffice)";
       comment = "Make a new spreadsheet (.xlsx, .ods)";
-      icon = "x-office-spreadsheet";
+      icon = "mos-office-cell";
       exec = "onlyoffice-desktopeditors --new:cell";
       categories = [ "Office" ];
     })
@@ -145,7 +145,7 @@
       name = "mos-office-slide";
       desktopName = "Presentations (OnlyOffice)";
       comment = "Make a new presentation (.pptx, .odp)";
-      icon = "x-office-presentation";
+      icon = "mos-office-slide";
       exec = "onlyoffice-desktopeditors --new:slide";
       categories = [ "Office" ];
     })

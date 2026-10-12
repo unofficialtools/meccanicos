@@ -7,6 +7,7 @@
 }:
 let
   inherit (import ./not-root.nix) notRoot;
+  style = import ./style.nix;
   # tldr pages bundled into the ISO so `tldr` works with no network.
   tldrPages = pkgs.fetchFromGitHub {
     owner = "tldr-pages";
@@ -179,30 +180,50 @@ let
         case $f in /*) cp -rn -- "$f" . ;; esac
       done
   '';
+  # yazi's theme (below), then yazi's own file icons without their colours:
+  # an icon takes its file's colour (the theme's file types), not one of
+  # yazi's ~700 brand colours.
+  yaziTheme =
+    theme:
+    pkgs.runCommand "theme.toml" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+      cp ${theme} $out
+      chmod +w $out
+      python3 - ${pkgs.yazi-unwrapped.srcs.code_src}/yazi-config/preset/theme-dark.toml >>$out <<'EOF'
+      import json, sys, tomllib
+      icon = tomllib.load(open(sys.argv[1], "rb"))["icon"]
+      print("\n[icon]")
+      for key, rules in icon.items():
+          items = ", ".join(
+              "{ " + ", ".join(f"{k} = {json.dumps(v, ensure_ascii=False)}" for k, v in r.items() if k != "fg") + " }"
+              for r in rules
+          )
+          print(f"{key} = [{items}]")
+      EOF
+    '';
   tldrCache = pkgs.runCommand "tldr-cache" { } ''
     mkdir -p $out/tldr-pages
     cp -r ${tldrPages}/pages $out/tldr-pages/pages.en
   '';
-  # Jed in the colours of mc's "modarin256-defbg-thin" skin (256-colour
-  # indices, terminal background): menus like mc's menu bar (light text,
-  # orange hotkeys, light-on-teal selection), mc's teal status bar and marked
-  # text, code coloured from mc's file-type palette.
+  # Jed in MeccanicOS's colours (modules/style.nix, as 256-colour indices,
+  # terminal background), like mc's skin below: graphite menus and status bar
+  # (235), off-white on graphite for the selection (254 on 238), amber (214)
+  # for hotkeys. Code keeps mc's file-type palette.
   jedColors = pkgs.writeText "meccanicos.sl" ''
     $1 = "color250"; $2 = "default";
     set_color("normal", $1, $2);
-    set_color("status", "color253", "color66");
-    set_color("region", "color228", "color23");
-    set_color("message", "color187", $2);
+    set_color("status", "color250", "color235");
+    set_color("region", "color254", "color238");
+    set_color("message", "color245", $2);
     set_color("error", "color203", $2);
-    set_color("cursor", "color235", "color250");
+    set_color("cursor", "color235", "color254");
     set_color("cursorovr", "color235", "color214");
-    set_color("linenum", "color66", "color235");
-    set_color("menu", $1, $2);
-    set_color("menu_char", "color214", $2);
-    set_color("menu_popup", "color252", "color239");
-    set_color("menu_shadow", "color236", $2);
-    set_color("menu_selection", "color253", "color23");
-    set_color("menu_selection_char", "color214", "color23");
+    set_color("linenum", "color242", $2);
+    set_color("menu", $1, "color235");
+    set_color("menu_char", "color214", "color235");
+    set_color("menu_popup", $1, "color235");
+    set_color("menu_shadow", "color233", $2);
+    set_color("menu_selection", "color254", "color238");
+    set_color("menu_selection_char", "color214", "color238");
     set_color("operator", $1, $2);
     set_color("delimiter", $1, $2);
     set_color("number", "color216", $2);
@@ -221,18 +242,163 @@ let
     set_color("preprocess", "color170", $2);
     set_color("dollar", "color170", $2);
     set_color("...", "color203", $2);
-    set_color("url", "color45", $2);
-    set_color("trailing_whitespace", "color56", "color234");
+    set_color("url", "color73", $2);
+    set_color("trailing_whitespace", "color238", "color236");
     set_color("tab", "color239", $2);
-    set_color("italic", "color187", $2);
+    set_color("italic", "color245", $2);
     set_color("underline", "color114", $2);
-    set_color("bold", "color228", $2);
+    set_color("bold", "color254", $2);
     set_color("html", "color180", $2);
+  '';
+  # mc's skin: mc's own "modarin256-defbg-thin" (single lines, terminal
+  # background) in MeccanicOS's colours, as above.
+  mcSkin = pkgs.writeText "meccanicos256.ini" ''
+    [skin]
+        description = MeccanicOS (256 colours)
+        256colors = true
+
+    [Lines]
+        horiz = ─
+        vert = │
+        lefttop = ┌
+        righttop = ┐
+        leftbottom = └
+        rightbottom = ┘
+        topmiddle = ┬
+        bottommiddle = ┴
+        leftmiddle = ├
+        rightmiddle = ┤
+        cross = ┼
+        dhoriz = ─
+        dvert = │
+        dlefttop = ┌
+        drighttop = ┐
+        dleftbottom = └
+        drightbottom = ┘
+        dtopmiddle = ─
+        dbottommiddle = ─
+        dleftmiddle = ├
+        drightmiddle = ┤
+
+    [core]
+        _default_ = color250;default
+        selected = color254;color238;bold
+        marked = color214;;bold
+        markselect = color214;color238;bold
+        gauge = color235;color214
+        input = color254;color236
+        inputmark = color235;color214
+        inputunchanged = color245;color236
+        commandlinemark = color235;color214
+        reverse = color254;color238
+        header = color254;;bold
+        disabled = color242;color235
+
+    [dialog]
+        _default_ = color250;color235
+        dhotnormal = color214
+        dfocus = color235;color214;bold
+        dhotfocus = color235;color214;bold
+        dtitle = color254;;bold
+
+    [error]
+        _default_ = color254;color52
+        errdfocus = color235;color214;bold
+        errdhotnormal = color214;color52
+        errdhotfocus = color235;color214;bold
+        errdtitle = color254;;bold
+
+    [filehighlight]
+        directory = color254;;bold
+        executable = color114
+        symlink = color73
+        hardlink =
+        stalelink = color203
+        device = color170
+        special = color142
+        core = color197
+        temp = color242
+        archive = color172
+        doc = color153
+        source = color109
+        media = color141
+        graph = color216
+        database = color103
+
+    [menu]
+        _default_ = color250;color235
+        menusel = color254;color238;bold
+        menuhot = color214
+        menuhotsel = color214;color238;bold
+        menuinactive = color242
+
+    [popupmenu]
+        _default_ = color250;color235
+        menusel = color254;color238;bold
+        menutitle = color254;;bold
+
+    [buttonbar]
+        button = color250;color235
+        hotkey = color214;default;bold
+
+    [statusbar]
+        _default_ = color250;color235
+
+    [help]
+        _default_ = color250;color235
+        helpitalic = color245
+        helpbold = color254;;bold
+        helplink = color214
+        helpslink = color235;color214;bold
+        helptitle = color254;;bold
+
+    [editor]
+        _default_ = color250;default
+        editbold = color254;;bold
+        editmarked = color254;color238;bold
+        editwhitespace = color238;color236
+        editlinestate = color242;color235
+        bookmark = ;color237
+        bookmarkfound = ;color238;bold
+        editrightmargin = ;color235;bold
+
+    [viewer]
+        _default_ = color250;default
+        viewbold = color254;;bold
+        viewunderline = ;;underline
+        viewselected = color235;color214;bold
+
+    [diffviewer]
+        changedline = color231;color29
+        changednew = color232;color78
+        changed = color231;color39
+        added = color232;color81
+        removed = ;color234
+        error = color231;color160
+
+    [widget-common]
+        sort-sign-up = ↑
+        sort-sign-down = ↓
+
+    [widget-panel]
+        hiddenfiles-sign-show = •
+        hiddenfiles-sign-hide = ○
+        history-prev-item-sign = «
+        history-next-item-sign = »
+        history-show-list-sign = ^
+
+    [widget-scollbar]
+        first-vert-char = ↑
+        last-vert-char = ↓
+        first-horiz-char = «
+        last-horiz-char = »
+        current-char = ■
+        background-char = ▒
   '';
 in
 {
   # ---- Midnight Commander defaults ------------------------------------------
-  # Skin "modarin256-defbg-thin" (256 colours, terminal background, single
+  # Skin "meccanicos256" (mcSkin: 256 colours, terminal background, single
   # lines) and F4 opening $EDITOR (Jed) instead of mc's built-in editor.
   # Global mc.ini is only the starting point: a user's ~/.config/mc/ini takes
   # over once saved. (On a 16-colour console mc falls back to its default.)
@@ -240,9 +406,10 @@ in
     (final: prev: {
       mc = prev.mc.overrideAttrs (old: {
         postInstall = (old.postInstall or "") + ''
+          cp ${mcSkin} $out/share/mc/skins/meccanicos256.ini
           cat > $out/etc/mc/mc.ini <<'EOF'
         [Midnight-Commander]
-        skin=modarin256-defbg-thin
+        skin=meccanicos256
         use_internal_edit=false
         EOF
           # Enter opens documents, media, web pages and anything unknown
@@ -264,8 +431,8 @@ in
             'if (file_time_cmp(libfslc, libfsl) >= 0)' \
             'if ((1 == file_status (libfslc)) && (file_time_cmp(libfslc, libfsl) >= 0))'
         '';
-        # Default colour scheme "meccanicos": the colours of mc's modarin256 skin
-        # (see jedColors). A user's ~/.jedrc can still set_color_scheme(...).
+        # Default colour scheme "meccanicos": MeccanicOS's colours, like mc's
+        # skin (see jedColors). A user's ~/.jedrc can still set_color_scheme(...).
         postInstall = (old.postInstall or "") + ''
           cp ${jedColors} $out/share/jed/lib/colors/meccanicos.sl
           echo '_Jed_Default_Color_Scheme = "meccanicos";' > $out/share/jed/lib/defaults.sl
@@ -286,9 +453,9 @@ in
   environment.variables.NIX_SHELL_PRESERVE_PROMPT = "1";
   programs.bash = {
     completion.enable = true;
-    # In mc's skin colours: a teal bar (mc's selection, 253 on 23) with
-    # user@host #N, the directory in sand (180, mc's headers) and [git branch] in orange
-    # (214, mc's hotkeys); then an orange "> " on its own line.
+    # A teal bar (the logo's second colour, 253 on 23) with user@host #N,
+    # the directory in sand (180) and [git branch] in orange (214); then an
+    # orange "> " on its own line.
     # \[ \] mark the colour codes as zero-width for line editing.
     # The [branch] only inside a git repository. The bar ends in a triangle
     # where it is exactly the line's height: Nerd Fonts draw it as tall as the
@@ -334,7 +501,7 @@ in
         [[ -n $cwd && $cwd != "$PWD" ]] && builtin cd -- "$cwd"
         rm -f -- "$tmp"
       }
-      export FZF_DEFAULT_OPTS='--height 40% --layout=reverse --border --color=bg+:#3a4049,fg+:#ffffff,hl:#9fb4c8,hl+:#cfe0f0,info:#8a96a3,prompt:#cfd6de,pointer:#cfd6de,marker:#9fb4c8,border:#5b6470 --bind "ctrl-o:execute(mos-open {+})"'
+      export FZF_DEFAULT_OPTS='--height 40% --layout=reverse --border --color=bg+:${style.raised},fg+:${style.text},hl:${style.amber},hl+:${style.amber},info:${style.dim},prompt:${style.amber},pointer:${style.amber},marker:${style.amber},border:${style.line} --bind "ctrl-o:execute(mos-open {+})"'
     '';
     shellAliases = {
       ls = "eza --group-directories-first";
@@ -422,173 +589,175 @@ in
       }
     ];
   };
-  # Colours of mc's "modarin256-defbg-thin" skin (as in Jed and the prompt;
-  # hex of the same 256-colour indices): the cursor line light on teal (253
-  # on 23), orange (214) for keys and the active choice, sand (180) titles,
-  # teal (66) borders and status, file types coloured like mc's panels.
-  environment.etc."xdg/yazi/theme.toml".source =
+  # MeccanicOS's colours (modules/style.nix), as in the command center, fzf,
+  # mc and Jed: the cursor line off-white on graphite, amber for keys, marks
+  # and the active choice, off-white titles, graphite borders and bars. File
+  # types keep mc's colours.
+  environment.etc."xdg/yazi/theme.toml".source = yaziTheme (
     let
       c = {
-        c23 = "#005f5f"; # teal: cursor line, selection
-        c66 = "#5f8787"; # light teal: status bar, borders
-        c45 = "#00d7ff"; # symlinks, links
-        c109 = "#87afaf"; # source code
-        c114 = "#87d787"; # executables
-        c141 = "#af87ff"; # audio, video
-        c172 = "#d78700"; # archives
-        c180 = "#d7af87"; # sand: headers, titles
-        c187 = "#d7d7af"; # input text
-        c203 = "#ff5f5f"; # errors, broken links
-        c214 = "#ffaf00"; # orange: hotkeys
-        c216 = "#ffaf87"; # images
-        c228 = "#ffff87"; # marked
-        c235 = "#262626";
-        c236 = "#303030";
-        c239 = "#4e4e4e";
-        c245 = "#8a8a8a"; # dim text
-        c250 = "#bcbcbc"; # normal text
-        c253 = "#dadada"; # text on teal
+        inherit (style)
+          ink
+          base
+          raised
+          line
+          text
+          dim
+          amber
+          ;
+        teal = "#5fafaf"; # symlinks, links
+        green = "#87d787"; # executables, copied
+        red = "#ff5f5f"; # errors, broken links, cut
+        source = "#87afaf";
+        media = "#af87ff";
+        archive = "#d78700";
+        image = "#ffaf87";
       };
       on = fg: bg: { inherit fg bg; };
-      cursor = on c.c253 c.c23;
+      cursor = on c.text c.raised // { bold = true; };
       frame = {
-        border.fg = c.c66;
-        title.fg = c.c180;
+        border.fg = c.line;
+        title = {
+          fg = c.text;
+          bold = true;
+        };
       };
     in
     toml.generate "theme.toml" {
       mgr = {
         cwd = {
-          fg = c.c180;
+          fg = c.text;
           bold = true;
         };
         find_keyword = {
-          fg = c.c228;
+          fg = c.amber;
           bold = true;
         };
         find_position = {
-          fg = c.c214;
+          fg = c.dim;
           bold = true;
         };
-        marker_copied = on c.c114 c.c114;
-        marker_cut = on c.c203 c.c203;
-        marker_marked = on c.c45 c.c45;
-        marker_selected = on c.c228 c.c228;
-        count_copied = on c.c235 c.c114;
-        count_cut = on c.c235 c.c203;
-        count_selected = on c.c235 c.c228;
-        border_style.fg = c.c239;
+        marker_copied = on c.green c.green;
+        marker_cut = on c.red c.red;
+        marker_marked = on c.teal c.teal;
+        marker_selected = on c.amber c.amber;
+        count_copied = on c.ink c.green;
+        count_cut = on c.ink c.red;
+        count_selected = on c.ink c.amber;
+        border_style.fg = c.line;
       };
       tabs = {
-        active = cursor // { bold = true; };
-        inactive = on c.c250 c.c236;
+        active = on c.ink c.amber // { bold = true; };
+        inactive = on c.dim c.raised;
       };
       mode = {
-        normal_main = on c.c253 c.c66 // { bold = true; };
-        normal_alt = on c.c253 c.c23;
-        select_main = on c.c235 c.c214 // { bold = true; };
-        select_alt = on c.c214 c.c236;
-        unset_main = on c.c235 c.c203 // { bold = true; };
-        unset_alt = on c.c203 c.c236;
+        normal_main = on c.ink c.amber // { bold = true; };
+        normal_alt = on c.text c.raised;
+        select_main = on c.ink c.text // { bold = true; };
+        select_alt = on c.text c.raised;
+        unset_main = on c.ink c.red // { bold = true; };
+        unset_alt = on c.red c.raised;
       };
       indicator = {
         parent = cursor;
         current = cursor;
       };
       status = {
-        perm_sep.fg = c.c239;
-        perm_type.fg = c.c109;
-        perm_read.fg = c.c228;
-        perm_write.fg = c.c203;
-        perm_exec.fg = c.c114;
-        progress_normal = on c.c66 c.c236;
-        progress_error = on c.c203 c.c236;
+        perm_sep.fg = c.line;
+        perm_type.fg = c.dim;
+        perm_read.fg = c.text;
+        perm_write.fg = c.amber;
+        perm_exec.fg = c.green;
+        progress_normal = on c.amber c.raised;
+        progress_error = on c.red c.raised;
       };
       which = {
-        mask.bg = c.c235;
-        cand.fg = c.c214;
-        rest.fg = c.c245;
-        desc.fg = c.c250;
-        separator_style.fg = c.c239;
+        mask.bg = c.base;
+        cand.fg = c.amber;
+        rest.fg = c.dim;
+        desc.fg = c.text;
+        separator_style.fg = c.line;
       };
       confirm = frame;
       spot = frame // {
-        tbl_col.fg = c.c180;
+        tbl_col.fg = c.dim;
         tbl_cell = cursor;
       };
       pick = frame // {
         active = {
-          fg = c.c214;
+          fg = c.amber;
           bold = true;
         };
       };
       input = frame // {
-        value.fg = c.c187;
-        selected = on c.c228 c.c23;
+        value.fg = c.text;
+        selected = on c.ink c.amber;
       };
       cmp = frame // {
         active = cursor;
       };
       tasks = frame // {
         hovered = {
-          fg = c.c214;
+          fg = c.amber;
           bold = true;
         };
       };
       help = {
-        on.fg = c.c214;
-        run.fg = c.c180;
-        hovered = cursor // { bold = true; };
-        footer = on c.c253 c.c66;
+        on.fg = c.amber;
+        run.fg = c.text;
+        hovered = cursor;
+        footer = on c.text c.raised;
       };
       notify = {
-        title_info.fg = c.c114;
-        title_warn.fg = c.c228;
-        title_error.fg = c.c203;
+        title_info.fg = c.green;
+        title_warn.fg = c.amber;
+        title_error.fg = c.red;
       };
       filetype.rules = [
         {
           url = "*/";
-          fg = c.c253;
+          fg = c.text;
           bold = true;
         }
         {
           url = "*";
           is = "orphan";
-          fg = c.c203;
+          fg = c.red;
         }
         {
           url = "*";
           is = "link";
-          fg = c.c45;
+          fg = c.teal;
         }
         {
           url = "*";
           is = "exec";
-          fg = c.c114;
+          fg = c.green;
         }
         {
           mime = "image/*";
-          fg = c.c216;
+          fg = c.image;
         }
         {
           mime = "{audio,video}/*";
-          fg = c.c141;
+          fg = c.media;
         }
         {
           mime = "application/{zip,rar,7z*,tar,gzip,xz,zstd,bzip*,lzma,compress,archive,cpio,arj,xar,ms-cab*}";
-          fg = c.c172;
+          fg = c.archive;
         }
         {
           url = "*.{c,h,cc,cpp,hpp,py,sh,rs,go,js,ts,java,lua,nix,pl,rb,el,sl}";
-          fg = c.c109;
+          fg = c.source;
         }
         {
           mime = "vfs/{absent,stale}";
-          fg = c.c245;
+          fg = c.dim;
         }
       ];
-    };
+    }
+  );
+
   environment.etc."xdg/yazi/keymap.toml".source = toml.generate "keymap.toml" {
     mgr.prepend_keymap = [
       {
@@ -682,7 +851,9 @@ in
   programs.zoxide.enable = true; # `z proj` / `zi` (interactive)
   programs.zoxide.flags = [ ];
 
-  # ---- Xfce Terminal: default terminal, steel colours -----------------------
+  # ---- Xfce Terminal: default terminal, style.nix colours ------------------
+  # Graphite, off-white text, an amber cursor; the prompt keeps its own
+  # 256-colour teal, sand and orange (PS1 above).
   # System defaults (xfconf channel "xfce4-terminal"); changes made in its
   # Preferences are saved per user and take over. TERM is xterm-256color.
   environment.etc."xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-terminal.xml".text = ''
@@ -697,15 +868,15 @@ in
       <property name="misc-confirm-close" type="bool" value="false"/>
       <property name="misc-cursor-shape" type="string" value="TERMINAL_CURSOR_SHAPE_IBEAM"/>
       <property name="color-use-theme" type="bool" value="false"/>
-      <property name="color-foreground" type="string" value="#d8dde4"/>
-      <property name="color-background" type="string" value="#22262c"/>
+      <property name="color-foreground" type="string" value="${style.text}"/>
+      <property name="color-background" type="string" value="${style.base}"/>
       <property name="color-cursor-use-default" type="bool" value="false"/>
-      <property name="color-cursor" type="string" value="#cfd6de"/>
+      <property name="color-cursor" type="string" value="${style.amber}"/>
       <property name="color-selection-use-default" type="bool" value="false"/>
       <property name="color-selection" type="string" value="#ffffff"/>
-      <property name="color-selection-background" type="string" value="#4a525d"/>
+      <property name="color-selection-background" type="string" value="${style.line}"/>
       <property name="color-bold-is-bright" type="bool" value="true"/>
-      <property name="color-palette" type="string" value="#2b2f36;#c0717a;#93ad86;#cdb688;#7f9bb6;#a58db3;#7fb0b4;#c3cad3;#5b6470;#d8909a;#aec7a1;#e0cba2;#9fb4c8;#bca8c9;#9ccace;#f2f5f8"/>
+      <property name="color-palette" type="string" value="${style.raised};#c0717a;#93ad86;#d9a441;#7f9bb6;#a58db3;#7fb0b4;#c9c7c2;#5b636c;#d8909a;#aec7a1;${style.amber};#9fb4c8;#bca8c9;#9ccace;${style.text}"/>
     </channel>
   '';
   # Make Xfce Terminal the terminal for Ctrl+Alt+T, the panel and Thunar "Open Terminal Here".

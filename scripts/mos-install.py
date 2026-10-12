@@ -353,6 +353,24 @@ def erase_warning(path, details=""):
     ]
 
 
+def country_zones(code):
+    """The time zones of a country (ISO code), from zone.tab, in its order
+    (roughly east to west), as (zone, region note): e.g. ("America/Chicago",
+    "Central (most areas)")."""
+    zones = []
+    for root in ("/etc/zoneinfo", "/usr/share/zoneinfo"):
+        try:
+            with open(os.path.join(root, "zone.tab")) as fh:
+                for line in fh:
+                    p = line.rstrip("\n").split("\t")
+                    if len(p) >= 3 and p[0] == code:
+                        zones.append((p[2], p[3] if len(p) > 3 else ""))
+            break
+        except OSError:
+            continue
+    return zones
+
+
 def list_timezones():
     try:
         out = subprocess.run(["timedatectl", "list-timezones", "--no-pager"], capture_output=True, text=True, timeout=5).stdout
@@ -656,6 +674,15 @@ def edit(scr, f, key):
             v["language"] = LANG_BY_LOCALE.get(c[2], v["language"])
         if "timezone" not in f.touched:
             v["timezone"] = c[4]
+            # A country with several time zones: ask which one, its own zones
+            # only, the usual one (its capital's or largest city's) chosen.
+            zones = country_zones(c[1])
+            if len(zones) > 1:
+                labels = [f"{z}  —  {note}" if note else z for z, note in zones]
+                cur = next((l for (z, _), l in zip(zones, labels) if z == c[4]), labels[0])
+                i = popup_list(scr, f"Time zone in {c[0]}", labels, cur)
+                if i is not None:
+                    v["timezone"] = zones[i][0]
         if "keyboard" not in f.touched:
             v["keyboard"] = c[5]
             apply_keyboard_live(KB[v["keyboard"]])
@@ -669,9 +696,12 @@ def edit(scr, f, key):
     elif key == "timezone":
         if f._tz is None:
             f._tz = list_timezones()
-        i = popup_list(scr, "Time zone", f._tz, v["timezone"])
+        # The country's own zones first, then all the others.
+        own = [z for z, _ in country_zones(COUNTRY[v["country"]][1]) if z in f._tz]
+        zones = own + [z for z in f._tz if z not in own]
+        i = popup_list(scr, "Time zone", zones, v["timezone"])
         if i is not None:
-            v["timezone"] = f._tz[i]
+            v["timezone"] = zones[i]
             f.touched.add(key)
     elif key == "keyboard":
         names = [k[0] for k in KEYBOARDS]

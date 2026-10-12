@@ -17,6 +17,7 @@ written to ~/.local/state/meccanicos/doctor.log.
 
 import datetime
 import glob
+import math
 import os
 import re
 import shutil
@@ -293,11 +294,13 @@ def check_display(reset=False):
                              advice=f"the driver didn't start: try {force_gpu('nvidia')} (or open), "
                                     "or mos-doctor --report to ask for help"))
     line = next((l for l in c.output("xrandr", "--query").splitlines() if " connected" in l), "")
-    px = re.search(r"(\d+)x\d+\+", line)
-    mm = re.search(r"(\d+)mm x \d+mm", line)
+    px = re.search(r"(\d+)x(\d+)\+", line)
+    mm = re.search(r"(\d+)mm x (\d+)mm", line)
     dpi_now = int(c.output("xfconf-query", "-c", "xsettings", "-p", "/Xft/DPI") or 96)
-    if px and mm and int(mm.group(1)) > 0:
-        dpi = int(px.group(1)) * 25.4 / int(mm.group(1))
+    # A virtual machine's screen (Virtual-1) reports a made-up size, as mos-hidpi knows.
+    if px and mm and int(mm.group(1)) > 0 and int(mm.group(2)) > 0 and not line.startswith("Virtual"):
+        # Along the diagonal, as mos-hidpi: pixels are after rotation, mm before.
+        dpi = math.hypot(*map(int, px.groups())) * 25.4 / math.hypot(*map(int, mm.groups()))
         if dpi >= 135 and dpi_now <= 96:
             probs.append(Problem("display", f"a sharp screen ({dpi:.0f} dpi) shown at normal size: text is tiny",
                                  lambda: c.run("mos-hidpi", "--force", check=True), "scale it up to fit"))

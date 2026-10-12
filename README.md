@@ -17,7 +17,7 @@ and a one-page installer.
 - **AI chat, after a one-time download** — `mos-ai-setup` downloads Qwen3 (~2.5 GB) for [Ollama](https://ollama.com); after that it works offline and nothing leaves the computer. Or Claude, ChatGPT or Grok with your API key (your questions go to that company). Chat with [aichat](https://github.com/sigoden/aichat) from the command bar.
 - **Encrypted storage on the stick** — vaults, and an optional *persistent home* for your files and settings (see [what survives a restart](#what-survives-a-restart)).
 - **Installs offline from one page** — one TUI page; full-disk encryption (LUKS2), unlock by password, TPM or security key.
-- **Brushed-metal look** — custom boot menus, login screen, wallpaper and a steel GTK theme.
+- **One look, boot to desktop** — brushed graphite, off-white and the logo's amber: the same brushed metal on the wallpaper, boot menu and login screen, icons drawn to match, a top bar of instrument readouts, notifications and terminal tools that all read as MeccanicOS.
 - **Broad hardware support** — a large collection of drivers and firmware, all of it freely redistributable (see [Licensing](#10-licensing)): Mesa/Vulkan, Intel/AMD video acceleration, PipeWire, Bluetooth, printers and scanners, and NVIDIA's driver picked automatically.
 - **Convenient defaults, stated plainly** — passwordless `sudo` (live and installed), and on an installed system an SSH server that accepts keys only. Both can be changed; see [Security](#security-what-is-protected-and-what-is-not).
 - **Reproducible** — the whole system is one Nix flake; `flake.lock` pins every package.
@@ -232,9 +232,16 @@ for the version you are running; `mos help TOPIC` opens it at a topic
 
 There is no applications menu; everything starts from the keyboard. The only
 desktop icons are USB drives, shown while they are plugged in. The top bar shows
-MeccanicOS on the left (click it for System Info: MeccanicOS build, NixOS, kernel, CPU,
-memory, disks) and, on the right, the date, CPU use in % (click it for btop),
-the window/workspace list, the tray, volume, battery and Log Out.
+the MeccanicOS mark and MECCANICOS // COMPUTER-NAME on the left (click it for the
+command bar, as Super+Space; type System Info there for the MeccanicOS build,
+session, NixOS, kernel, CPU, memory and disks), then the four
+workspaces, 01 DEV  02 WEB  03 TERM  04 DOC, the current one in amber (click one
+to go there). On the right: where you're running and how your files are kept
+(USB · NOT SAVED, USB · SAVED, INSTALLED · ENCRYPTED, and 1 VAULT OPEN in amber
+while a USB vault is unlocked; `mos-status` prints the same), the date, the
+window/workspace list, CPU use in % (amber from 80 °C, red from 90 °C; click it
+for btop), the tray, volume, battery and Log Out.
+The command bar (Super+Space) shows the same readout above the search.
 
 Apps are named by what they do, then the program: "Web Browser (Brave)",
 "Home Files (Thunar)", "File Editor (Jed)" (list in `modules/menu.nix`).
@@ -361,8 +368,8 @@ to print and cancels it. The same from the command line: `mos-printers list`,
 
 Every full-screen tool (Printers, Apps Manager, USB Vault, Configuration
 Management, the installer, Read Aloud) looks and works the same way, in the
-prompt's colours: a teal title bar, the keys at the bottom, and whatever Enter
-acts on — the chosen row, button or field — in orange
+desktop's colours: a graphite title bar, the keys at the bottom, and whatever
+Enter acts on — the chosen row, button or field — in amber
 ([`scripts/lib/mos_tui.py`](scripts/lib/mos_tui.py)).
 
 ### Read aloud
@@ -700,6 +707,10 @@ moves to a newer NixOS (26.05 → 26.11), `mos-upgrade` follows it. Rebuilds wit
 (`mos-rebuild`, a mos-config system setting) work offline: the source of the version you run
 stays on the disk.
 
+Most of a new release's look reaches you on its own. A few settings your account keeps
+its own copy of (shadows under windows, mc's colours): when a release changes them, the
+next login asks whether to apply the new look (`mos-look apply` does it later).
+
 Closing the lid **suspends**, on battery and on power. With an external screen connected,
 closing the lid does nothing and you keep working on the external screen. Laptops switch
 to the power-saver profile on battery.
@@ -750,7 +761,8 @@ modules/
   drivers.nix            hardware support (mapped from EndeavourOS packages.x86_64)
   desktop.nix            XFCE, LightDM, fonts
   keyboard.nix           command bar, shortcuts, cheat sheet, top bar, HiDPI, screenshots
-  branding.nix           theme, login screen, wallpaper   (branding-boot.nix: boot menus)
+  style.nix              the colours and fonts every part of the look uses
+  branding.nix           theme, login screen, wallpaper, notifications   (branding-boot.nix: boot menus)
   ai.nix                 Ollama + aichat, mos-ai-setup, AI Chat (no model shipped)
   shell.nix              bash, prompt, terminal, tmux, mc, yazi, fzf, open + print, Jed, tldr, podman
   hardening.nix          kernel, memory and network hardening; dbus-broker

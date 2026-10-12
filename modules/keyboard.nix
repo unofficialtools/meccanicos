@@ -9,48 +9,88 @@
 }:
 let
   inherit (import ./not-root.nix) notRoot;
+  style = import ./style.nix;
   # ---- Command bar ---------------------------------------------------------
+  # The command center: a header with the mark, MECCANICOS, this computer and
+  # you, and the session · storage · network · battery · vaults readout
+  # (mos-ask fills them in from mos-status --header when it opens);
+  # then the search, the matches and a line of hints. Square, thin lines, the
+  # chosen row marked by an amber edge.
+  nameSpaced = lib.concatStringsSep " " (lib.stringToCharacters (lib.toUpper distro.name));
   rofiTheme = pkgs.writeText "mos-ask.rasi" ''
     * {
-      steel-dark: #22262cf2;
-      steel-mid: #3a4049;
-      steel: #8a96a3;
-      chrome: #e6ebf0;
-      ice: #9fb4c8;
+      ink: ${style.ink}f5;
+      base: ${style.base}f7;
+      raised: ${style.raised};
+      line: ${style.line};
+      text: ${style.text};
+      dim: ${style.dim};
+      amber: ${style.amber};
       background-color: transparent;
-      text-color: @chrome;
-      font: "JetBrainsMono Nerd Font,DejaVu Sans Mono,monospace 20";
+      text-color: @text;
+      font: "${style.mono},DejaVu Sans Mono,monospace 18";
     }
     window {
       location: center;
       anchor: center;
-      width: 62%;
-      background-color: @steel-dark;
-      border: 2px;
-      border-color: @steel;
-      border-radius: 14px;
-      padding: 26px 30px;
+      width: 60%;
+      background-color: @base;
+      border: 1px;
+      border-color: @line;
+      border-radius: 0;
+      padding: 0;
     }
-    mainbox { children: [ inputbar, listview, message ]; spacing: 16px; }
-    inputbar { children: [ prompt, entry ]; spacing: 16px; }
-    prompt { text-color: @ice; }
+    mainbox { children: [ box-header, inputbar, listview, message ]; spacing: 0; }
+    box-header {
+      orientation: horizontal;
+      children: [ icon-mark, textbox-name, textbox-status ];
+      expand: false;
+      spacing: 16px;
+      padding: 16px 24px;
+      background-color: @ink;
+      border: 0 0 1px 0;
+      border-color: @line;
+    }
+    icon-mark { filename: "${../branding/mark.png}"; size: 40px; expand: false; vertical-align: 0.5; }
+    /* One quoted string per line: rofi reads a string up to the line's last quote.
+       Two lines in one textbox (Pango markup): rofi draws a box of
+       textboxes on top of each other. mos-ask adds the second line. */
+    textbox-name {
+      content: "<b>${nameSpaced}</b>";
+      markup: true;
+      font: "${style.mono} 13";
+      text-color: @text;
+      expand: false;
+      vertical-align: 0.5;
+    }
+    textbox-status {
+      content: "";
+      font: "${style.mono} 10";
+      text-color: @dim;
+      horizontal-align: 1;
+      vertical-align: 0.5;
+      expand: true;
+    }
+    inputbar { children: [ prompt, entry ]; spacing: 14px; padding: 18px 24px 12px 24px; }
+    prompt { text-color: @amber; }
     entry {
       placeholder: "Type an app, a command, a website… or just ask";
-      placeholder-color: @steel;
+      placeholder-color: @dim;
       cursor: text;
     }
-    listview { lines: 7; fixed-height: false; scrollbar: false; spacing: 4px; }
-    element { padding: 8px 12px; border-radius: 8px; spacing: 14px; }
-    element selected.normal { background-color: @steel-mid; }
+    listview { lines: 7; fixed-height: false; scrollbar: false; spacing: 2px; padding: 0 16px 12px 16px; }
+    element { padding: 8px 12px; border: 0 0 0 3px; border-color: transparent; border-radius: 0; spacing: 14px; }
+    element selected.normal { background-color: @raised; border-color: @amber; }
     element-icon { size: 1.3em; }
-    element-text { font: "Cantarell 16"; vertical-align: 0.5; }
-    message { border: 1px 0 0 0; border-color: @steel-mid; padding: 10px 0 0 0; }
-    textbox { font: "Cantarell 11"; text-color: @steel; }
+    element-text { font: "${style.sans} 15"; vertical-align: 0.5; highlight: bold ${style.amber}; }
+    message { border: 1px 0 0 0; border-color: @line; padding: 10px 24px 12px 24px; background-color: @ink; }
+    textbox { font: "${style.mono} 9"; text-color: @dim; }
   '';
 
   mos-ask = pkgs.writeShellApplication {
     name = "mos-ask";
     runtimeInputs = with pkgs; [
+      mos-status
       rofi
       xfce4-terminal
       glib # gio
@@ -63,6 +103,8 @@ let
     ];
     text = notRoot "mos-ask" + ''
       export MECCANICOS_ASK_THEME=${rofiTheme}
+      export MECCANICOS_ASK_ICONS=${style.iconTheme} # rofi reads only gtk-3.0/settings.ini, not the desktop's setting
+      export MECCANICOS_ASK_NAME=${lib.escapeShellArg nameSpaced}
       exec ${pkgs.bash}/bin/bash ${../scripts/mos-ask.sh} "$@"
     '';
   };
@@ -85,9 +127,27 @@ let
       xrandr
       xfconf
       gnugrep
+      gawk
       coreutils
     ];
     text = notRoot "mos-hidpi" + builtins.readFile ../scripts/mos-hidpi.sh;
+  };
+
+  # Session (live, persistent, installed), storage (encrypted or not),
+  # unlocked vaults, network, battery: the top bar and the command center.
+  mos-status = pkgs.writeShellApplication {
+    name = "mos-status";
+    runtimeInputs = with pkgs; [
+      util-linux # findmnt, lsblk
+      networkmanager # nmcli
+      gawk
+      gnugrep
+      gnused
+      coreutils
+    ];
+    # The name every computer starts with: not shown as "its" name.
+    runtimeEnv.MOS_DEFAULT_HOST = distro.hostName;
+    text = builtins.readFile ../scripts/mos-status.sh;
   };
 
   # ---- Cheat sheet ("shortcuts" in the command bar) -------------------------
@@ -140,11 +200,13 @@ let
     window { width: 72%; }
     mainbox { children: [ inputbar, listview ]; }
     inputbar { children: [ prompt ]; }
-    prompt { text-color: @ice; font: "Cantarell Bold 16"; }
+    prompt { text-color: @amber; font: "${style.mono} Bold 13"; }
+    inputbar { padding: 18px 24px 12px 24px; }
+    listview { padding: 0 16px 16px 16px; }
     listview { lines: 21; }
     element { padding: 3px 12px; }
     element-text { font: "JetBrainsMono Nerd Font,DejaVu Sans Mono,monospace 12"; }
-    element selected.normal { background-color: transparent; }
+    element selected.normal { background-color: transparent; border-color: transparent; }
   '';
   mos-keys = pkgs.writeShellScriptBin "mos-keys" ''
     ${notRoot "mos-keys"}
@@ -273,6 +335,7 @@ let
   about = pkgs.writeShellApplication {
     name = "mos-about";
     runtimeInputs = with pkgs; [
+      mos-status
       util-linux # lscpu, lsblk
       procps # free
       coreutils
@@ -285,7 +348,7 @@ let
         -h | --help | help) printf '%s\n\n  %s\n' "mos-about - this computer's ${distro.name} build, NixOS, kernel, CPU, graphics, memory and disks" "mos-about   (no options)"; exit 0 ;;
         *) echo "mos-about: unknown option $1 (mos-about --help)" >&2; exit 2 ;;
       esac
-      t=$'\e[1;38;5;214m' k=$'\e[38;5;180m' r=$'\e[0m'
+      t=$'\e[1;38;5;214m' k=$'\e[38;5;245m' r=$'\e[0m'
       row() { printf '  %s%-8s%s %s\n' "$k" "$1" "$r" "$2"; }
       iec() { numfmt --to=iec-i --suffix=B --format=%.1f "$1" | sed -E 's/([0-9])([KMGTP]?iB)$/\1 \2/'; }
 
@@ -294,6 +357,7 @@ let
       # shellcheck disable=SC1091
       [ -n "$(. /etc/os-release; echo "''${IMAGE_VERSION:-}")" ] && where="live USB"
       row ${distro.name} "built $(cat /etc/${distro.id}/version 2>/dev/null || echo "(unknown)"), $where"
+      row Session "$(mos-status | sed -n 's/^status *//p')"
       row NixOS "$(nixos-version 2>/dev/null || echo "(unknown)")"
       row Kernel "$(uname -r)"
       row CPU "$(lscpu | sed -n 's/^Model name: *//p' | head -n1), $(nproc) threads"
@@ -367,7 +431,9 @@ let
   };
   btopWindow = "xfce4-terminal --class btop --title \"System Utilization (btop)\" -x ${mos-btop}/bin/mos-btop";
   # Top bar CPU use: busy share of all cores since the previous call (every
-  # 2 s; the first call averages since boot). Click: btop.
+  # 2 s; the first call averages since boot), in amber from 80 °C and red
+  # from 90 °C (the CPU's own sensor: k10temp on AMD, coretemp on Intel, the
+  # SoC's on ARM, else the x86_pkg_temp zone). Click: btop.
   mos-cpu = pkgs.writeShellScript "mos-cpu" ''
     read -r _ user nice system idle iowait irq softirq steal _ </proc/stat
     total=$((user + nice + system + idle + iowait + irq + softirq + steal))
@@ -378,12 +444,49 @@ let
       dt=$((total - ptotal)) db=$((busy - pbusy))
     fi
     echo "$total $busy" >"$state"
-    printf '<txt>CPU %d%%</txt><txtclick>%s</txtclick><tool>CPU use, average over all cores (click: btop)</tool>\n' \
-      $(((100 * db + dt / 2) / dt)) ${lib.escapeShellArg btopWindow}
+    temp=
+    for h in /sys/class/hwmon/hwmon*; do
+      case $(cat "$h/name" 2>/dev/null) in
+        k10temp | coretemp | zenpower | cpu_thermal | soc_thermal)
+          read -r temp 2>/dev/null <"$h/temp1_input" && break ;;
+      esac
+    done
+    if [ -z "$temp" ]; then
+      for z in /sys/class/thermal/thermal_zone*; do
+        [ "$(cat "$z/type" 2>/dev/null)" = x86_pkg_temp ] && read -r temp 2>/dev/null <"$z/temp" && break
+      done
+    fi
+    cpu="CPU $(((100 * db + dt / 2) / dt))%" tool="CPU use, average over all cores"
+    if [ -n "$temp" ]; then
+      temp=$((temp / 1000))
+      tool="$tool; $temp °C"
+      if [ "$temp" -ge 90 ]; then
+        cpu="<span fgcolor='${style.red}'>$cpu</span>" tool="$tool: too hot"
+      elif [ "$temp" -ge 80 ]; then
+        cpu="<span fgcolor='${style.amber}'>$cpu</span>" tool="$tool: hot"
+      fi
+    fi
+    printf '<txt>%s</txt><txtclick>%s</txtclick><tool>%s (click: btop)</tool>\n' \
+      "$cpu" ${lib.escapeShellArg btopWindow} "$tool"
   '';
-  # Top bar "MeccanicOS" label (click: System Info).
+  # Top bar, left: the mark, the name and this computer's name (click: the
+  # command bar, as Super+Space; "System Info" is in it), e.g.
+  # [M] M E C C A N I C O S  // WORKSTATION.
+  # The computer's name only once it has its own (not the default ${distro.hostName}).
   mos-label = pkgs.writeShellScript "mos-label" ''
-    printf '<txt>%s</txt><txtclick>%s</txtclick><tool>System Info</tool>\n' ${distro.name} ${lib.escapeShellArg aboutWindow}
+    host=$(${pkgs.coreutils}/bin/uname -n)
+    name=""
+    if [ "$host" != ${distro.hostName} ]; then
+      name="  <span fgcolor='${style.dim}' weight='normal'>//  $(echo "$host" | ${pkgs.coreutils}/bin/tr '[:lower:]' '[:upper:]')</span>"
+    fi
+    printf '<img>%s</img><click>%s</click><txt> <span letter_spacing="2400" fgcolor="${style.text}">%s</span>%s</txt><txtclick>%s</txtclick><tool>Start anything (Super+Space)</tool>\n' \
+      ${../branding/mark-20.png} ${mos-ask}/bin/mos-ask ${lib.toUpper distro.name} "$name" ${mos-ask}/bin/mos-ask
+  '';
+  # Top bar, right: the session and whether your files are encrypted, e.g.
+  # USB · NOT SAVED, INSTALLED · ENCRYPTED, and 1 VAULT OPEN in amber while a
+  # vault is unlocked (click: System Info).
+  mos-session = pkgs.writeShellScript "mos-session" ''
+    MOS_STATUS_CLICK=${lib.escapeShellArg aboutWindow} exec ${mos-status}/bin/mos-status --panel
   '';
   terminalApps = [
     (termApp {
@@ -395,7 +498,7 @@ let
     })
     (termApp {
       id = "mc";
-      name = "Home Files (mc)";
+      name = "Home Files (Midnight Commander)";
       comment = "Two-panel file manager in the terminal";
       icon = "system-file-manager";
       cmd = "mc";
@@ -437,15 +540,27 @@ let
     })
   ];
 
-  # ---- Slim top bar: "MeccanicOS" (left, click: System Info) · date · CPU %
-  # (click: btop) · window/workspace dropdown · tray · volume · battery · Log Out
-  # (right). One panel: a clock in a separate panel on top of it got covered
+  # ---- The top bar: graphite, one line of instrument readouts ---------------
+  # Left: the mark, MECCANICOS // COMPUTER (click: the command bar), then the
+  # workspaces as 01 DEV  02 WEB  03 TERM  04 DOC, the current one in amber
+  # (click one to go there; Ctrl+F1…F4 too). Right: the session and storage
+  # (USB · NOT SAVED, INSTALLED · ENCRYPTED, an open vault in amber), date,
+  # window/workspace dropdown, CPU % (click: btop), tray, volume, battery,
+  # Log Out. One panel: a clock in a separate panel on top of it got covered
   # whenever the bar took focus (e.g. opening the dropdown). No applications
-  # menu, task buttons or workspace pager (Ctrl+F1…F4 switch workspaces; the
-  # dropdown lists windows per workspace).
-  # "MeccanicOS", the date and CPU % in one font (the desktop's), "MeccanicOS" in bold.
-  barFont = "Cantarell 10";
-  barFontBold = "Cantarell Bold 10";
+  # menu or task buttons: the command bar starts things, Alt+Tab switches.
+  # Readouts in the monospace, as in the command center and the terminal tools;
+  # the bar's look (border, workspace buttons) is in branding.nix's CSS.
+  barFont = "${style.mono} 9";
+  barFontBold = "${style.mono} Bold 9";
+  # The panel's background, #rrggbb as xfconf's four doubles.
+  rgba =
+    hex:
+    let
+      ch = i: (lib.fromHexString (builtins.substring (1 + 2 * i) 2 hex)) / 255.0;
+    in
+    map (i: ''<value type="double" value="${toString (ch i)}"/>'') [ 0 1 2 ]
+    ++ [ ''<value type="double" value="1"/>'' ];
   panel = pkgs.writeText "xfce4-panel.xml" ''
     <?xml version="1.0" encoding="UTF-8"?>
     <channel name="xfce4-panel" version="1.0">
@@ -458,12 +573,21 @@ let
           <property name="length" type="uint" value="100"/>
           <property name="position-locked" type="bool" value="true"/>
           <property name="icon-size" type="uint" value="16"/>
-          <property name="size" type="uint" value="28"/>
+          <property name="size" type="uint" value="34"/>
+          <property name="background-style" type="uint" value="1"/>
+          <property name="background-rgba" type="array">
+            ${lib.concatStringsSep "\n        " (rgba style.base)}
+          </property>
           <property name="plugin-ids" type="array">
             <value type="int" value="11"/>
             <value type="int" value="3"/>
+            <value type="int" value="13"/>
+            <value type="int" value="12"/>
             <value type="int" value="5"/>
+            <value type="int" value="14"/>
+            <value type="int" value="15"/>
             <value type="int" value="4"/>
+            <value type="int" value="16"/>
             <value type="int" value="10"/>
             <value type="int" value="2"/>
             <value type="int" value="6"/>
@@ -485,16 +609,44 @@ let
           <property name="font" type="string" value="${barFontBold}"/>
           <property name="update-period" type="int" value="86400000"/>
         </property>
+        <!-- Invisible: room between the name and the workspaces. -->
+        <property name="plugin-13" type="string" value="separator">
+          <property name="expand" type="bool" value="false"/>
+          <property name="style" type="uint" value="0"/>
+        </property>
+        <!-- Workspaces as buttons with their names (xfwm4's workspace_names). -->
+        <property name="plugin-12" type="string" value="pager">
+          <property name="rows" type="uint" value="1"/>
+          <property name="miniature-view" type="bool" value="false"/>
+          <property name="wrap-workspaces" type="bool" value="false"/>
+          <property name="numbering" type="bool" value="false"/>
+        </property>
         <!-- Expanding, invisible: pushes everything after it to the right. -->
         <property name="plugin-5" type="string" value="separator">
           <property name="expand" type="bool" value="true"/>
           <property name="style" type="uint" value="0"/>
         </property>
+        <property name="plugin-14" type="string" value="genmon">
+          <property name="command" type="string" value="${mos-session}"/>
+          <property name="use-label" type="bool" value="false"/>
+          <property name="font" type="string" value="${barFont}"/>
+          <property name="update-period" type="int" value="5000"/>
+        </property>
+        <!-- Invisible: room between the session and the date. -->
+        <property name="plugin-15" type="string" value="separator">
+          <property name="expand" type="bool" value="false"/>
+          <property name="style" type="uint" value="0"/>
+        </property>
         <property name="plugin-4" type="string" value="clock">
           <property name="mode" type="uint" value="2"/>
           <property name="digital-layout" type="uint" value="3"/>
-          <property name="digital-time-format" type="string" value="%a %d %b   %H:%M"/>
+          <property name="digital-time-format" type="string" value="%a %d %b  %H:%M"/>
           <property name="digital-time-font" type="string" value="${barFont}"/>
+        </property>
+        <!-- Invisible: room between the time and the CPU. -->
+        <property name="plugin-16" type="string" value="separator">
+          <property name="expand" type="bool" value="false"/>
+          <property name="style" type="uint" value="0"/>
         </property>
         <property name="plugin-2" type="string" value="windowmenu">
           <property name="style" type="uint" value="0"/>
@@ -551,6 +703,7 @@ in
   environment.systemPackages = [
     mos-ask
     mos-keys
+    mos-status
     mos-passwords # also "Passwords" in the command bar; listed by `mos`
     keysLauncher
     mos-screenshot
@@ -562,7 +715,7 @@ in
     pkgs.xfce4-clipman-plugin # clipboard history daemon
     pkgs.brightnessctl # screen brightness from the keyboard
     pkgs.xfce4-pulseaudio-plugin
-    pkgs.xfce4-genmon-plugin # "MeccanicOS" label and CPU % in the top bar
+    pkgs.xfce4-genmon-plugin # the top bar's name, session and CPU % readouts
   ]
   ++ [
     about
@@ -609,13 +762,20 @@ in
     '';
   };
 
-  # First login: scale the desktop for high-density screens.
+  # At login: scale the desktop for high-density screens. Again 20 s later:
+  # right after login the screen can still be settling (a driver switching
+  # modes, the installer's rotation being applied) or the settings service
+  # not answering yet; the second run does nothing if the first one held.
   environment.etc."xdg/autostart/mos-hidpi.desktop".text = ''
     [Desktop Entry]
     Type=Application
     Name=Screen scaling
     NoDisplay=true
-    Exec=${mos-hidpi}/bin/mos-hidpi
+    Exec=${pkgs.writeShellScript "mos-hidpi-login" ''
+      ${mos-hidpi}/bin/mos-hidpi
+      ${pkgs.coreutils}/bin/sleep 20
+      exec ${mos-hidpi}/bin/mos-hidpi
+    ''}
   '';
 
   # First login: tell people how to drive the system.
@@ -630,7 +790,7 @@ in
       mkdir -p "''${stamp%/*}" && touch "$stamp"
       sleep 4
       ${pkgs.libnotify}/bin/notify-send -i input-keyboard -t 15000 \
-        "Welcome to MeccanicOS" \
+        "${lib.toUpper distro.name} // WELCOME" \
         "Super+Space: start anything.\nType shortcuts there for every keyboard shortcut."
     ''}
   '';

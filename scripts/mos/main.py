@@ -42,6 +42,8 @@ COMMANDS = [
         ("mos-say", "say something aloud (also: say)"),
         ("mos-ai", "ask the AI from the terminal"),
         ("mos-about", "this computer and MeccanicOS"),
+        ("mos-status", "live, persistent or installed; encrypted or not; vaults, network, battery"),
+        ("mos-look", "after an update that changes the look: bring your saved settings to it"),
     ]),
     ("System", [
         ("mos-updates", "updates in one place: system and apps, and how to go back"),

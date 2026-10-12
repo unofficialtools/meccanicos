@@ -25,4 +25,4 @@ case $mode in
 esac || exit 1
 
 xclip -selection clipboard -t image/png -i "$file"
-notify-send -i "$file" -t 4000 "Screenshot copied" "Saved as ${file/#$HOME/\~}"
+notify-send -i "$file" -t 4000 "SCREENSHOT // COPIED" "Saved as ${file/#$HOME/\~}"

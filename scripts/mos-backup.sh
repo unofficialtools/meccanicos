@@ -182,7 +182,7 @@ cmd_now() {
     if [[ $mode != manual && ! -f $PASSFILE ]]; then
         # No password to back up with by itself (init --ask-password): say so.
         if [[ $mode == --plugged ]] && (($(age) >= 12 * 3600)); then
-            notify drive-removable-media "Backup disk plugged in" "Run mos-backup now in a terminal to back up (it asks for the password)."
+            notify drive-removable-media "BACKUP // DISK PLUGGED IN" "Run mos-backup now in a terminal to back up (it asks for the password)."
         fi
         exit 0
     fi
@@ -198,12 +198,12 @@ cmd_now() {
     rm -f "$ex"
     # 3: saved, but some files could not be read (restic said which)
     if ((rc != 0 && rc != 3)); then
-        [[ $mode == manual ]] || notify dialog-error "Backup failed" "Run mos-backup now in a terminal to see why."
+        [[ $mode == manual ]] || notify dialog-error "BACKUP // FAILED" "Run mos-backup now in a terminal to see why."
         exit 1
     fi
     date +%s >"$LAST"
     thin
-    [[ $mode == --auto ]] || notify document-save "Backup finished" "Your home folder is backed up."
+    [[ $mode == --auto ]] || notify document-save "BACKUP // DONE" "Your home folder is backed up."
 }
 
 # Time Machine's rule for which backups to keep (and every one of the last
@@ -437,8 +437,8 @@ cmd_plugged() {
         echo "$uuid" >>"$CONF/backup.asked"
         name=${target##*/}
         choice=$(timeout 300 notify-send -a Backup -i drive-removable-media -t 120000 --wait \
-            -A use="Use for backups" -A never="Don't ask again" "Use $name for backups?" \
-            "Back up your home folder to it, encrypted, each time it is plugged in." 2>/dev/null || true)
+            -A use="Use for backups" -A never="Don't ask again" "BACKUP // NEW DISK // $name" \
+            "Use it for backups? Your home folder is backed up to it, encrypted, each time it is plugged in." 2>/dev/null || true)
         case $choice in
             use)
                 # shellcheck disable=SC2016 # $1 is for the inner bash

@@ -8,10 +8,12 @@
 #                           it so ("manual"; mos-config display.scale)
 #
 # Text (fonts/DPI: the top bar, title bars, icon labels, terminals, the
-# command bar) grows with the main screen: width/2048 on screens wider than
-# 2048 pixels (2560: 1.25x, 3840: 1.875x), or more on small dense ones (a
-# laptop's 2880 pixels in 13": 2x). The top bar grows to fit the text, title
-# bars and the cursor follow; icons keep their size.
+# command bar) grows with the main screen: its long side/2048 above 2048
+# pixels (2560: 1.25x, 3840: 1.875x), or more on small dense ones (a
+# laptop's 2880 pixels in 13": 2x). Density is measured along the diagonal,
+# so a screen turned to portrait gets the same size as in landscape. The top
+# bar grows to fit the text, title bars and the cursor follow; icons keep
+# their size.
 #
 # Done again at login when the screen is not the one it was done for. A
 # size picked in mos-config (display.scale) stays: it writes "manual" in
@@ -48,18 +50,27 @@ done
 line=$(xrandr --query | grep ' connected primary' | head -n1) || true
 [[ -n $line ]] || line=$(xrandr --query | grep ' connected [0-9]' | head -n1) || true
 [[ -n $line ]] || line=$(xrandr --query | grep ' connected' | head -n1) || true
-px=$(grep -oE '[0-9]+x[0-9]+\+' <<<"$line" | head -n1 | cut -dx -f1) || true
-mm=$(grep -oE '[0-9]+mm x [0-9]+mm' <<<"$line" | head -n1 | cut -dm -f1) || true
-[[ -n $px ]] || { echo "mos-hidpi: no screen found" >&2; exit 1; }
+# Pixels as shown (after any rotation), millimetres as built (before it):
+# compare the long sides and the diagonals, which rotation doesn't change.
+res=$(grep -oE '[0-9]+x[0-9]+\+' <<<"$line" | head -n1) || true
+size=$(grep -oE '[0-9]+mm x [0-9]+mm' <<<"$line" | head -n1) || true
+[[ -n $res ]] || { echo "mos-hidpi: no screen found" >&2; exit 1; }
+pw=${res%%x*} ph=${res#*x} ph=${ph%+}
+px=$((pw > ph ? pw : ph))
+mm='' mw=0 mh=0
+# A virtual machine's screen (QEMU, VirtualBox: Virtual-1) reports a made-up
+# size, fixed for its first mode: by pixels only.
+[[ $line == Virtual* ]] && size=''
+[[ -n $size ]] && read -r mw _ mh _ <<<"${size//mm/ }" && mm=$((mw > mh ? mw : mh))
 [[ $force == 0 && $(cat "$stamp" 2>/dev/null) == "auto $px" ]] && exit 0
 
-# The factor in hundredths: width/2048, at least 1, or the density's 1.5/2.
+# The factor in hundredths: long side/2048, at least 1, or the density's 1.5/2.
 f=$((px * 100 / 2048))
 [[ -n $manual ]] && f=$manual
 ((f < 100)) && f=100
 dpi=unknown
-if [[ -n $mm && $mm -gt 0 ]]; then
-    dpi=$((px * 254 / (mm * 10)))
+if ((mw > 0 && mh > 0)); then
+    dpi=$(awk -v a="$pw" -v b="$ph" -v c="$mw" -v d="$mh" 'BEGIN { printf "%d", sqrt(a*a + b*b) * 25.4 / sqrt(c*c + d*d) }')
     if [[ -n $manual ]]; then :
     elif ((dpi >= 170 && f < 200)); then f=200
     elif ((dpi >= 135 && f < 150)); then f=150

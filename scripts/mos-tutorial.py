@@ -584,18 +584,21 @@ def steps():
 # typed in}} {field} #heading# «key».
 # ANSI colours of the roles in mos_tui.py.
 _STYLE = {
-    "bar": "38;5;253;48;5;23;1", "sel": "38;5;235;48;5;214;1", "btn": "38;5;252;48;5;238",
-    "field": "38;5;253;48;5;237", "key": "38;5;214;1", "head": "38;5;180;1", "dim": "38;5;245",
-    "ok": "38;5;114", "border": "38;5;66", "text": "38;5;250",
+    "bar": "38;5;252;48;5;235;1", "sel": "38;5;235;48;5;214;1", "btn": "38;5;252;48;5;238",
+    "field": "38;5;253;48;5;237", "key": "38;5;214;1", "head": "38;5;254;1", "dim": "38;5;245",
+    "ok": "38;5;114", "border": "38;5;239", "text": "38;5;250", "tab": "38;5;214;48;5;235;1",
 }
 _TOKEN = re.compile(r"\[\[(.+?)\]\]|\[(.+?)\]|<<(.+?)>>|\{\{(.+?)\}\}|\{(.+?)\}|#(.+?)#|«(.+?)»|\(\((.+?)\)\)|([┌┐└┘│─]+)")
 
 
 def _strip(line):
-    """The line without its kind mark: > and . leave their column blank."""
+    """The line without its kind mark: > and . leave their column blank; a
+    title bar starts with MOS // in orange, as the tools' (mos_tui.bar)."""
     mark = line[:1]
     if mark and mark in ">.":
         return " " + line[1:]
+    if mark == "=":
+        return " «MOS //»" + line[1:]
     return line[1:] if mark and mark in "=~" else line
 
 
@@ -615,11 +618,11 @@ def mock_ansi(line, width):
 
     def token(m):
         g = m.groups()
-        styled = [("sel", f" {g[0]} "), ("btn", f" {g[1]} "), ("bar", f" {g[2]} "), ("sel", f" {g[3]} "),
+        styled = [("sel", f" {g[0]} "), ("btn", f" {g[1]} "), ("tab", f" {g[2]} "), ("sel", f" {g[3]} "),
                   ("field", f" {g[4]} "), ("head", g[5]), ("key", g[6]), ("dim", g[7]), ("border", g[8])]
         k, text = next(x for x, y in zip(styled, g) if y is not None)
         if k == "key" and on_bar:
-            return f"\033[0;38;5;214;48;5;23;1m{text}{base}"
+            return f"\033[0;38;5;214;48;5;235;1m{text}{base}"
         return f"{esc(k)}{text}{base}"
 
     out = base + _TOKEN.sub(token, line)

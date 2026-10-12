@@ -1,16 +1,17 @@
 """mos_tui - the look every MeccanicOS full-screen tool shares.
 
-The colours are the shell prompt's (PS1 in modules/shell.nix): light on teal,
-sand, orange. One rule for focus: what Enter acts on (the chosen row, the
-focused button, the field being typed in) is dark on orange, and nothing
-else on the screen is.
+The colours are the desktop's (modules/style.nix, as 256-colour indices; mc,
+Jed and yazi use the same): graphite, off-white, amber. One rule for focus:
+what Enter acts on (the chosen row, the focused button, the field being
+typed in) is dark on amber, and nothing else on the screen is.
 
-  bar        title bar (top) and key bar (bottom): light on teal, keys orange
-  heading    sand, bold: titles, group names, column heads
+  bar        title bar (top) and key bar (bottom): light on graphite, keys
+             amber; the title bar starts with MOS // in amber
+  heading    off-white, bold: titles, group names, column heads
   selected   dark on orange: the chosen row, focused button or field
   button     " Label " light on grey, its shortcut letter orange
   field      an input: light on grey (selected while typed in)
-  dim        help and notes;  ok ✓ green;  err ✗ red;  border teal-grey
+  dim        help and notes;  ok ✓ green;  err ✗ red;  border graphite
   spinner    orange, on the message line while waiting (network, slow tools):
              wait() in a full-screen view, spinning() on a plain terminal
 
@@ -31,9 +32,9 @@ NORMAL, BAR, BAR_KEY, HEADING, KEY, SELECTED, BUTTON, BUTTON_KEY, FIELD, DIM, OK
 _C = curses
 STYLE = {
     NORMAL: ((250, -1), (-1, -1), 0),
-    BAR: ((253, 23), (_C.COLOR_BLACK, _C.COLOR_CYAN), _C.A_BOLD),
-    BAR_KEY: ((214, 23), (_C.COLOR_BLACK, _C.COLOR_CYAN), _C.A_BOLD),
-    HEADING: ((180, -1), (_C.COLOR_YELLOW, -1), _C.A_BOLD),
+    BAR: ((252, 235), (_C.COLOR_BLACK, _C.COLOR_CYAN), _C.A_BOLD),
+    BAR_KEY: ((214, 235), (_C.COLOR_BLACK, _C.COLOR_CYAN), _C.A_BOLD),
+    HEADING: ((254, -1), (_C.COLOR_YELLOW, -1), _C.A_BOLD),
     KEY: ((214, -1), (_C.COLOR_YELLOW, -1), _C.A_BOLD),
     SELECTED: ((235, 214), (_C.COLOR_BLACK, _C.COLOR_YELLOW), _C.A_BOLD),
     BUTTON: ((252, 238), (_C.COLOR_BLACK, _C.COLOR_WHITE), 0),
@@ -42,7 +43,7 @@ STYLE = {
     DIM: ((245, -1), (-1, -1), 0),
     OK: ((114, -1), (_C.COLOR_GREEN, -1), 0),
     ERR: ((203, -1), (_C.COLOR_RED, -1), _C.A_BOLD),
-    BORDER: ((66, -1), (_C.COLOR_CYAN, -1), 0),
+    BORDER: ((239, -1), (_C.COLOR_CYAN, -1), 0),
 }
 PLAIN = {BAR: _C.A_REVERSE, BAR_KEY: _C.A_REVERSE | _C.A_BOLD, HEADING: _C.A_BOLD, KEY: _C.A_BOLD,
          SELECTED: _C.A_REVERSE | _C.A_BOLD, BUTTON: 0, BUTTON_KEY: _C.A_UNDERLINE, FIELD: _C.A_UNDERLINE,
@@ -103,13 +104,19 @@ def put(win, y, x, text, a=0):
     return x + len(text)
 
 
+BRAND = "MOS //"
+
+
 def bar(win, y, text, right=""):
-    """A full-width title bar."""
+    """A full-width title bar: MOS // in orange, then the title; right-aligned
+    status, if any. Every tool's first line, so a screenshot of any of them
+    reads as MeccanicOS."""
     w = win.getmaxyx()[1]
-    line = f" {text}".ljust(w)
+    line = f" {BRAND} {text}".ljust(w)
     if right:
         line = line[: max(0, w - len(right) - 2)] + right + "  "
     put(win, y, 0, line.ljust(w), attr(BAR))
+    put(win, y, 1, BRAND[: max(0, w - 2)], attr(BAR_KEY))
 
 
 def keybar(win, y, keys):

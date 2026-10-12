@@ -538,6 +538,12 @@ in
       shot("mos-keys", find("--class rofi"))
       machine.send_key("esc")
       machine.sleep(1)
+      # The Log Out dialog (the top bar's Log Out); Escape cancels it.
+      x("setsid xfce4-session-logout >/dev/null 2>&1 &")
+      machine.sleep(3)
+      shot("logout-dialog", find("--class '^xfce4-session$'"))
+      machine.send_key("esc")
+      machine.sleep(1)
 
       # A backup to restore from, an online AI set up (a made-up key: nothing is sent),
       # and mos-unlock (installed systems only) for its help.
@@ -567,6 +573,13 @@ in
       command("mos-dropbox", "mos-dropbox --help")
       command("mos-passwords", "mos-passwords --help")
       command("mos-screenshot", "mos-screenshot --help")
+      command("mos-say", "say 'Hello from MeccanicOS'", wait=5)
+      command("mos-gpu-driver", "mos-gpu-driver; mos-gpu-driver --help")
+      # The Logins alert, as a notification (its example: nothing is changed).
+      x("MECCANICOS_LOGINS_DEMO_SECONDS=20 setsid mos-logins demo >/dev/null 2>&1 &")
+      machine.sleep(4)
+      shot("mos-logins-alert", find("--class '^xfce4-notifyd$'"))
+      machine.sleep(17)
 
       # print: its menu, then Esc.
       wid = term("Terminal")
@@ -640,6 +653,13 @@ in
           data = machine.succeed(f"base64 -w0 /tmp/shots/{name}")
           with open(os.path.join(outdir, name), "wb") as f:
               f.write(base64.b64decode(data))
+
+      # Last, the login screen: log out (autologin is only at boot) and take
+      # the whole screen, greeter and background.
+      x("xfce4-session-logout --logout --fast", check=False)
+      machine.wait_until_succeeds("pgrep -f lightdm-gtk-greeter", timeout=120)
+      machine.sleep(10)
+      machine.screenshot(os.path.join(outdir, "login-screen.png"))
       machine.shutdown()
     '';
   };
