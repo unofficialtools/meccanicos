@@ -483,7 +483,10 @@ in
     ''}
   '';
 
-  # Plymouth boot splash: a spinner under the MeccanicOS mark.
+  # Plymouth boot splash: a spinner on plain black, no logo (the spinner
+  # theme shows the logo as its watermark; a blank pixel hides it).
   boot.plymouth.theme = "spinner";
-  boot.plymouth.logo = "${art}/mark.png";
+  boot.plymouth.logo = pkgs.runCommand "plymouth-blank.png" {
+    nativeBuildInputs = [ pkgs.imagemagick ];
+  } "magick -size 1x1 xc:none png32:$out";
 }
