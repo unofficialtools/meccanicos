@@ -5,6 +5,13 @@ mos-install - one-page TUI installer.
 Installs the prebuilt MeccanicOS system (shipped inside the ISO) onto a disk:
 GPT -> 1 GiB EFI + LUKS2 -> ext4, systemd-boot. No network needed.
 
+Organization install (EXPERIMENTAL): when the USB stick holds
+meccanicos/fleet/<computer>/corporate.config (written by `mos-fleet prepare`),
+the installer offers to install that computer as a managed member of the
+organization's fleet: name, disk and disk unlocking come from the file, no
+local account is made (people log in with their organization account), and
+it needs the network. See docs/fleet/ADMIN-GUIDE.md.
+
 Environment (set by the Nix wrapper):
   MECCANICOS_SYSTEM   store path of the installed system's toplevel
   MECCANICOS_SYSTEM_DISK_BYTES  space it takes on the target (for the progress bar)
@@ -12,20 +19,26 @@ Environment (set by the Nix wrapper):
   MECCANICOS_NAME     distro name, e.g. "MeccanicOS"
   MECCANICOS_HOSTNAME default hostname, e.g. "meccanicos"
   MECCANICOS_ISO_LABEL  volume label of the live USB (excluded from targets)
+  MECCANICOS_FLEET_DIR  where else to look for meccanicos/fleet/*/corporate.config
 Testing:
   MECCANICOS_INSTALL_TEST=1   run disk steps but skip nixos-install / nixos-enter
   --config FILE.json     skip the TUI, install with these answers
+                         ("fleet_dir": a corporate.config folder: organization install)
 """
 
 import curses
 import datetime
+import glob
 import json
 import os
 import re
+import secrets
 import shlex
+import shutil
 import subprocess
 import sys
 import time
+import tomllib
 
 # The look shared by MeccanicOS TUIs: MECCANICOS_PYLIB from the Nix wrapper, else next to this file.
 sys.path.insert(0, os.environ.get("MECCANICOS_PYLIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
@@ -43,6 +56,14 @@ TARGET = "/mnt/mos-target"
 MAPPER = "mos-target"
 LOG = "/tmp/mos-install.log"
 USER_GROUPS = "wheel,networkmanager,video,audio,input,dialout,lp,scanner"
+# Organization install (corporate.config): where its files go on the disk.
+FLEET_SECRETS = "/etc/secrets/meccanicos"
+UNLOCK_METHODS = {
+    "tang": "automatic on the office network (Tang server + this PC's TPM)",
+    "tpm-pin": "a PIN at power-on (this PC's TPM chip)",
+    "fido2": "a FIDO2 security key at power-on",
+}
+PIN_MIN = 6
 
 # ----------------------------------------------------------------- data ----
 # (label, xkb layout, xkb variant, console keymap)
@@ -211,7 +232,7 @@ LANG_BY_LOCALE = {loc: label for label, loc in LANGUAGES}
 COUNTRY = {c[0]: c for c in COUNTRIES}
 
 
-def run(cmd, check=True, input=None, capture=False, quiet=False):
+def run(cmd, check=True, input=None, capture=False, quiet=False, env=None):
     """Run a command, log it, raise on failure."""
     if isinstance(cmd, str):
         shown, args, shell = cmd, cmd, True
@@ -225,6 +246,7 @@ def run(cmd, check=True, input=None, capture=False, quiet=False):
         input=input.encode() if isinstance(input, str) else input,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        env=None if env is None else {**os.environ, **env},
     )
     out = r.stdout.decode(errors="replace")
     with open(LOG, "a") as log:
@@ -235,6 +257,18 @@ def run(cmd, check=True, input=None, capture=False, quiet=False):
     if check and r.returncode != 0:
         raise RuntimeError(f"command failed ({r.returncode}): {shown}\n{out[-2000:]}")
     return out
+
+
+def run_secret(cmd, input=None, env=None):
+    """Run a command whose output is secret (a recovery key, a sealed key):
+    only the command goes to the log. Returns stdout; raises on failure."""
+    with open(LOG, "a") as log:
+        log.write(f"$ {' '.join(shlex.quote(c) for c in cmd)}   (output not logged)\n")
+    r = subprocess.run(cmd, input=input, capture_output=True, text=True,
+                       env=None if env is None else {**os.environ, **env})
+    if r.returncode != 0:
+        raise RuntimeError(f"command failed ({r.returncode}): {cmd[0]} {cmd[1] if len(cmd) > 1 else ''}\n{r.stderr[-1500:]}")
+    return r.stdout
 
 
 def closure_bytes(path):
@@ -314,7 +348,7 @@ def boot_disk():
 
 def list_disks():
     out = subprocess.run(
-        ["lsblk", "-J", "-b", "-d", "-o", "NAME,PATH,SIZE,MODEL,TYPE,TRAN,RO"], capture_output=True, text=True
+        ["lsblk", "-J", "-b", "-d", "-o", "NAME,PATH,SIZE,MODEL,SERIAL,TYPE,TRAN,RO"], capture_output=True, text=True
     ).stdout
     skip = boot_disk()
     disks = []
@@ -328,7 +362,7 @@ def list_disks():
             continue
         model = (d.get("model") or "").strip() or "disk"
         label = f"{drive_name(d['path'], d.get('tran'))}  {size / 1e9:6.1f} GB  {model}"
-        disks.append((label, d["path"], size))
+        disks.append((label, d["path"], size, (d.get("serial") or "").strip()))
     return disks
 
 
@@ -428,9 +462,97 @@ def apply_keyboard_live(kb):
         subprocess.run(["loadkeys", keymap], capture_output=True)
 
 
+# --------------------------------------------- organization install ----
+def fleet_bundles():
+    """corporate.config folders on the USB stick(s): [(folder, config)].
+    The stick's own files are mounted by `usb-vault stick` (the data
+    partition, or the Ventoy partition holding the ISO); other sticks are
+    looked for where the desktop mounts them."""
+    try:
+        subprocess.run(["usb-vault", "stick"], capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    roots = ["/run/usb-vault/data"] + glob.glob("/run/media/*/*") + glob.glob("/media/*")
+    if os.environ.get("MECCANICOS_FLEET_DIR"):
+        roots.insert(0, os.environ["MECCANICOS_FLEET_DIR"])
+    found, seen = [], set()
+    for root in roots:
+        for cfg in sorted(glob.glob(os.path.join(root, "meccanicos", "fleet", "*", "corporate.config"))):
+            d = os.path.dirname(os.path.realpath(cfg))
+            if d in seen:
+                continue
+            seen.add(d)
+            try:
+                found.append((d, load_bundle(d)))
+            except (OSError, ValueError) as e:
+                found.append((d, {"error": str(e)}))
+    return found
+
+
+def load_bundle(d):
+    """Read and check a corporate.config folder (mos-fleet prepare). Raises
+    ValueError saying what is wrong."""
+    with open(os.path.join(d, "corporate.config"), "rb") as fh:
+        try:
+            c = tomllib.load(fh)
+        except tomllib.TOMLDecodeError as e:
+            raise ValueError(f"corporate.config: {e}") from None
+    need = [("organization",), ("hostname",), ("profile",), ("repo", "url"), ("cache", "url"),
+            ("cache", "public_key"), ("fleet", "url"), ("kanidm", "url"), ("unlock", "method")]
+    for path in need:
+        x = c
+        for k in path:
+            x = x.get(k) if isinstance(x, dict) else None
+        if not x:
+            raise ValueError(f"corporate.config: missing {'.'.join(path)}")
+    if not HOSTNAME_RE.fullmatch(c["hostname"]):
+        raise ValueError(f"corporate.config: bad computer name {c['hostname']!r}")
+    m = c["unlock"]["method"]
+    if m not in UNLOCK_METHODS:
+        raise ValueError(f"corporate.config: unlock method must be one of {', '.join(UNLOCK_METHODS)}")
+    if m == "tang" and not (c["unlock"].get("tang_url") and c["unlock"].get("tang_thumbprint")):
+        raise ValueError("corporate.config: tang needs unlock.tang_url and unlock.tang_thumbprint")
+    for f in ("ca.crt", "repo.token", "fleet.secret", "admins.txt"):
+        if not os.path.isfile(os.path.join(d, f)):
+            raise ValueError(f"{f} is missing next to corporate.config")
+    if not admin_keys(d):
+        raise ValueError("admins.txt has no age public key (age1...): nobody could read the recovery key")
+    return c
+
+
+def admin_keys(d):
+    with open(os.path.join(d, "admins.txt")) as fh:
+        return [l.strip() for l in fh if l.strip().startswith("age1")]
+
+
+def bundle_summary(c):
+    return f"{c['hostname']} ({c['profile']}) for {c['organization']}"
+
+
+def toml_str(x):
+    return json.dumps(x, ensure_ascii=False)  # JSON strings are TOML basic strings
+
+
+def fleet_toml(c):
+    """/etc/nixos/fleet.toml: what managed.nix reads (no secrets, no install section)."""
+    lines = [
+        "# Written by mos-install from corporate.config. Read by managed.nix.",
+        "version = 1",
+        f"organization = {toml_str(c['organization'])}",
+        f"profile = {toml_str(c['profile'])}",
+    ]
+    for table, keys in (("repo", ("url", "branch", "username")), ("cache", ("url", "public_key")),
+                        ("fleet", ("url",)), ("kanidm", ("url",)), ("unlock", ("method",))):
+        lines.append(f"\n[{table}]")
+        for k in keys:
+            if c.get(table, {}).get(k):
+                lines.append(f"{k} = {toml_str(c[table][k])}")
+    return "\n".join(lines) + "\n"
+
+
 # ---------------------------------------------------------------- the TUI ----
 class Form:
-    def __init__(self):
+    def __init__(self, org=None):
         c = COUNTRY["United States"]
         self.v = {
             "country": c[0],
@@ -448,7 +570,9 @@ class Form:
             "luks_password": "",
             "disk": "",
             "disk_label": "",
+            "pin": "",
         }
+        self.org = org  # organization install: (folder, corporate.config)
         self.touched = set()  # fields the user set explicitly (not overwritten by country)
         self.fields = [
             ("country", "Country"),
@@ -472,11 +596,37 @@ class Form:
         self.err = False
         self._tz = None
         self._disks = None
+        if org:
+            c = org[1]
+            self.v["hostname"] = c["hostname"]
+            self.v["org"] = org[0]
+            # No local account and no disk password: people log in with their
+            # organization account; the disk unlocks as the organization chose.
+            drop = {"fullname", "username", "password", "hostname", "luks_password"}
+            self.fields = [f for f in self.fields if f[0] not in drop]
+            if c["unlock"]["method"] == "tpm-pin":
+                self.fields.insert(self.fields.index(("disk", "Target disk")), ("pin", "Disk PIN"))
+            self.fields.insert(0, ("organization", "Organization"))
+            self.fields.insert(1, ("computer", "Computer"))
+            serial = c.get("install", {}).get("disk_serial", "")
+            if serial:
+                for d in list_disks():
+                    if d[3].casefold() == serial.casefold():
+                        self.v["disk_label"], self.v["disk"] = d[0], d[1]
+                if not self.v["disk"]:
+                    self.msg, self.err = f"No disk with serial {serial} here: is this the right computer?", True
+            if not self.err:
+                self.msg = "Organization install: needs the network (a cable for Tang)."
 
     # -- display text for each field
     def show(self, key):
         v = self.v
-        if key in ("password", "luks_password"):
+        if key == "organization":
+            return self.org[1]["organization"]
+        if key == "computer":
+            c = self.org[1]
+            return f"{c['hostname']}, profile {c['profile']}"
+        if key in ("password", "luks_password", "pin"):
             return "•" * min(len(v[key]), 24) if v[key] else "(not set)"
         if key == "wifi_password":
             if not v["wifi"]:
@@ -489,6 +639,8 @@ class Form:
         if key == "disk":
             return v["disk_label"] or "(choose a disk)"
         if key == "fs":
+            if self.org:
+                return "encrypted; unlock: " + UNLOCK_METHODS[self.org[1]["unlock"]["method"]]
             return "ext4 on LUKS2 (encrypted), EFI boot"
         if key == "fullname":
             return v["fullname"] or "(optional)"
@@ -512,7 +664,7 @@ def draw(scr, f):
             ui.button(scr, y, max(2, (w - len(btn) - 2) // 2), btn, f.sel == i)
             continue
         line = f"  {label:<{labw}} {f.show(key)}"
-        ui.row(scr, y, 0, w - 1, line, f.sel == i, ui.attr(ui.DIM if key == "fs" else ui.NORMAL))
+        ui.row(scr, y, 0, w - 1, line, f.sel == i, ui.attr(ui.DIM if key in ("fs", "organization", "computer") else ui.NORMAL))
     ui.keybar(scr, h - 1, [("↑↓", "move"), ("Enter", "change"), ("Tab", "next"), ("Ctrl-C", "quit")])
     if f.msg:
         ui.message(scr, h - 2, 1, ("✗ " if f.err and not f.msg.startswith("✗") else "") + f.msg[: w - 5])
@@ -778,6 +930,16 @@ def edit(scr, f, key):
             v["luks_password"] = p
         elif err:
             f.msg, f.err = err, True
+    elif key == "pin":
+        p, err = ask_password(scr, "Disk PIN (asked at every power-on)", PIN_MIN)
+        if p is not None:
+            v["pin"] = p
+        elif err:
+            f.msg, f.err = err, True
+    elif key in ("organization", "computer"):
+        f.msg = "From corporate.config on the USB stick (mos-fleet prepare)."
+    elif key == "disk" and f.org and f.org[1].get("install", {}).get("disk_serial"):
+        f.msg = f"The organization chose the disk with serial {f.org[1]['install']['disk_serial']}."
     elif key == "disk":
         disks = list_disks()
         if not disks:
@@ -788,11 +950,22 @@ def edit(scr, f, key):
         if i is not None:
             v["disk_label"], v["disk"] = disks[i][0], disks[i][1]
     elif key == "fs":
-        f.msg = "MeccanicOS installs ext4 inside full-disk LUKS2 encryption."
+        if f.org:
+            f.msg = "Unlocking: " + UNLOCK_METHODS[f.org[1]["unlock"]["method"]] + "; a recovery key goes to the admins."
+        else:
+            f.msg = "MeccanicOS installs ext4 inside full-disk LUKS2 encryption."
 
 
-def validate(v):
+def validate(v, org=None):
     errs = []
+    if org:
+        if org[1]["unlock"]["method"] == "tpm-pin" and len(v["pin"]) < PIN_MIN:
+            errs.append(f"Set the disk PIN ({PIN_MIN}+ characters).")
+        if not v["disk"]:
+            errs.append("Choose the target disk.")
+        if v["wifi"] and v["wifi_security"] and len(v["wifi_password"]) < 8:
+            errs.append("Wi-Fi password must be at least 8 characters.")
+        return errs
     if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", v["username"] or ""):
         errs.append("Username: lowercase letters/digits, starting with a letter.")
     elif v["username"] in ("root", "nixos", "nobody", "daemon", "bin", "sys", "messagebus", "sshd", "nixbld"):
@@ -810,10 +983,25 @@ def validate(v):
     return errs
 
 
-def tui(scr):
+def tui(scr, bundles=()):
     ui.init()
     scr.keypad(True)
-    f = Form()
+    org = None
+    if bundles:
+        items = [f"Organization install: {bundle_summary(c)}" if "error" not in c else f"(unusable) {d}: {c['error']}"
+                 for d, c in bundles] + [f"Normal install (a personal {NAME} computer)"]
+        while True:
+            i = popup_list(scr, "Found on the USB stick", items, None, filterable=False)
+            if i is None:
+                return None
+            if i == len(bundles):
+                break
+            if "error" in bundles[i][1]:
+                popup_message(scr, "Cannot use it", f"{bundles[i][0]}\n\n{bundles[i][1]['error']}")
+                continue
+            org = bundles[i]
+            break
+    f = Form(org)
     apply_keyboard_live(KB[f.v["keyboard"]])
     n = len(f.fields)
     while True:
@@ -830,17 +1018,23 @@ def tui(scr):
             if key != "install":
                 edit(scr, f, key)
                 continue
-            errs = validate(f.v)
+            errs = validate(f.v, org)
             if errs:
                 popup_message(scr, "Almost there", "\n".join("• " + e for e in errs))
                 continue
+            if org:
+                c = org[1]
+                who = (f"Organization: {c['organization']}   Computer: {c['hostname']} (profile {c['profile']})\n"
+                       f"Unlock: {UNLOCK_METHODS[c['unlock']['method']]}\n")
+            else:
+                who = f"User: {f.v['username']} (passwordless sudo)   Computer name: {f.v['hostname']}\n"
             ok = popup_message(
                 scr,
                 f"Erase the {drive_name(f.v['disk']).split(' (')[0]}?",
                 "\n".join(erase_warning(f.v["disk"], " ".join(f.v["disk_label"].split())))
                 + f"\n\nThen {NAME} is installed on it, encrypted.\n"
-                f"User: {f.v['username']} (passwordless sudo)   Computer name: {f.v['hostname']}\n"
-                f"Keyboard: {f.v['keyboard']}\n"
+                + who
+                + f"Keyboard: {f.v['keyboard']}\n"
                 f"Language: {f.v['language']}   Time zone: {f.v['timezone']}",
                 confirm_word="YES",
                 danger=True,
@@ -894,24 +1088,16 @@ def release_disk(disk):
             run(["cryptsetup", "close", name], check=False, quiet=True)
 
 
-def install(v):
-    s = answers_to_settings(v)
-    disk = v["disk"]
-    total = 8
-    open(LOG, "w").close()
-    os.chmod(LOG, 0o600)
-    print(f"\033[1m{NAME} installer\033[0m — log: {LOG}")
+def check_uefi():
+    if not TEST and not os.path.isdir("/sys/firmware/efi"):
+        raise RuntimeError(
+            "This PC started the USB stick in legacy BIOS mode.\n"
+            "Reboot, open the firmware boot menu and pick the UEFI entry for the stick."
+        )
 
-    if not TEST:
-        if not os.path.isdir("/sys/firmware/efi"):
-            raise RuntimeError(
-                "This PC started the USB stick in legacy BIOS mode.\n"
-                "Reboot, open the firmware boot menu and pick the UEFI entry for the stick."
-            )
-        if not SYSTEM or not os.path.exists(SYSTEM):
-            raise RuntimeError("Prebuilt system not found on the ISO (MECCANICOS_SYSTEM).")
 
-    step(1, total, f"Partitioning {disk}")
+def partition_disk(disk):
+    """GPT: 1 GiB EFI + the rest for LUKS. Returns (efi, crypt) partitions."""
     release_disk(disk)
     run(["wipefs", "-af", disk], quiet=True)
     layout = (
@@ -926,20 +1112,49 @@ def install(v):
     parts = partitions_of(disk)
     if len(parts) < 2:
         raise RuntimeError(f"Expected 2 partitions on {disk}, found {parts}")
-    efi, crypt = parts[0], parts[1]
+    return parts[0], parts[1]
 
-    step(2, total, "Encrypting (LUKS2)")
-    pw = v["luks_password"]
-    run(["cryptsetup", "luksFormat", "--batch-mode", "--type", "luks2", "--label", "MOS_CRYPT", "--key-file", "-", crypt], input=pw)
-    run(["cryptsetup", "open", "--allow-discards", "--key-file", "-", crypt, MAPPER], input=pw)
 
-    step(3, total, "Creating filesystems")
+def encrypt(crypt, key):
+    run(["cryptsetup", "luksFormat", "--batch-mode", "--type", "luks2", "--label", "MOS_CRYPT", "--key-file", "-", crypt], input=key)
+    run(["cryptsetup", "open", "--allow-discards", "--key-file", "-", crypt, MAPPER], input=key)
+
+
+def make_filesystems(efi):
     run(["mkfs.fat", "-F", "32", "-n", "MOS_EFI", efi])
     run(["mkfs.ext4", "-q", "-F", "-L", "MECCANICOS_ROOT", f"/dev/mapper/{MAPPER}"])
     os.makedirs(TARGET, exist_ok=True)
     run(["mount", f"/dev/mapper/{MAPPER}", TARGET])
     os.makedirs(f"{TARGET}/boot", exist_ok=True)
     run(["mount", "-o", "umask=0077", efi, f"{TARGET}/boot"])
+
+
+def start_log():
+    open(LOG, "w").close()
+    os.chmod(LOG, 0o600)
+    print(f"\033[1m{NAME} installer\033[0m — log: {LOG}")
+
+
+def install(v):
+    if v.get("org"):
+        return install_org(v)
+    s = answers_to_settings(v)
+    disk = v["disk"]
+    total = 8
+    start_log()
+
+    check_uefi()
+    if not TEST and (not SYSTEM or not os.path.exists(SYSTEM)):
+        raise RuntimeError("Prebuilt system not found on the ISO (MECCANICOS_SYSTEM).")
+
+    step(1, total, f"Partitioning {disk}")
+    efi, crypt = partition_disk(disk)
+
+    step(2, total, "Encrypting (LUKS2)")
+    encrypt(crypt, v["luks_password"])
+
+    step(3, total, "Creating filesystems")
+    make_filesystems(efi)
 
     step(4, total, f"Copying {NAME} to disk (no download needed)")
     if TEST:
@@ -976,6 +1191,218 @@ def install(v):
     with open(LOG) as src, open(f"{TARGET}/etc/meccanicos/install.log", "w") as dst:
         dst.write(src.read())
     # When the ISO it was installed from was built (System Info shows it).
+    if os.path.exists("/etc/meccanicos/version"):
+        with open("/etc/meccanicos/version") as src, open(f"{TARGET}/etc/meccanicos/version", "w") as dst:
+            dst.write(src.read())
+    run(["sync"])
+    run(["umount", "-R", TARGET], check=False)
+    run(["cryptsetup", "close", MAPPER], check=False)
+    return True
+
+
+RUNDIR = "/run/mos-install"  # tmpfs: never on a disk
+
+
+def secret_file(name, text):
+    os.makedirs(RUNDIR, mode=0o700, exist_ok=True)
+    path = os.path.join(RUNDIR, name)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    return path
+
+
+def ca_bundle(d):
+    """The usual CAs plus the organization's, for talking to its servers."""
+    os.makedirs(RUNDIR, mode=0o700, exist_ok=True)
+    path = os.path.join(RUNDIR, "ca-bundle.crt")
+    with open(path, "w") as out:
+        for f in ("/etc/ssl/certs/ca-certificates.crt", os.path.join(d, "ca.crt")):
+            if os.path.exists(f):
+                out.write(open(f).read().rstrip("\n") + "\n")
+    return path
+
+
+def connect_wifi(v):
+    """Join the chosen Wi-Fi network now (the organization install downloads)."""
+    cmd = ["nmcli", "device", "wifi", "connect", v["wifi"]]
+    if v["wifi_password"]:
+        cmd += ["password", v["wifi_password"]]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    print(f"    Wi-Fi {v['wifi']}: {'connected' if r.returncode == 0 else 'could not connect (' + r.stderr.strip()[:80] + ')'}")
+
+
+def preflight(c, d, bundle):
+    """Reach every server the install and the first boot need, before erasing."""
+    token = open(os.path.join(d, "repo.token")).read().strip()
+    checks = [
+        ("binary cache", c["cache"]["url"].rstrip("/") + "/nix-cache-info", []),
+        ("fleet repository", c["repo"]["url"].rstrip("/") + "/info/refs?service=git-upload-pack",
+         ["-H", f"Authorization: token {token}"]),
+        ("Fleet", c["fleet"]["url"].rstrip("/") + "/healthz", []),
+        ("Kanidm", c["kanidm"]["url"].rstrip("/") + "/status", []),
+    ]
+    if c["unlock"]["method"] == "tang":
+        checks.append(("Tang", c["unlock"]["tang_url"].rstrip("/") + "/adv", []))
+    bad = []
+    for name, url, extra in checks:
+        r = subprocess.run(["curl", "-fsS", "-o", "/dev/null", "--max-time", "15", "--cacert", bundle] + extra + [url],
+                           capture_output=True, text=True)
+        print(f"    {'ok  ' if r.returncode == 0 else 'FAIL'} {name}  {url.split('?')[0]}")
+        if r.returncode != 0:
+            bad.append(f"{name}: {r.stderr.strip()[:120]}")
+    if bad:
+        raise RuntimeError(
+            "Cannot reach the organization's servers:\n  " + "\n  ".join(bad)
+            + "\nCheck the network (for Tang: a cable on the office network). Nothing was erased."
+        )
+
+
+def enroll_unlock(c, d, v, crypt, tempf):
+    """The organization's way of unlocking the disk, and a recovery key for
+    its admins (encrypted to their age keys, saved on the stick). Then the
+    temporary key the disk was made with goes."""
+    method = c["unlock"]["method"]
+    if TEST:
+        print(f"    [test mode] skipping enrollment ({method})")
+        return
+    out = run_secret(["systemd-cryptenroll", f"--unlock-key-file={tempf}", "--recovery-key", crypt])
+    m = re.search(r"\b[cbdefghijklnrtuv]{8}(?:-[cbdefghijklnrtuv]{8}){7}\b", out)
+    if not m:
+        raise RuntimeError("systemd-cryptenroll did not print a recovery key")
+    rec = m.group(0)
+    res = os.path.join(d, "result")
+    os.makedirs(res, exist_ok=True)
+    run_secret(["age", "-R", os.path.join(d, "admins.txt"), "-o", os.path.join(res, "recovery.age")], input=rec + "\n")
+    print(f"    Recovery key: encrypted for the {len(admin_keys(d))} admin key(s) in admins.txt (on the stick).")
+
+    if method == "tang":
+        key = secrets.token_hex(32)
+        keyf = secret_file("clevis.key", key)
+        run(["cryptsetup", "luksAddKey", "--batch-mode", f"--key-file={tempf}", crypt, keyf])
+        tang = {"url": c["unlock"]["tang_url"], "thp": c["unlock"]["tang_thumbprint"]}
+        if os.path.exists("/dev/tpmrm0"):
+            policy = {"t": 2, "pins": {"tang": [tang], "tpm2": {"pcr_bank": "sha256", "pcr_ids": "7"}}}
+            print("    Unlock: Tang server AND this PC's TPM (only on the office network, only in this PC).")
+        else:
+            policy = {"t": 1, "pins": {"tang": [tang]}}
+            print("    Unlock: Tang server (this PC has no TPM).")
+        jwe = run_secret(["clevis", "encrypt", "sss", json.dumps(policy)], input=key)
+        if run_secret(["clevis", "decrypt"], input=jwe) != key:
+            raise RuntimeError("clevis: the sealed key does not decrypt back (Tang/TPM)")
+        os.makedirs(TARGET + FLEET_SECRETS, mode=0o700, exist_ok=True)
+        write(FLEET_SECRETS + "/cryptroot.jwe", jwe, mode=0o600)
+        os.remove(keyf)
+    elif method == "tpm-pin":
+        run(["systemd-cryptenroll", f"--unlock-key-file={tempf}", "--tpm2-device=auto", "--tpm2-pcrs=7",
+             "--tpm2-with-pin=yes", crypt], env={"NEWPIN": v["pin"]})
+        print("    Unlock: this PC's TPM chip and the PIN.")
+    elif method == "fido2":
+        print("\n    Plug in the FIDO2 security key. Touch it when it blinks (type its PIN if asked).")
+        r = subprocess.run(["systemd-cryptenroll", f"--unlock-key-file={tempf}", "--fido2-device=auto",
+                            "--fido2-with-user-presence=yes", crypt])
+        if r.returncode != 0:
+            raise RuntimeError("Could not enroll the FIDO2 security key.")
+        print("    Unlock: the FIDO2 security key.")
+    recf = secret_file("recovery.key", rec)
+    run(["cryptsetup", "luksKillSlot", "--batch-mode", f"--key-file={recf}", crypt, "0"])
+    os.remove(recf)
+    print("    The temporary disk key is removed: only the above and the recovery key open the disk.")
+
+
+def save_result(c, d, v):
+    """What the admin adds to the fleet repository (mos-fleet add): this
+    computer's own /etc/nixos files and its encrypted recovery key, in
+    result/ on the stick. Its secrets leave the stick."""
+    res = os.path.join(d, "result")
+    os.makedirs(res, exist_ok=True)
+    for f in ("hardware-configuration.nix", "local.nix", "fleet.toml", "ca.crt"):
+        src = f"{TARGET}/etc/nixos/{f}"
+        if os.path.exists(src):
+            shutil.copyfile(src, os.path.join(res, f))
+    with open(os.path.join(res, "installed.txt"), "w") as fh:
+        fh.write(f"computer = {toml_str(c['hostname'])}\n"
+                 f"date = {toml_str(datetime.datetime.now().isoformat(timespec='seconds'))}\n"
+                 f"disk = {toml_str(v['disk_label'])}\n"
+                 f"unlock = {toml_str(c['unlock']['method'])}\n")
+    for f in ("repo.token", "fleet.secret"):
+        try:
+            os.remove(os.path.join(d, f))
+        except OSError:
+            pass
+    run(["sync"], check=False, quiet=True)
+    print(f"    On the stick: {res}  (then on your computer: mos-fleet add {c['hostname']})")
+
+
+def install_org(v):
+    """Organization install: a managed computer of the fleet (corporate.config)."""
+    d = v["org"]
+    c = load_bundle(d)
+    s = answers_to_settings(v)
+    disk = v["disk"]
+    total = 9
+    start_log()
+    check_uefi()
+    print(f"    Organization install: {bundle_summary(c)}")
+
+    step(1, total, "Network and the organization's servers")
+    if v.get("wifi"):
+        connect_wifi(v)
+    bundle = ca_bundle(d)
+    os.environ["NIX_SSL_CERT_FILE"] = bundle
+    preflight(c, d, bundle)
+
+    step(2, total, f"Partitioning {disk}")
+    efi, crypt = partition_disk(disk)
+
+    step(3, total, "Encrypting (LUKS2)")
+    temp = secrets.token_hex(32)
+    tempf = secret_file("temp.key", temp)
+    encrypt(crypt, temp)
+
+    step(4, total, "Creating filesystems")
+    make_filesystems(efi)
+
+    step(5, total, "Disk unlocking and recovery key")
+    enroll_unlock(c, d, v, crypt, tempf)
+    os.remove(tempf)
+
+    step(6, total, f"{c['organization']}'s settings to /etc/nixos")
+    write_nixos_config(v, s, org=c)
+    write("/etc/nixos/fleet.toml", fleet_toml(c))
+    write("/etc/nixos/ca.crt", open(os.path.join(d, "ca.crt")).read())
+    os.makedirs(TARGET + FLEET_SECRETS, mode=0o700, exist_ok=True)
+    for f in ("repo.token", "fleet.secret"):
+        write(f"{FLEET_SECRETS}/{f}", open(os.path.join(d, f)).read().strip() + "\n", mode=0o600)
+    print("    fleet.toml, ca.crt; secrets in " + FLEET_SECRETS)
+
+    step(7, total, f"Installing {NAME} with {c['organization']}'s settings (downloads what it needs)")
+    if TEST:
+        print("    [test mode] skipping nixos-install")
+        os.makedirs(f"{TARGET}/boot/loader/entries", exist_ok=True)
+    else:
+        try:
+            size = int(os.environ.get("MECCANICOS_SYSTEM_DISK_BYTES", "0"))
+        except ValueError:
+            size = 0
+        run_with_progress(
+            ["nixos-install", "--root", TARGET, "--flake", f"{TARGET}/etc/nixos#installed",
+             "--no-root-passwd", "--no-channel-copy",
+             "--option", "extra-substituters", c["cache"]["url"],
+             "--option", "extra-trusted-public-keys", c["cache"]["public_key"],
+             "--option", "ssl-cert-file", bundle],
+            size,
+            TARGET,
+        )
+
+    step(8, total, "Language, keyboard, time zone, screen")
+    write_runtime_config(v, s)
+
+    step(9, total, "Finishing")
+    save_result(c, d, v)
+    os.makedirs(f"{TARGET}/etc/meccanicos", exist_ok=True)
+    with open(LOG) as src, open(f"{TARGET}/etc/meccanicos/install.log", "w") as dst:
+        dst.write(src.read())
     if os.path.exists("/etc/meccanicos/version"):
         with open("/etc/meccanicos/version") as src, open(f"{TARGET}/etc/meccanicos/version", "w") as dst:
             dst.write(src.read())
@@ -1074,7 +1501,7 @@ def nix_str(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"').replace("${", "\\${") + '"'
 
 
-def write_nixos_config(v, s):
+def write_nixos_config(v, s, org=None):
     dst = TARGET + "/etc/nixos"
     if FLAKE and os.path.isdir(FLAKE):
         run(["cp", "-rT", "--no-preserve=mode,ownership", FLAKE, dst], quiet=True)
@@ -1094,9 +1521,24 @@ def write_nixos_config(v, s):
         ) + "  };\n"
     params = [f"vconsole.keymap={s['keymap']}"] + (["fbcon=rotate:1"] if s["portrait"] else [])
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    local = f"""# Choices made in mos-install on {stamp}.
-# Edit freely, then apply with:  mos-rebuild
-{{ ... }}:
+    if org:
+        users = (f"  # A managed computer of {org['organization']} (fleet.toml): people log in\n"
+                 "  # with their organization account; no local accounts.\n")
+        head = (f"# Choices made in mos-install on {stamp} (organization install).\n"
+                "# This file also goes to the fleet repository (hosts/<name>/local.nix),\n"
+                "# where changes to this computer are made from now on.\n")
+    else:
+        users = f"""  users.users.{v['username']} = {{
+    isNormalUser = true;
+    description = {nix_str(v['fullname'])};
+    extraGroups = [ {' '.join(nix_str(g) for g in USER_GROUPS.split(','))} ];
+    # Password is managed with `passwd` (users.mutableUsers = true).
+    # SSH is key-only: add keys here or in ~/.ssh/authorized_keys
+    openssh.authorizedKeys.keys = [ ];
+  }};
+"""
+        head = f"# Choices made in mos-install on {stamp}.\n# Edit freely, then apply with:  mos-rebuild\n"
+    local = f"""{head}{{ ... }}:
 {{
   networking.hostName = {nix_str(v['hostname'])};
   time.timeZone = {nix_str(s['timezone'])};
@@ -1108,16 +1550,7 @@ def write_nixos_config(v, s):
   }};
   boot.kernelParams = [ {' '.join(nix_str(p) for p in params)} ];
   boot.extraModprobeConfig = "options cfg80211 ieee80211_regdom={s['country']}";
-  # meccanicos.autoUpgrade = false;   # uncomment to stop weekly background updates
-  users.users.{v['username']} = {{
-    isNormalUser = true;
-    description = {nix_str(v['fullname'])};
-    extraGroups = [ {' '.join(nix_str(g) for g in USER_GROUPS.split(','))} ];
-    # Password is managed with `passwd` (users.mutableUsers = true).
-    # SSH is key-only: add keys here or in ~/.ssh/authorized_keys
-    openssh.authorizedKeys.keys = [ ];
-  }};
-}}
+{"" if org else "  # meccanicos.autoUpgrade = false;   # uncomment to stop weekly background updates" + chr(10)}{users}}}
 """
     write("/etc/nixos/local.nix", local)
     print("    /etc/nixos: local.nix with these choices; the rest comes from the MeccanicOS release.")
@@ -1133,6 +1566,25 @@ def main():
     if len(sys.argv) > 2 and sys.argv[1] == "--config":
         v = json.load(open(sys.argv[2]))
         v.setdefault("hostname", HOSTNAME)
+        if v.get("fleet_dir"):
+            try:
+                c = load_bundle(v["fleet_dir"])
+            except (OSError, ValueError) as e:
+                print(f"Organization install: {e}")
+                return 1
+            v["org"], v["hostname"] = v["fleet_dir"], c["hostname"]
+            v.setdefault("pin", "")
+            v.setdefault("disk_label", v["disk"])
+            for k in ("wifi", "wifi_security", "wifi_password"):
+                v.setdefault(k, "")
+            serial = c.get("install", {}).get("disk_serial", "")
+            if serial and not any(d[1] == v["disk"] and d[3].casefold() == serial.casefold() for d in list_disks()):
+                print(f"Organization install: {v['disk']} is not the disk with serial {serial}.")
+                return 1
+            errs = validate(v, (v["org"], c))
+            if errs:
+                print("\n".join(errs))
+                return 1
         if not HOSTNAME_RE.fullmatch(v["hostname"]):
             print(f"Bad hostname: {v['hostname']!r}")
             return 1
@@ -1149,7 +1601,8 @@ def main():
             return 1
     else:
         os.environ.setdefault("ESCDELAY", "25")
-        v = curses.wrapper(tui)
+        bundles = fleet_bundles()
+        v = curses.wrapper(tui, bundles)
         if v is None:
             print("Nothing was changed.")
             return 0
@@ -1165,7 +1618,17 @@ def main():
         input("\nPress Enter to close.")
         return 1
     print(f"\n\033[1;32m{NAME} is installed.\033[0m Remove the USB stick and reboot.")
-    print("At boot, type your disk password; then log in as", v["username"])
+    if v.get("org"):
+        # (Its secrets have left the stick: read just the method.)
+        with open(os.path.join(v["org"], "corporate.config"), "rb") as fh:
+            method = tomllib.load(fh).get("unlock", {}).get("method", "")
+        print({"tang": "At boot the disk unlocks by itself on the office network (a cable).",
+               "tpm-pin": "At boot, type the disk PIN.",
+               "fido2": "At boot, plug in the security key and touch it."}.get(method, ""))
+        print("Then log in with an organization account. Give the stick back to the admin:")
+        print("its result/ folder goes to the fleet repository (mos-fleet add).")
+    else:
+        print("At boot, type your disk password; then log in as", v["username"])
     if not TEST and sys.stdin.isatty():
         a = input("\nReboot now? [Y/n] ").strip().lower()
         if a in ("", "y", "yes"):

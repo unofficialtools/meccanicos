@@ -49,7 +49,8 @@
   td.yes { color: #7fd1a6; }
   td.no { color: var(--orange); }
   figure.tutorial video { display: block; width: 100%; height: auto; border-radius: 12px; background: #000; }
-  h1 .logo { display: block; margin: 0 auto; width: clamp(200px, 40vw, 320px); height: auto; } /* branding/MeccanicOS.png, resized */
+  h1 .logo { display: block; margin: 0 auto; width: clamp(120px, 22vw, 168px); height: auto; } /* branding/mark.png */
+  h1 .name { display: block; margin-top: 22px; font: 600 clamp(20px, 4vw, 30px)/1 var(--mono); letter-spacing: 0.6em; padding-left: 0.6em; color: var(--text); } /* padding: the last letter's spacing, so it stays centred */
   .more { margin: 22px 0 0; color: var(--dim); font-size: 15px; }
   .tagline { font-size: clamp(18px, 2.4vw, 22px); color: var(--dim); max-width: 720px; margin: 0 auto 44px; }
 
@@ -125,7 +126,7 @@
 
 <header class="hero">
   <div class="wrap">
-    <h1><img class="logo" src="MeccanicOS.png" width="320" height="320" alt="MeccanicOS"></h1>
+    <h1><img class="logo" src="mark.png" width="168" height="168" alt=""><span class="name">MECCANICOS</span></h1>
     <p class="tagline">Your computer. In your pocket.
       Fast, uncluttered, secure, shell first, keyboard driven, encrypted filesystem, sane custom tools.</p>
     <nav class="buttons" aria-label="Get MeccanicOS">
@@ -209,6 +210,7 @@ chmod +x mos-usb-linux-x86_64
     <div class="card"><h3>Settings and a doctor</h3><p>Common settings in one place, exported to another computer in one file; a doctor that finds problems and offers a fix.</p></div>
     <div class="card"><h3>Scales to the screen</h3><p>Text grows with large and sharp screens by itself; icons keep their size.</p></div>
     <div class="card"><h3>A terminal that helps</h3><p>VictorMono Nerd Font, Atuin history, fzf, zoxide, yazi with image previews and drag and drop.</p></div>
+    <div class="card"><h3>Fleets <small>(experimental)</small></h3><p>Run all of an organization's computers on MeccanicOS from one MeccanicOS server: accounts, updates from one Git repository, disk unlocking with Tang, the TPM or a security key. <a href="https://github.com/unofficialtools/meccanicos/blob/main/docs/fleet/ADMIN-GUIDE.md">Admin guide</a>.</p></div>
     <div class="card"><h3>A guided tour, and Help</h3><p>A tutorial video with subtitles on every desktop, filmed in a VM from the same system; the manual is on the stick too (Help in the command bar).</p></div>
   </div>
 </section>

@@ -40,6 +40,11 @@ let
       config.system.build.nixos-install
       nixos-enter
       config.system.build.nixos-generate-config
+      # Organization install (corporate.config): servers, disk unlock, recovery key.
+      curl
+      clevis
+      tpm2-tools
+      age
     ];
     text = ''
       if [ "$(id -u)" -ne 0 ]; then

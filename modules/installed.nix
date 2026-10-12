@@ -67,6 +67,14 @@ in
     default = builtins.pathExists remoteUnlockKeys;
     description = "Unlock the disk at boot over SSH (port 2222, wired network). See mos-unlock remote.";
   };
+  # A wired network (DHCP) in the boot stage: remote unlock over SSH, and
+  # a managed machine unlocking with a Tang server (managed.nix).
+  options.meccanicos.initrdNetwork = lib.mkOption {
+    type = lib.types.bool;
+    default = config.meccanicos.remoteUnlock;
+    internal = true;
+    description = "Bring up the wired network (DHCP) while the machine boots, before the disk is unlocked.";
+  };
   options.meccanicos.hibernate = lib.mkOption {
     type = lib.types.bool;
     default = true;
@@ -348,7 +356,7 @@ in
   # straight to the password prompt. Keys: /etc/nixos/remote-unlock-keys plus
   # every user's keys in local.nix. Its host key lives outside the store, in
   # /etc/secrets/initrd (made by mos-unlock remote).
-  boot.initrd.systemd.network = lib.mkIf config.meccanicos.remoteUnlock {
+  boot.initrd.systemd.network = lib.mkIf config.meccanicos.initrdNetwork {
     enable = true;
     networks."10-wired" = {
       matchConfig.Type = "ether";
@@ -366,7 +374,7 @@ in
   };
   boot.initrd.systemd.users.root.shell = lib.mkIf config.meccanicos.remoteUnlock "/bin/systemd-tty-ask-password-agent";
   # Wired network cards (and USB adapters) common on PCs, laptops and VMs.
-  boot.initrd.availableKernelModules = lib.mkIf config.meccanicos.remoteUnlock [
+  boot.initrd.availableKernelModules = lib.mkIf config.meccanicos.initrdNetwork [
     "e1000e"
     "igb"
     "igc"

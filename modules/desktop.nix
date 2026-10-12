@@ -32,7 +32,7 @@ in
   services.xserver = {
     enable = true;
     desktopManager.xfce.enable = true;
-    xkb.layout = "us"; # change to e.g. "it", "de", "us,it"
+    xkb.layout = lib.mkDefault "us"; # change to e.g. "it", "de", "us,it" (an installed system: local.nix)
   };
   services.displayManager.defaultSession = "xfce";
 
@@ -102,7 +102,7 @@ in
     ];
   };
 
-  i18n.defaultLocale = "en_US.UTF-8";
+  i18n.defaultLocale = lib.mkDefault "en_US.UTF-8"; # the installer's local.nix sets the chosen one
 
   # NixOS turns on the speech server (screen-reader voices, ~0.7 GB with the
   # MBROLA voices) for graphical desktops. Re-enable it if you need Orca.

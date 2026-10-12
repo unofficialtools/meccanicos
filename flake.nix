@@ -10,6 +10,12 @@
       url = "github:unofficialtools/rigx";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # comin: pull-based GitOps for managed (fleet) machines, modules/managed.nix.
+    # Only its source: its package and NixOS module are imported from it.
+    comin = {
+      url = "github:nlewo/comin";
+      flake = false;
+    };
   };
 
   outputs =
@@ -17,6 +23,7 @@
       self,
       nixpkgs,
       rigx,
+      comin,
     }:
     let
       system = "x86_64-linux";
@@ -118,14 +125,25 @@
           specialArgs = {
             inherit distro;
             meccanicosRoot = root;
+            cominSrc = comin;
           };
           modules =
             common
             ++ [
               ./modules/installed.nix
               ./modules/settings.nix
-              # Keep this source (and rigx's) on the disk: rebuilds then work offline.
-              { system.extraDependencies = [ self.outPath rigx.outPath ]; }
+              # Fleet management (experimental): a managed machine (fleet.toml)
+              # and the fleet server (fleet-server.toml). Off without those files.
+              ./modules/managed.nix
+              ./modules/fleet-server.nix
+              # Keep these sources on the disk: rebuilds then work offline.
+              {
+                system.extraDependencies = [
+                  self.outPath
+                  rigx.outPath
+                  comin.outPath
+                ];
+              }
             ]
             ++ mine "hardware-configuration.nix"
             ++ mine "local.nix"
@@ -158,10 +176,15 @@
                   url = "github:${repoLock.nodes.rigx.original.owner}/${repoLock.nodes.rigx.original.repo}";
                   inputs.nixpkgs.follows = "nixpkgs";
                 };
+                comin = {
+                  url = "github:${repoLock.nodes.comin.original.owner}/${repoLock.nodes.comin.original.repo}";
+                  flake = false;
+                };
                 meccanicos = {
                   url = "github:${github}/latest";
                   inputs.nixpkgs.follows = "nixpkgs";
                   inputs.rigx.follows = "rigx";
+                  inputs.comin.follows = "comin";
                 };
               };
               outputs =
@@ -176,15 +199,17 @@
             root = "root";
             nodes = {
               root.inputs = {
+                comin = "comin";
                 meccanicos = "meccanicos";
                 nixpkgs = "nixpkgs";
                 rigx = "rigx";
               };
-              inherit (repoLock.nodes) nixpkgs;
+              inherit (repoLock.nodes) nixpkgs comin;
               meccanicos = {
                 inputs = {
                   nixpkgs = [ "nixpkgs" ];
                   rigx = [ "rigx" ];
+                  comin = [ "comin" ];
                 };
                 locked = {
                   type = "github";

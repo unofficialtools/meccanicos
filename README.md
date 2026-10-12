@@ -36,7 +36,7 @@ and a one-page installer.
 4. [Using MeccanicOS: keyboard, command bar, AI chat, opening and printing files, settings](#4-using-meccanicos)
 5. [Encrypted storage on the stick (`usb-vault`)](#5-encrypted-storage-on-the-stick)
 6. [Install to a hard disk](#6-install-to-a-hard-disk)
-7. [Living with an installed system](#7-living-with-an-installed-system)
+7. [Living with an installed system](#7-living-with-an-installed-system) · [Fleets of computers (experimental)](#fleets-of-computers-experimental)
 8. [Customise and build](#8-customise-and-build)
 9. [Tests and CI](#9-tests-and-ci)
 10. [Licensing](#10-licensing) · [Roadmap](#roadmap) · [Credits](#credits)
@@ -720,6 +720,27 @@ next start asks for the disk password (also over SSH with remote unlock) and pic
 where you left off. The swap file is created at boot, as large as the RAM, unless
 that would leave less than 10 GB free.
 Text grows with the screen, at every login on a screen it was not done for: width/2048 on screens wider than 2048 pixels (2560: 1.25×, 3840: 1.875×), or 1.5×/2× on small dense ones; title bars, the top bar and the cursor follow, icons keep their size. `mos-config set display.scale 1.5` picks a size by hand (and keeps it); `auto` goes back.
+
+### Fleets of computers (experimental)
+
+> **⚠ Experimental:** new, and not yet tested on real hardware or in a real organization.
+
+An organization can run MeccanicOS on all its computers and manage them from one
+MeccanicOS server, with standard tools:
+
+- **Kanidm** for people: who may log in where, also offline;
+- **comin** and a signed binary cache for configuration: one Git repository decides what
+  every computer runs;
+- **Tang**, the TPM or a FIDO2 key for disk unlocking, with a recovery key only the admins
+  can read;
+- **Fleet** for inventory.
+
+`mos-fleet` sets up the server in one command and prepares new computers. The installer
+offers an **organization install** when it finds the `corporate.config` that
+`mos-fleet prepare` put on the stick.
+
+- [Admin guide: set up the server, add computers](docs/fleet/ADMIN-GUIDE.md)
+- [Design: how it works, and why these tools](docs/fleet/DESIGN.md)
 
 ## 8. Customise and build
 
