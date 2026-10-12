@@ -35,6 +35,32 @@ let
           for f in $out/share/themes/*/xfwm4/title-[1-5]-active.xpm; do
             sed -i 's/^"\. c #2C2C2C s active_color_2",/". c ${style.amber}",/' "$f"
           done
+          # Square top corners: the amber edge runs the window's full width
+          # instead of stopping at a rounded dark corner. Each corner becomes
+          # a plain block, its top rows amber like the title bar's (active).
+          for d in $out/share/themes/*/xfwm4; do
+            n=$(awk '/pixels/ { p = 1; next } p && /^"\.+"/ { c++; next } p { print c + 0; exit }' \
+              $d/title-1-active.xpm)
+            for f in $d/top-left-*.xpm $d/top-right-*.xpm; do
+              case $f in *-active.xpm) rows=$n ;; *) rows=0 ;; esac
+              awk -v n=$rows -v amber='${style.amber}' '
+                !hdr && /^"[0-9]+ [0-9]+ [0-9]+ 1 *",$/ {
+                  split(substr($0, 2), a, " "); w = a[1]; h = a[2]
+                  printf "\"%d %d 2 1 \",\n", w, h; hdr = 1; next
+                }
+                hdr && !px && /^"/ { next }
+                /pixels/ {
+                  print "\"  c #2C2C2C s active_color_2\","
+                  printf "\". c %s\",\n", amber; print; px = 1; next
+                }
+                px && /^"/ {
+                  s = sprintf("%*s", w, ""); if (++r <= n) gsub(/ /, ".", s)
+                  printf "\"%s\"%s\n", s, (r < h ? "," : ""); next
+                }
+                { print }
+              ' "$f" > "$f.new" && mv "$f.new" "$f"
+            done
+          done
           for css in $out/share/themes/*/gtk-3.0/gtk*.css; do
             sed -i 's/#E0E0E0/${style.amber}/g' "$css"
             cat ${shellCss} >> "$css"
