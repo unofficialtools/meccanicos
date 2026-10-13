@@ -1,6 +1,8 @@
 # Hardware support matching the EndeavourOS live ISO package list
 # (https://github.com/endeavouros-team/EndeavourOS-ISO/blob/main/packages.x86_64).
-# Each block notes the Arch packages it replaces.
+# Each block notes the Arch packages it replaces. drivers/map.toml maps every
+# package of that list (pinned in drivers/endeavouros.txt) to what provides it
+# here, or why it's skipped; ./start drivers-check checks both (drivers/README.md).
 {
   config,
   lib,

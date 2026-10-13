@@ -8,20 +8,22 @@
 ## Drivers: keeping up with EndeavourOS
 `modules/drivers.nix` was mapped by hand from EndeavourOS's live-ISO package list
 (`packages.x86_64`); nothing records which version, so drift goes unnoticed.
-- [ ] **Snapshot:** `modules/drivers/endeavouros.txt`, upstream's list at a pinned
+- [x] **Snapshot:** `modules/drivers/endeavouros.txt`, upstream's list at a pinned
       EndeavourOS commit (recorded in the file).
-- [ ] **Mapping:** `modules/drivers/map.toml`, every Arch package either mapped to what
-      replaces it (`nixos = "hardware.enableRedistributableFirmware"`) or skipped with a
-      reason (`skip = "not redistributable"`); nothing left unchecked.
-- [ ] **`./start drivers-check`:** upstream side: fetch the current list, diff it with the
-      snapshot, fail on new, removed or unmapped packages (the to-do list); our side:
-      evaluate the ISO and check each mapped entry is really there (option set, package
-      in the closure, kernel module built), so a nixpkgs bump can't drop one silently.
-- [ ] **Weekly GitHub Actions job** running it, opening an issue (or a PR updating the
-      snapshot) with the packages that need a decision.
-- [ ] **At each NixOS release** (nixos-YY.05), by hand: the NVIDIA open-driver cut-off
-      (`0x1e00`, Turing, in `mos-gpu-driver`), legacy NVIDIA branches nixpkgs drops,
-      newly unfree firmware.
+- [x] **Mapping:** `modules/drivers/map.toml`, every package either provided
+      (`by = ["option:hardware.enableRedistributableFirmware"]`, `"package:…"`) or skipped
+      with a reason (`skip = "not redistributable"`): 165 provided, 72 skipped.
+- [x] **`./start drivers-check`** (`scripts/drivers-check.py`): the map covers the snapshot
+      exactly, and every `by` holds on the evaluated live ISO (option set, package
+      installed), so a nixpkgs update can't drop one silently; `--upstream` compares with
+      EndeavourOS's newest list, `--update` moves the snapshot.
+- [x] **Weekly GitHub Actions job** (`.github/workflows/drivers.yml`): one issue, labelled
+      `drivers`, listing what needs a decision (later runs comment on it).
+- [x] **At each NixOS release** (nixos-YY.05), by hand: the checklist in
+      `modules/drivers/README.md` (NVIDIA branch and open-driver cut-off, legacy branches,
+      firmware licences, renamed options).
+- [ ] Not checked yet: kernel modules themselves (e.g. that the kernel still builds one a
+      driver needs); only options and packages are.
 - [ ] Later: `mos-hw-report` (lspci/lsusb, "firmware failed to load" lines; to the stick
       or an issue): what breaks on real machines; a `mos-fleet hardware` summary from the
       fleet's logs; the installer suggesting the matching `nixos-hardware` module (DMI

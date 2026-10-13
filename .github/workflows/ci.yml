@@ -26,7 +26,7 @@ jobs:
       - name: pyflakes
         run: |
           python3 -m pip install --quiet pyflakes
-          python3 -m pyflakes scripts/*.py scripts/mos/*.py scripts/lib/*.py branding/generate.py tests/*.py
+          python3 -m pyflakes scripts/*.py scripts/mos/*.py scripts/lib/*.py scripts/mos_fleet/*.py branding/generate.py tests/*.py
       - name: tutorial scenes point only at their own bullets
         run: python3 tests/tutorial_points.py
 
@@ -76,7 +76,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [live, install, ventoy]
+        test: [live, install, ventoy, fleet]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-nix

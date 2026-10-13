@@ -1,0 +1,49 @@
+name: Drivers vs EndeavourOS
+# Weekly: does EndeavourOS's live ISO list still match our snapshot, is every
+# package mapped (modules/drivers/map.toml), and does every mapping hold on
+# our live ISO? If not, one open issue (label "drivers") says what needs a
+# decision; later runs comment on it rather than opening more.
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: experimental-features = nix-command flakes
+      - name: Check
+        id: check
+        run: |
+          if python3 scripts/drivers-check.py --upstream --report report.md; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Open or update the issue
+        if: steps.check.outputs.ok == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create drivers --color FBCA04 --description "Hardware support vs EndeavourOS" --force
+          {
+            cat report.md
+            echo
+            echo "From [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+            echo "Fix: \`./start drivers-check --update\`, map the changes in \`modules/drivers/map.toml\`, \`./start drivers-check\`."
+          } > body.md
+          n=$(gh issue list --label drivers --state open --json number --jq '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body-file body.md
+          else
+            gh issue create --title "Drivers: EndeavourOS's list needs a decision" --label drivers --body-file body.md
+          fi
+          exit 1

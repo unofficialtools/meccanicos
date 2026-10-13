@@ -15,6 +15,9 @@
 #                               on it); not a Ventoy stick yet: install
 #                               Ventoy first (erases it; asks first)
 #   ./start ventoy              list the USB disks, marking Ventoy sticks
+#   ./start drivers-check       hardware support vs EndeavourOS's live ISO
+#                               (modules/drivers/): --upstream compares with
+#                               its newest list, --update moves the snapshot
 
 set -euo pipefail
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
@@ -275,6 +278,16 @@ ventoy() {
     echo "         Vaults and the persistent home go in meccanicos/ on this partition (usb-vault)."
 }
 
+# modules/drivers/: every package of EndeavourOS's live ISO mapped, and
+# checked on our live ISO (scripts/drivers-check.py; weekly in CI too).
+drivers_check() {
+    if command -v python3 >/dev/null && command -v curl >/dev/null; then
+        python3 scripts/drivers-check.py "$@"
+    else
+        nix shell nixpkgs#python3 nixpkgs#curl -c python3 scripts/drivers-check.py "$@"
+    fi
+}
+
 cmd=${1:-}
 shift || true
 case $cmd in
@@ -284,5 +297,6 @@ case $cmd in
     tutorial-video) tutorial_video "$@" ;;
     burn) burn "$@" ;;
     ventoy) ventoy "$@" ;;
+    drivers-check) drivers_check "$@" ;;
     *) sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac

@@ -1,0 +1,543 @@
+# What MeccanicOS does about each package of EndeavourOS's live ISO
+# (endeavouros.txt, the snapshot we follow). Every package there has an
+# entry here, and only those:
+#
+#   by = ["...", ...]   what provides it in MeccanicOS, each one checked on the
+#                       live ISO by ./start drivers-check:
+#                         "option:PATH"        the option is set (true, non-empty)
+#                         "option:PATH~VALUE"  the list option contains VALUE
+#                         "package:NAME"       a package of that name is installed
+#                                              (system packages, firmware, graphics,
+#                                              fonts, udev, NetworkManager plugins…)
+#   skip = "why"        not shipped, and why (a decision, not an oversight)
+#   note = "..."        anything else worth knowing
+#
+# Most hardware support is in modules/drivers.nix; the rest in iso.nix,
+# desktop.nix and others.
+
+# ---------------------------------------------------------------- BASE
+[iptables]
+by = ["package:iptables", "option:networking.firewall.enable"]
+[base]
+skip = "Arch's base meta-package: NixOS's base system"
+[base-devel]
+skip = "Arch's build tools: on NixOS, per project (nix-shell -p gcc, uv)"
+[archlinux-keyring]
+skip = "pacman's signing keys: Nix verifies its own binary cache"
+[endeavouros-mirrorlist]
+skip = "pacman's mirrors: Nix uses cache.nixos.org"
+[endeavouros-keyring]
+skip = "pacman's signing keys: Nix verifies its own binary cache"
+[cryptsetup]
+by = ["package:cryptsetup"]
+[device-mapper]
+by = ["package:lvm2", "option:services.lvm.enable"]
+note = "device-mapper ships with lvm2"
+[diffutils]
+by = ["package:diffutils"]
+[dracut]
+skip = "an initramfs builder: NixOS builds its own initrd"
+[edk2-shell]
+skip = "the UEFI shell in the boot menu: not shipped (rarely needed; efibootmgr from Linux)"
+[inetutils]
+by = ["package:iputils", "package:hostname-debian"]
+note = "ping and hostname; no telnet or ftp"
+[less]
+by = ["package:less"]
+[linux]
+by = ["option:boot.kernelPackages"]
+[linux-firmware]
+by = ["option:hardware.enableRedistributableFirmware"]
+note = "redistributable firmware only (MeccanicOS ships nothing that can't be shared)"
+[linux-firmware-marvell]
+by = ["option:hardware.enableRedistributableFirmware"]
+[linux-headers]
+skip = "headers for building kernel modules by hand: NixOS builds them (boot.extraModulePackages)"
+[logrotate]
+by = ["option:services.logrotate.enable"]
+[lsb-release]
+skip = "lsb_release: /etc/os-release instead"
+[man-db]
+by = ["package:man-db"]
+[man-pages]
+by = ["package:man-pages"]
+[mdadm]
+by = ["package:mdadm", "option:boot.swraid.enable"]
+[nano]
+by = ["package:nano"]
+[nano-syntax-highlighting]
+by = ["option:programs.nano.syntaxHighlight"]
+[perl]
+by = ["package:perl"]
+[s-nail]
+skip = "a command-line mail client: not shipped"
+[sudo]
+by = ["package:sudo"]
+[sysfsutils]
+skip = "systool: rarely needed (lspci, lsusb, hwinfo, inxi instead)"
+[systemd-sysvcompat]
+skip = "SysV command names: NixOS's systemd has halt, reboot, poweroff"
+[texinfo]
+skip = "info pages: man pages and the NixOS manual instead"
+[vi]
+by = ["package:vim"]
+[which]
+by = ["package:which"]
+[xterm]
+by = ["package:xfce4-terminal"]
+note = "a terminal: Xfce's"
+
+[btrfs-progs]
+by = ["package:btrfs-progs", "option:boot.supportedFilesystems.btrfs"]
+[dosfstools]
+by = ["package:dosfstools"]
+[e2fsprogs]
+by = ["package:e2fsprogs"]
+[exfatprogs]
+by = ["package:exfatprogs"]
+[f2fs-tools]
+by = ["package:f2fs-tools"]
+[jfsutils]
+by = ["package:jfsutils"]
+[lvm2]
+by = ["package:lvm2"]
+[mtools]
+by = ["package:mtools"]
+[nfs-utils]
+by = ["package:nfs-utils"]
+[nilfs-utils]
+by = ["package:nilfs-utils"]
+[ntfs-3g]
+by = ["package:ntfs3g"]
+[xfsprogs]
+by = ["package:xfsprogs"]
+
+[efibootmgr]
+by = ["package:efibootmgr"]
+[efitools]
+skip = "Secure Boot key tools: no Secure Boot yet (TODO.md: lanzaboote)"
+
+# ------------------------------------------------------------ HARDWARE
+[amd-ucode]
+by = ["option:hardware.cpu.amd.updateMicrocode"]
+[intel-ucode]
+by = ["option:hardware.cpu.intel.updateMicrocode"]
+
+[nvidia-open]
+by = ["option:hardware.nvidia.open", "package:nvidia-open"]
+note = "mos-gpu-driver picks it or nouveau at boot (drivers.nix)"
+[nvidia-utils]
+by = ["package:nvidia-x11", "option:services.xserver.videoDrivers~nvidia"]
+[vulkan-nouveau]
+by = ["option:hardware.graphics.enable"]
+note = "part of mesa in nixpkgs"
+[mesa]
+by = ["option:hardware.graphics.enable"]
+[mesa-utils]
+by = ["package:glxinfo"]
+note = "glxinfo only"
+[vulkan-intel]
+by = ["option:hardware.graphics.enable"]
+note = "part of mesa in nixpkgs"
+[intel-media-driver]
+by = ["package:intel-media-driver"]
+[gst-plugin-va]
+by = ["package:gstreamer-vaapi"]
+[vpl-gpu-rt]
+by = ["package:vpl-gpu-rt"]
+[libva-intel-driver]
+by = ["package:intel-vaapi-driver"]
+[open-vm-tools]
+by = ["package:open-vm-tools", "option:virtualisation.vmware.guest.enable"]
+[xf86-input-vmmouse]
+by = ["option:virtualisation.vmware.guest.enable"]
+[gtkmm3]
+skip = "a library (open-vm-tools' desktop part): Nix brings libraries with what uses them"
+[vulkan-swrast]
+by = ["option:hardware.graphics.enable"]
+note = "part of mesa in nixpkgs"
+[virtualbox-guest-utils]
+skip = "VirtualBox guest additions: not enabled (an out-of-tree kernel module; MeccanicOS targets QEMU, VMware, Hyper-V)"
+[spice-vdagent]
+by = ["option:services.spice-vdagentd.enable"]
+[qemu-guest-agent]
+by = ["option:services.qemuGuest.enable"]
+[vulkan-virtio]
+by = ["option:hardware.graphics.enable"]
+note = "part of mesa in nixpkgs"
+[vulkan-radeon]
+by = ["option:hardware.graphics.enable"]
+note = "part of mesa in nixpkgs"
+[eos-hwtool]
+skip = "EndeavourOS's driver installer: drivers.nix ships them all, mos-gpu-driver picks NVIDIA's"
+
+[b43-fwcutter]
+skip = "Broadcom b43 Wi-Fi firmware: not redistributable"
+
+[lsscsi]
+by = ["package:lsscsi"]
+[sg3_utils]
+by = ["package:sg3_utils"]
+[smartmontools]
+by = ["package:smartmontools"]
+[usbutils]
+by = ["package:usbutils"]
+
+[alsa-firmware]
+by = ["option:hardware.enableRedistributableFirmware"]
+[alsa-plugins]
+by = ["option:services.pipewire.alsa.enable"]
+[alsa-utils]
+by = ["package:alsa-utils"]
+[gst-libav]
+by = ["package:gst-libav"]
+[gst-plugin-pipewire]
+by = ["option:services.pipewire.enable"]
+[gst-plugins-bad]
+by = ["package:gst-plugins-bad"]
+[gst-plugins-ugly]
+by = ["package:gst-plugins-ugly"]
+[libdvdcss]
+skip = "DVD decryption: not shipped (its legal status varies by country)"
+[pavucontrol]
+by = ["package:pavucontrol"]
+[pipewire-alsa]
+by = ["option:services.pipewire.alsa.enable"]
+[pipewire-jack]
+by = ["option:services.pipewire.jack.enable"]
+[pipewire-pulse]
+by = ["option:services.pipewire.pulse.enable"]
+[rtkit]
+by = ["option:security.rtkit.enable"]
+[sof-firmware]
+by = ["option:hardware.enableRedistributableFirmware"]
+[wireplumber]
+by = ["option:services.pipewire.wireplumber.enable"]
+
+# ------------------------------------------------------------ SOFTWARE
+[bash-completion]
+by = ["option:programs.bash.completion.enable"]
+[dmidecode]
+by = ["package:dmidecode"]
+[dialog]
+skip = "dialogs for shell scripts: MeccanicOS's tools are their own"
+[dmraid]
+skip = "old BIOS fake-RAID: mdadm reads most of its formats (boot.swraid)"
+[downgrade]
+skip = "pacman downgrades: NixOS goes back a whole system (the boot menu)"
+[duf]
+by = ["package:duf"]
+[fakeroot]
+skip = "packaging tool: not needed with Nix"
+[freetype2]
+skip = "a library: Nix brings libraries with what uses them"
+[git]
+by = ["package:git"]
+[glances]
+by = ["package:btop"]
+note = "a system monitor: btop"
+[python-packaging]
+skip = "a Python library: per project, with uv"
+[python-jinja]
+skip = "a Python library: per project, with uv"
+[gpm]
+by = ["option:services.gpm.enable"]
+[gptfdisk]
+by = ["package:gptfdisk"]
+[haveged]
+skip = "an entropy daemon: not needed since Linux 5.6"
+[hwdetect]
+skip = "Arch's module detection: hardware.enableAllHardware"
+[hwinfo]
+by = ["package:hwinfo"]
+[inxi]
+by = ["package:inxi"]
+[libgsf]
+skip = "a library (thumbnails): Nix brings libraries with what uses them"
+[libopenraw]
+skip = "a library (thumbnails): Nix brings libraries with what uses them"
+[plocate]
+by = ["package:fd"]
+note = "finding files: fd"
+[ntp]
+by = ["option:services.timesyncd.enable"]
+[pacman-contrib]
+skip = "pacman's tools"
+[pkgfile]
+skip = "pacman's file search"
+[poppler-glib]
+skip = "a library (PDF): Nix brings libraries with what uses them"
+[power-profiles-daemon]
+by = ["option:services.power-profiles-daemon.enable"]
+[pv]
+by = ["package:pv"]
+[rebuild-detector]
+skip = "pacman's tools: Nix rebuilds what depends on a change"
+[reflector]
+skip = "pacman's mirror ranking"
+[rsync]
+by = ["package:rsync"]
+[tldr]
+by = ["package:tealdeer"]
+[unrar]
+by = ["package:unrar"]
+[unzip]
+by = ["package:unzip"]
+[wget]
+by = ["package:wget"]
+[xdg-user-dirs]
+by = ["package:xdg-user-dirs"]
+[xdg-utils]
+by = ["package:xdg-utils"]
+[xz]
+by = ["package:xz"]
+
+[bind]
+by = ["package:bind"]
+note = "dig, nslookup"
+[dnsmasq]
+skip = "a DNS/DHCP server: NetworkManager brings it where it needs it (sharing a connection)"
+[ethtool]
+by = ["package:ethtool"]
+[iwd]
+by = ["package:wpa_supplicant"]
+note = "Wi-Fi: NetworkManager's default, wpa_supplicant"
+[modemmanager]
+by = ["package:modemmanager", "option:networking.modemmanager.enable"]
+[net-tools]
+by = ["package:iproute2"]
+note = "ip and ss instead of ifconfig and netstat"
+[netctl]
+skip = "Arch's network manager: NetworkManager"
+[networkmanager]
+by = ["option:networking.networkmanager.enable"]
+[networkmanager-openconnect]
+by = ["package:NetworkManager-openconnect"]
+[networkmanager-openvpn]
+by = ["package:NetworkManager-openvpn"]
+[nss-mdns]
+by = ["option:services.avahi.nssmdns4"]
+[openconnect]
+by = ["package:openconnect"]
+[openvpn]
+by = ["package:NetworkManager-openvpn"]
+note = "through NetworkManager"
+[usb_modeswitch]
+by = ["option:hardware.usb-modeswitch.enable"]
+[vpnc]
+skip = "the old Cisco VPN client: openconnect speaks Cisco AnyConnect"
+[whois]
+skip = "whois: not shipped (nix-shell -p whois)"
+[wireless-regdb]
+by = ["option:hardware.wirelessRegulatoryDatabase"]
+[wpa_supplicant]
+by = ["package:wpa_supplicant"]
+[xl2tpd]
+by = ["package:NetworkManager-l2tp"]
+
+[bluez]
+by = ["option:hardware.bluetooth.enable"]
+[bluez-utils]
+by = ["option:hardware.bluetooth.enable"]
+note = "bluetoothctl comes with bluez"
+
+[firewalld]
+by = ["option:networking.firewall.enable"]
+note = "NixOS's own firewall"
+[firewall-applet]
+skip = "firewalld's tray icon: the firewall is configured, not clicked"
+
+# ----------------------------------------------------------------- ISO
+[arch-install-scripts]
+by = ["package:mos-install"]
+note = "the installer"
+[iso-create-ml]
+skip = "EndeavourOS's ISO tooling"
+["memtest86+"]
+skip = "a memory test in the boot menu: not shipped yet"
+["memtest86+-efi"]
+skip = "a memory test in the boot menu: not shipped yet"
+[mkinitcpio-archiso]
+skip = "Arch's ISO tooling"
+[mkinitcpio-nfs-utils]
+skip = "Arch's ISO tooling (booting from NFS)"
+[nbd]
+skip = "network block devices: not shipped"
+[syslinux]
+by = ["package:syslinux"]
+
+[clonezilla]
+by = ["package:fsarchiver", "package:ddrescue"]
+note = "disk imaging and rescue (Clonezilla isn't in nixpkgs)"
+[fsarchiver]
+by = ["package:fsarchiver"]
+[gpart]
+by = ["package:testdisk"]
+note = "recovering a lost partition table"
+[gparted]
+by = ["package:gparted"]
+[grsync]
+by = ["package:rsync"]
+note = "rsync itself; no GUI"
+[hardinfo2]
+by = ["package:inxi", "package:hwinfo"]
+[partitionmanager]
+by = ["package:gparted"]
+[hdparm]
+by = ["package:hdparm"]
+[wl-clipboard]
+by = ["package:xclip"]
+note = "the desktop is X11"
+[xclip]
+by = ["package:xclip"]
+
+# ------------------------------------------------------------- DESKTOP
+# EndeavourOS's live ISO runs KDE Plasma; MeccanicOS's desktop is Xfce
+# (desktop.nix). What does the same job is named; the rest is skipped.
+[ark]
+by = ["package:file-roller"]
+[bluedevil]
+by = ["package:blueman"]
+[breeze-gtk]
+skip = "KDE's theme: MeccanicOS has its own (branding.nix)"
+[dolphin]
+by = ["package:thunar-with-plugins"]
+[dolphin-plugins]
+skip = "KDE Plasma: the desktop is Xfce"
+[endeavouros-konsole-colors]
+skip = "EndeavourOS's branding"
+[ffmpegthumbs]
+by = ["package:tumbler"]
+[fwupd]
+by = ["option:services.fwupd.enable"]
+[gwenview]
+by = ["package:eog"]
+[haruna]
+by = ["package:celluloid"]
+[kate]
+by = ["package:vscodium", "package:jed"]
+[kcalc]
+skip = "a calculator: not shipped (python3 in a terminal)"
+[kde-cli-tools]
+skip = "KDE Plasma: the desktop is Xfce"
+[kde-gtk-config]
+skip = "KDE Plasma: the desktop is Xfce"
+[kdeconnect]
+skip = "phone integration: not shipped"
+[kdegraphics-thumbnailers]
+by = ["package:tumbler"]
+[kdenetwork-filesharing]
+skip = "Samba sharing from the file manager: not shipped"
+[kdeplasma-addons]
+skip = "KDE Plasma: the desktop is Xfce"
+[kgamma]
+skip = "KDE Plasma: the desktop is Xfce"
+[kimageformats]
+skip = "KDE Plasma: the desktop is Xfce"
+[kinfocenter]
+by = ["package:inxi", "package:hwinfo"]
+[kio-admin]
+skip = "KDE Plasma: the desktop is Xfce"
+[kio-extras]
+by = ["package:gvfs"]
+[kio-fuse]
+by = ["package:gvfs"]
+[konsole]
+by = ["package:xfce4-terminal"]
+[kscreen]
+by = ["package:xfce4-settings"]
+[kwallet-pam]
+by = ["package:gnome-keyring"]
+[kwayland-integration]
+skip = "KDE Plasma: the desktop is Xfce"
+[kwin-x11]
+by = ["package:xfwm4"]
+[libappindicator]
+skip = "a library: Nix brings libraries with what uses them"
+[okular]
+by = ["package:evince"]
+[plasma-browser-integration]
+skip = "KDE Plasma: the desktop is Xfce"
+[plasma-desktop]
+by = ["package:xfdesktop", "package:xfce4-panel"]
+[plasma-disks]
+by = ["package:smartmontools", "package:gnome-disk-utility"]
+[plasma-keyboard]
+skip = "an on-screen keyboard: not shipped"
+[plasma-login-manager]
+by = ["package:lightdm"]
+[plasma-nm]
+by = ["package:network-manager-applet"]
+[plasma-pa]
+by = ["package:xfce4-pulseaudio-plugin"]
+[plasma-systemmonitor]
+by = ["package:xfce4-taskmanager", "package:btop"]
+[plasma-workspace]
+by = ["package:xfce4-session"]
+[plasma-x11-session]
+by = ["package:xfce4-session"]
+[powerdevil]
+by = ["package:xfce4-power-manager"]
+[print-manager]
+by = ["package:system-config-printer"]
+[spectacle]
+by = ["package:xfce4-screenshooter"]
+[xdg-desktop-portal-kde]
+by = ["package:xdg-desktop-portal-gtk"]
+[xsettingsd]
+by = ["package:xfce4-settings"]
+[firefox]
+by = ["package:brave"]
+note = "the browser: Brave (browser.nix)"
+[meld]
+skip = "a diff GUI: not shipped (git diff, lazygit)"
+
+[cantarell-fonts]
+by = ["package:cantarell-fonts"]
+[noto-fonts]
+by = ["package:noto-fonts"]
+[noto-fonts-emoji]
+by = ["package:noto-fonts-color-emoji"]
+[noto-fonts-cjk]
+by = ["package:noto-fonts-cjk-sans"]
+[noto-fonts-extra]
+by = ["package:noto-fonts"]
+note = "nixpkgs' noto-fonts has the extra families"
+[ttf-bitstream-vera]
+by = ["package:dejavu-fonts"]
+note = "DejaVu extends Bitstream Vera"
+[ttf-dejavu]
+by = ["package:dejavu-fonts"]
+[ttf-liberation]
+by = ["package:liberation-fonts"]
+[ttf-opensans]
+by = ["package:open-sans"]
+
+# --------------------------------------------------- ENDEAVOUROS REPO
+[endeavouros-branding]
+skip = "EndeavourOS's branding: MeccanicOS has its own"
+[eos-apps-info]
+skip = "EndeavourOS's own tool"
+[eos-hooks]
+skip = "EndeavourOS's pacman hooks"
+[eos-log-tool]
+by = ["package:mos-doctor"]
+note = "collecting logs for support"
+[eos-packagelist]
+skip = "EndeavourOS's ISO tooling"
+[eos-quickstart]
+by = ["package:mos-apps"]
+[eos-rankmirrors]
+skip = "pacman's mirror ranking"
+[rate-mirrors]
+skip = "pacman's mirror ranking"
+[reflector-simple]
+skip = "pacman's mirror ranking"
+[welcome]
+by = ["package:mos-about"]
+[yay]
+skip = "the AUR: nixpkgs instead (mos-apps)"
+[calamares]
+by = ["package:mos-install"]
+[ckbcomp]
+skip = "keyboard maps for Calamares: mos-install's own"

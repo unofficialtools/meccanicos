@@ -1,0 +1,294 @@
+#@ upstream: endeavouros-team/EndeavourOS-ISO packages.x86_64
+#@ commit: 4ea6e5dd7b8acc494ff6320b98116486c18e68ba (2026-09-27)
+#@ MeccanicOS's answer to each package: map.toml. Refresh: ./start drivers-check --update
+# BASE
+
+## Base system
+iptables
+base
+base-devel
+archlinux-keyring
+endeavouros-mirrorlist
+endeavouros-keyring
+cryptsetup
+device-mapper
+diffutils
+dracut
+edk2-shell
+inetutils
+less
+linux
+linux-firmware
+linux-firmware-marvell
+linux-headers
+logrotate
+lsb-release
+man-db
+man-pages
+mdadm
+nano
+nano-syntax-highlighting
+perl
+s-nail
+sudo
+sysfsutils
+systemd-sysvcompat
+texinfo
+vi
+which
+xterm
+
+## Filesystem
+btrfs-progs
+dosfstools
+e2fsprogs
+exfatprogs
+f2fs-tools
+jfsutils
+lvm2
+mtools
+nfs-utils
+nilfs-utils
+ntfs-3g
+xfsprogs
+
+## Boot
+efibootmgr
+efitools
+
+# HARDWARE
+
+## CPU
+amd-ucode
+intel-ucode
+
+## GPU-VM
+nvidia-open
+nvidia-utils
+vulkan-nouveau
+mesa
+mesa-utils
+vulkan-intel
+intel-media-driver
+gst-plugin-va
+vpl-gpu-rt
+libva-intel-driver
+open-vm-tools
+xf86-input-vmmouse
+gtkmm3
+vulkan-swrast
+virtualbox-guest-utils
+spice-vdagent
+qemu-guest-agent
+vulkan-virtio
+vulkan-radeon
+eos-hwtool
+
+## Network hardware
+b43-fwcutter
+
+## General hardware
+lsscsi
+sg3_utils
+smartmontools
+usbutils
+
+## Audio hardware
+alsa-firmware
+alsa-plugins
+alsa-utils
+gst-libav
+gst-plugin-pipewire
+gst-plugins-bad
+gst-plugins-ugly
+libdvdcss
+pavucontrol
+pipewire-alsa
+pipewire-jack
+pipewire-pulse
+rtkit
+sof-firmware
+wireplumber
+
+# SOFTWARE
+
+## General system
+bash-completion
+dmidecode
+dialog
+dmraid
+downgrade
+duf
+fakeroot
+freetype2
+git
+glances
+python-packaging
+python-jinja
+gpm
+gptfdisk
+haveged
+hwdetect
+hwinfo
+inxi
+libgsf
+libopenraw
+plocate
+ntp
+pacman-contrib
+pkgfile
+poppler-glib
+power-profiles-daemon
+pv
+rebuild-detector
+reflector
+rsync
+tldr
+unrar
+unzip
+wget
+xdg-user-dirs
+xdg-utils
+xz
+
+## Network
+bind
+dnsmasq
+ethtool
+iwd
+modemmanager
+net-tools
+netctl
+networkmanager
+networkmanager-openconnect
+networkmanager-openvpn
+nss-mdns
+openconnect
+openvpn
+usb_modeswitch
+vpnc
+whois
+wireless-regdb
+wpa_supplicant
+xl2tpd
+
+## Bluetooth
+bluez
+bluez-utils
+
+## Firewall
+firewalld
+firewall-applet
+
+# ISO
+
+## Live iso specific
+arch-install-scripts
+iso-create-ml
+memtest86+
+memtest86+-efi
+mkinitcpio-archiso
+mkinitcpio-nfs-utils
+nbd
+pv
+syslinux
+
+## Live iso tools
+clonezilla
+efitools
+fsarchiver
+gpart
+gparted
+grsync
+hardinfo2
+partitionmanager
+hdparm
+wl-clipboard
+xclip
+
+# DESKTOP
+
+## Desktop environment
+ark
+bluedevil
+breeze-gtk
+dolphin
+dolphin-plugins
+endeavouros-konsole-colors
+ffmpegthumbs
+fwupd
+gwenview
+haruna
+kate
+kcalc
+kde-cli-tools
+kde-gtk-config
+kdeconnect
+kdegraphics-thumbnailers
+kdenetwork-filesharing
+kdeplasma-addons
+kgamma
+kimageformats
+kinfocenter
+kio-admin
+kio-extras
+kio-fuse
+konsole
+kscreen
+kwallet-pam
+kwayland-integration
+kwin-x11
+libappindicator
+okular
+plasma-browser-integration
+plasma-desktop
+plasma-disks
+plasma-keyboard
+plasma-login-manager
+plasma-nm
+plasma-pa
+plasma-x11-session
+plasma-systemmonitor
+plasma-workspace
+powerdevil
+print-manager
+spectacle
+xdg-desktop-portal-kde
+xsettingsd
+
+## Browser
+firefox
+
+## System
+meld
+
+## Fonts
+cantarell-fonts
+noto-fonts
+noto-fonts-emoji
+noto-fonts-cjk
+noto-fonts-extra
+ttf-bitstream-vera
+ttf-dejavu
+ttf-liberation
+ttf-opensans
+
+# ENDEAVOUROS REPO
+
+## General
+endeavouros-branding
+eos-apps-info
+eos-hooks
+eos-log-tool
+eos-packagelist
+eos-quickstart
+eos-rankmirrors
+rate-mirrors
+reflector-simple
+welcome
+yay
+
+## Calamares EndeavourOS
+calamares
+ckbcomp
+
