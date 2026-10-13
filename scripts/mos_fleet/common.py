@@ -7,6 +7,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 
 VERSION = "2"
 
@@ -100,7 +101,7 @@ def clip(s, n):
 
 
 def write_atomic(path, text, mode=0o600):
-    tmp = f"{path}.tmp{os.getpid()}"
+    tmp = f"{path}.tmp{os.getpid()}.{threading.get_ident()}"  # unique per thread too
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
     with os.fdopen(fd, "w") as fh:
         fh.write(text)

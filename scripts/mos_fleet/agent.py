@@ -48,6 +48,7 @@ PASSWORDS = os.path.join(STATE, "passwords")
 ENROLL_KEY = os.path.join(STATE, "enroll.key")
 RECOVERY = os.path.join(STATE, "recovery.age")
 ENROLLED = os.path.join(STATE, "enrolled")
+ACCEPTED = os.path.join(STATE, "accepted")  # the server has let it in once: it is in the fleet
 CURSOR = os.path.join(STATE, "log.cursor")
 SYSTEM_PROFILE = "/nix/var/nix/profiles/system"
 
@@ -115,6 +116,8 @@ class Agent:
         self.req = 0
         self.cursor_sent = None
         self.restart = False
+        self.was_refused = False
+        self.pw_lock = threading.Lock()
 
     # ---- the connection
     def send(self, obj):
@@ -148,7 +151,7 @@ class Agent:
                 log("restarting with the new system's agent")
                 return 0
             backoff = 10 if time.time() - started > 120 else min(backoff * 2, CFG["reconnect_max_seconds"])
-            if why == "bye":
+            if why in ("bye", "refused"):
                 backoff = 2 * CFG["reconnect_max_seconds"]
             time.sleep(backoff)
 
@@ -186,11 +189,25 @@ class Agent:
 
     def session(self):
         try:
-            self.proc = subprocess.Popen(ssh_cmd(self.cfg, "session"), stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            self.proc = subprocess.Popen(ssh_cmd(self.cfg, "session"), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                         stderr=subprocess.PIPE)
         except OSError as e:
             log(f"ssh: {e}")
             return "error"
         q = self.q = queue.Queue()
+        refused = threading.Event()
+
+        def errors(err):
+            # ssh's own messages, to the journal; a refused key is how a
+            # computer learns it was retired while it wasn't connected.
+            for line in err:
+                text = line.decode(errors="replace").rstrip()
+                if "Permission denied" in text:
+                    refused.set()
+                else:
+                    log(f"ssh: {text}")
+
+        threading.Thread(target=errors, args=(self.proc.stderr,), daemon=True).start()
 
         def reader(out):
             try:
@@ -216,6 +233,8 @@ class Agent:
                 if msg is None:
                     break
                 if msg:
+                    if not os.path.exists(ACCEPTED):
+                        write_atomic(ACCEPTED, time.strftime("%Y-%m-%d %H:%M:%S\n"))
                     if msg.get("t") == "bye":
                         log(f"the server says: {msg.get('reason')}")
                         why = "bye"
@@ -245,6 +264,14 @@ class Agent:
                 p.kill()
             for ev in self.pending.values():
                 ev[0].set()
+        if why == "closed" and refused.wait(timeout=2):
+            why = "refused"
+            if not self.was_refused:
+                log("the server refuses this computer's key: it is no longer in the fleet (or its key changed); "
+                    "trying again now and then" if os.path.exists(ACCEPTED) else
+                    "the server doesn't know this computer yet: an admin adds it (mos-fleet host add "
+                    f"{socket.gethostname()}); trying again now and then")
+        self.was_refused = why == "refused"
         return why
 
     def handle(self, m):
@@ -354,6 +381,10 @@ class Agent:
 
     # ---- people
     def apply_passwords(self, hashes):
+        with self.pw_lock:  # the session and mos-passwd's socket both apply them
+            self._apply_passwords(hashes)
+
+    def _apply_passwords(self, hashes):
         os.makedirs(PASSWORDS, mode=0o700, exist_ok=True)
         good = {n: h for n, h in hashes.items()
                 if isinstance(n, str) and PERSON_RE.fullmatch(n) and isinstance(h, str) and HASH_RE.fullmatch(h)}

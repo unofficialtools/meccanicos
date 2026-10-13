@@ -78,6 +78,7 @@ with subtest("prepare ws1, install it (as mos-install does)"):
     ws1.succeed(f"echo test-recovery-key | age -a -r {recipient} > /var/lib/mos-fleet/recovery.age")
     ws1.succeed("systemctl restart mos-fleet-agent")
     a_until("mos-fleet host pending | grep 'mos-fleet host add'", timeout=180)
+    ws1.wait_until_succeeds("journalctl -u mos-fleet-agent | grep -q \"doesn't know this computer yet\"", timeout=120)
     ws1.succeed("test ! -e /var/lib/mos-fleet/enroll.key")
     out = ws1.fail("ssh -F /dev/null -i /root/enroll.key -o IdentitiesOnly=yes -o BatchMode=yes "
                    "-o UserKnownHostsFile=/etc/mos-fleet/known_hosts -o HostKeyAlias=mos-fleet-server "
@@ -144,8 +145,13 @@ with subtest("recovery key, audit, backup"):
     hq.succeed("test -s /root/backup/state.db -a -s /root/backup/secrets.db -a -s /root/backup/fleet.bundle")
 
 with subtest("retire ws1"):
+    # Retired while its agent isn't connected (as after a switch, or off):
+    # it learns from the refused key, not from the server's goodbye.
+    ws1.systemctl("stop mos-fleet-agent")
+    t = ws1.succeed("date +%s").strip()
     a("mos-fleet host retire ws1 --push")
     a_until("mos-fleet status --all | grep 'ws1.*retired'", timeout=60)
-    ws1.wait_until_succeeds("journalctl -u mos-fleet-agent | grep -q 'no longer in the fleet'", timeout=120)
+    ws1.systemctl("start mos-fleet-agent")
+    ws1.wait_until_succeeds(f"journalctl -u mos-fleet-agent --since @{t} | grep -q 'no longer in the fleet'", timeout=120)
     out = ws1.fail(f"{SSH_WS} session < /dev/null 2>&1")
     assert "Permission denied" in out, out
