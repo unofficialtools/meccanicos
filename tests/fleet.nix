@@ -25,8 +25,6 @@ let
   pkgs = nixpkgs.legacyPackages.${system};
   lib = nixpkgs.lib;
   keys = ./fleet/keys;
-  canon = f: lib.concatStringsSep " " (lib.take 2 (lib.splitString " " (lib.removeSuffix "\n" (builtins.readFile f))));
-  hqKey = canon "${keys}/hq.pub";
   rigx = self.inputs.rigx;
 
   # Fixed keys (tests only): installed with the right modes at activation.
@@ -92,15 +90,7 @@ let
       };
     };
   # Just installed (what mos-install's organization install leaves).
-  bootstrap = pkgs.writeTextDir "fleet.toml" ''
-    organization = "Example Corp"
-    hostname = "ws1"
-    profile = "office"
-    server = "hq"
-    server_host_key = "${hqKey}"
-    [unlock]
-    method = "tpm-pin"
-  '';
+  bootstrap = ./fleet/bootstrap;
 
   nodesWith = ws1: {
     hq =

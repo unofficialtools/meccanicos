@@ -1,0 +1,10 @@
+# ws1 just installed: what mos-install's organization install writes to
+# /etc/nixos/fleet.toml (tests/fleet.nix). A plain file: evaluating the test
+# must not need anything built first.
+organization = "Example Corp"
+hostname = "ws1"
+profile = "office"
+server = "hq"
+server_host_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWKMG3gSSWcfAUMHIMT3JTWWEHaTSVqaViszKVhpNSr"
+[unlock]
+method = "tpm-pin"
