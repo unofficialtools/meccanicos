@@ -623,13 +623,17 @@ class Admin:
         x.add_argument("--priority", type=int)
         x.add_argument("--limit", type=int, default=200)
         x.add_argument("--follow", action="store_true")
+        x.add_argument("--after", type=int, default=0, help="only entries after this id")
+        x.add_argument("--json", action="store_true")
         x = sub.add_parser("builds")
         x.add_argument("host", nargs="?")
         x.add_argument("--limit", type=int, default=20)
         x.add_argument("--log", action="store_true")
+        x.add_argument("--json", action="store_true")
         x = sub.add_parser("deployments")
         x.add_argument("host")
         x.add_argument("--limit", type=int, default=20)
+        x.add_argument("--json", action="store_true")
         x = sub.add_parser("run")
         x.add_argument("--host", action="append", default=[])
         x.add_argument("--profile")
@@ -641,6 +645,7 @@ class Admin:
         x = sub.add_parser("jobs")
         x.add_argument("host", nargs="?")
         x.add_argument("--limit", type=int, default=30)
+        x.add_argument("--json", action="store_true")
         x = sub.add_parser("job")
         x.add_argument("id", type=int)
         x.add_argument("--json", action="store_true")
@@ -659,9 +664,11 @@ class Admin:
         x.add_argument("--days", type=int, default=7)
         x = sub.add_parser("enroll-show")
         x.add_argument("host")
-        sub.add_parser("enroll-list")
+        sub.add_parser("enroll-list").add_argument("--json", action="store_true")
         sub.add_parser("enroll-delete").add_argument("host")
-        sub.add_parser("audit").add_argument("--limit", type=int, default=50)
+        x = sub.add_parser("audit")
+        x.add_argument("--limit", type=int, default=50)
+        x.add_argument("--json", action="store_true")
         try:
             a = p.parse_args(argv)
         except (argparse.ArgumentError, SystemExit) as e:
@@ -730,7 +737,13 @@ class Admin:
             q &= db.log.priority <= a.priority
         if a.since:
             q &= db.log.time >= since(a.since)
+        if a.after:
+            q &= db.log.id > a.after
         rows = db(q).select(orderby=~db.log.id, limitby=(0, max(1, min(a.limit, 100000))))
+        if a.json:
+            say(json.dumps([dict(id=r.id, time=fmt(r.time), unit=r.unit, priority=r.priority, message=r.message)
+                            for r in reversed(rows)]))
+            return
         last = 0
         for r in reversed(rows):
             say(f"{fmt(r.time)} {r.unit or '?'}[{r.priority}]: {r.message}")
@@ -745,7 +758,13 @@ class Admin:
     def cmd_builds(self, a):
         db, b = self.db, self.db.build
         q = b.host == a.host if a.host else b.id > 0
-        for r in db(q).select(orderby=~b.id, limitby=(0, a.limit)):
+        rows = db(q).select(orderby=~b.id, limitby=(0, a.limit))
+        if a.json:
+            say(json.dumps([dict(id=r.id, host=r.host, branch=r.branch, rev=r.rev, started=fmt(r.started),
+                                 finished=fmt(r.finished), ok=r.ok, log=(r.log or "")[-20000:] if a.log else None)
+                            for r in rows]))
+            return
+        for r in rows:
             st = "ok" if r.ok else "FAILED" if r.ok is False else "building"
             say(f"{fmt(r.started)}  {r.host:16} {r.branch or '':10} {(r.rev or '')[:10]}  {st}")
             if a.log and r.log:
@@ -754,7 +773,13 @@ class Admin:
     def cmd_deployments(self, a):
         db, d = self.db, self.db.deployment
         self.need_host(a.host, in_repo=False)
-        for r in db(d.host == a.host).select(orderby=~d.id, limitby=(0, a.limit)):
+        rows = db(d.host == a.host).select(orderby=~d.id, limitby=(0, a.limit))
+        if a.json:
+            say(json.dumps([dict(id=r.id, rev=r.rev, started=fmt(r.started), finished=fmt(r.finished),
+                                 result=r.result, to_system=r.to_system, output=(r.output or "")[-20000:])
+                            for r in rows]))
+            return
+        for r in rows:
             say(f"{fmt(r.started)}  {(r.rev or '')[:10]}  {r.result or '?':8} {os.path.basename(r.to_system or '')[33:]}")
             if r.result == "failed" and r.output:
                 say("\n".join("    " + x for x in r.output.splitlines()[-15:]))
@@ -762,9 +787,13 @@ class Admin:
     def cmd_jobs(self, a):
         db, j = self.db, self.db.job
         q = (j.host == a.host) if a.host else (j.id > 0)
-        for r in db(q & (j.kind != "relay")).select(orderby=~j.id, limitby=(0, a.limit)):
-            st = ("canceled" if r.canceled else f"exit {r.exit_code}" if r.finished_on
-                  else "running" if r.delivered_on else "queued")
+        rows = db(q & (j.kind != "relay")).select(orderby=~j.id, limitby=(0, a.limit))
+        if a.json:
+            say(json.dumps([dict(id=r.id, host=r.host, kind=r.kind, created_by=r.created_by, created_on=fmt(r.created_on),
+                                 state=job_state(r), command=job_args(r)) for r in rows]))
+            return
+        for r in rows:
+            st = job_state(r)
             say(f"{r.id:6}  {fmt(r.created_on)}  {r.host:16} {r.kind:7} {st:10} by {r.created_by}  {job_args(r)}")
 
     def cmd_job(self, a):
@@ -784,7 +813,12 @@ class Admin:
 
     def cmd_audit(self, a):
         db = self.db
-        for r in db(db.audit.id > 0).select(orderby=~db.audit.id, limitby=(0, a.limit)):
+        rows = db(db.audit.id > 0).select(orderby=~db.audit.id, limitby=(0, a.limit))
+        if a.json:
+            say(json.dumps([dict(time=fmt(r.time), actor=r.actor, action=r.action, target=r.target, details=r.details)
+                            for r in rows]))
+            return
+        for r in rows:
             say(f"{fmt(r.time)}  {r.actor:16} {r.action:18} {r.target or ''}  {r.details or ''}")
 
     # ---- acting
@@ -941,7 +975,13 @@ class Admin:
 
     def cmd_enroll_list(self, a):
         db = self.db
-        for e in db(db.enrollment.added_on == None).select(orderby=~db.enrollment.id):  # noqa: E711
+        rows = db(db.enrollment.added_on == None).select(orderby=~db.enrollment.id)  # noqa: E711
+        if a.json:
+            say(json.dumps([dict(host=e.host, profile=e.profile, created_on=fmt(e.created_on), created_by=e.created_by,
+                                 state="introduced" if e.used_on else "expired" if e.expires < now() else "waiting",
+                                 fingerprint=fingerprint(e.host_key) if e.host_key else None) for e in rows]))
+            return
+        for e in rows:
             st = "waiting for: mos-fleet host add" if e.used_on else "expired" if e.expires < now() else "waiting for the computer"
             say(f"{e.host:16} {e.profile:12} {fmt(e.created_on)}  by {e.created_by:12} {st}")
 
@@ -951,6 +991,11 @@ class Admin:
         audit(db, self.actor, "enroll-delete", a.host)
         write_keys(db, main_repo())
         say(f"{n} enrollment(s) for {a.host} cancelled.")
+
+
+def job_state(r):
+    return ("canceled" if r.canceled else f"exit {r.exit_code}" if r.finished_on
+            else "running" if r.delivered_on else "queued")
 
 
 def job_args(r):

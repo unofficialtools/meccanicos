@@ -116,6 +116,13 @@ with subtest("jobs, shell, logs"):
     ws1.succeed("logger -p user.warning fleet-test-log-line")
     a_until("mos-fleet logs ws1 | grep fleet-test-log-line", timeout=180)
 
+with subtest("the TUI's data: every tab and pane, from the server"):
+    out = a("mos-fleet tui --check")
+    for x in ("== Computers", "== ws1 › Logs", "== ws1 › Builds", "== ws1 › Deployments", "== ws1 › Jobs",
+              "== People", "== Groups", "== Profiles", "== Changes", "== Audit", "mrossi", "office"):
+        assert x in out, (x, out)
+    a("mos-fleet tui --demo --check")
+
 with subtest("what a computer's key may not do"):
     out = ws1.fail(f"{SSH_WS} status 2>&1")
     assert "unknown request" in out, out
@@ -129,7 +136,15 @@ with subtest("what a computer's key may not do"):
     assert "Permission denied" in out, out
 
 with subtest("an update reaches ws1"):
-    a("mos-fleet person add gverdi 'Giulia Verdi' --group office")
+    # As the TUI does it: change the files, commit them later, together.
+    a("mos-fleet person add gverdi 'Giulia Verdi' --no-commit")
+    a("mos-fleet member add office gverdi --no-commit")
+    out = a("mos-fleet diff --worktree")
+    assert "gverdi may log in" in out, out
+    out = a("mos-fleet push --no-eval", ok=False)
+    assert "not committed" in out, out
+    a("mos-fleet commit -m 'Giulia joins the office'")
+    assert "Giulia joins" in a("git log -1 --format=%s")
     print(a("mos-fleet diff"))
     a("mos-fleet push --no-eval")
     ws1.wait_until_succeeds(f"test $(readlink -f /run/current-system) = {EXPECTED_B}", timeout=900)

@@ -204,7 +204,9 @@ class Change:
             except OSError:
                 pass
 
-    def commit(self, push=False):
+    def commit(self, push=False, commit=True):
+        """Check; then commit (and push), or with commit=False leave the
+        change in the working tree, for `mos-fleet commit` (the TUI's way)."""
         r = Repo(self.d)
         if r.errors:
             for rel, text in self.saved.items():
@@ -216,6 +218,9 @@ class Change:
                     with open(p, "w") as fh:
                         fh.write(text)
             raise Fail("Not changed, it wouldn't be valid:\n  " + "\n  ".join(r.errors))
+        if not commit:
+            say(f"Changed, not committed: {self.message}")
+            return r
         git(self.d, "add", "-A", "--", *self.saved)
         if subprocess.run(["git", "-C", self.d, "diff", "--cached", "--quiet"]).returncode == 0:
             say("Nothing changed.")
@@ -229,7 +234,34 @@ class Change:
         return r
 
 
+def cmd_commit(a):
+    """Everything changed in the working tree, checked, as one commit."""
+    r = load(a)
+    if not git(r.root, "status", "--porcelain").strip():
+        raise Fail("Nothing to commit.")
+    if not a.message.strip():
+        raise Fail("A commit message, please (-m).")
+    git(r.root, "add", "-A")
+    git(r.root, "commit", "-q", "-m", a.message)
+    say(f"Committed: {a.message.splitlines()[0]}")
+    if a.push:
+        do_push(r.root)
+    else:
+        say("   (mos-fleet push sends it to the server)")
+
+
+def require_clean(d):
+    """Only commits reach the server, and only commits are checked before a
+    push: never a working tree with changes not committed (they would be
+    validated, but not sent)."""
+    left = git(d, "status", "--porcelain", "--untracked-files=all").splitlines()
+    if left:
+        raise Fail("Changes not committed (mos-fleet commit -m MESSAGE, or discard them):\n  "
+                   + "\n  ".join(x[3:] for x in left[:10]) + ("\n  …" if len(left) > 10 else ""))
+
+
 def do_push(d, branch="main", force=False):
+    require_clean(d)
     p = subprocess.run(["git", "-C", d, "push", "-q"] + (["-f"] if force else []) + ["origin", branch],
                        capture_output=True, text=True)
     out = "\n".join(line.removeprefix("remote: ") for line in (p.stderr + p.stdout).splitlines() if line.strip())
@@ -369,6 +401,7 @@ def cmd_validate(a):
 
 def cmd_push(a):
     r = load(a)
+    require_clean(r.root)  # before the slow check: what is checked is what is pushed
     if not a.no_eval:
         cmd_validate(a)
     do_push(r.root, a.branch, force=a.branch != "main" and a.force)
@@ -425,7 +458,7 @@ def cmd_person(a):
         where = [h for h in sorted(r.hosts) if a.name in r.allowed(h)]
         say(f"# may log in on: {', '.join(where) or '(no computer yet)'}")
         return
-    c.commit(a.push)
+    c.commit(a.push, commit=not a.no_commit)
 
 
 def cmd_group(a):
@@ -460,7 +493,7 @@ def cmd_group(a):
             raise Fail(f"{a.name} still has members: {', '.join(members)} (mos-fleet member remove …).")
         groups.pop(a.name, None)
     write_groups(c, groups)
-    c.commit(a.push)
+    c.commit(a.push, commit=not a.no_commit)
 
 
 def cmd_member(a):
@@ -473,7 +506,7 @@ def cmd_member(a):
     p["groups"] = sorted(gs)
     c = Change(r, f"member {a.action} {a.group} {a.name}")
     write_person(c, a.name, p)
-    c.commit(a.push)
+    c.commit(a.push, commit=not a.no_commit)
 
 
 def cmd_profile(a):
@@ -503,7 +536,7 @@ def cmd_profile(a):
         for g, t in list(groups.items()):
             t["profiles"] = [p for p in t.get("profiles", []) if p != a.name]
         write_groups(c, groups)
-    c.commit(a.push)
+    c.commit(a.push, commit=not a.no_commit)
 
 
 def stick_dir(to):
@@ -545,7 +578,7 @@ def cmd_host(a):
         for f in glob.glob(os.path.join(r.root, "hosts", a.name, "*")):
             c.remove(os.path.relpath(f, r.root))
         say("Its recovery key stays on the server (mos-fleet recover still works).")
-    c.commit(a.push)
+    c.commit(a.push, commit=not a.no_commit)
 
 
 def host_prepare(a, r):
@@ -615,8 +648,8 @@ def host_add(a, r):
             c.write(f"hosts/{a.name}/{f}", e["files"][f])
         elif os.path.exists(os.path.join(r.root, "hosts", a.name, f)):
             c.remove(f"hosts/{a.name}/{f}")
-    c.commit(a.push)
-    if not a.push:
+    c.commit(a.push, commit=not a.no_commit)
+    if not a.push and not a.no_commit:
         say(f"Review hosts/{a.name}/ (the computer wrote its .nix files), then: mos-fleet push")
 
 
@@ -647,9 +680,14 @@ def cmd_upgrade(a):
 
 
 def trees(r, base, target):
-    """Two commits' repositories (base None: an empty one)."""
+    """Two commits' repositories; target None: the working tree, as it is."""
     out = []
     for rev in (base, target):
+        if rev is None:
+            tmp = tempfile.mkdtemp(prefix="mos-fleet-diff-")
+            shutil.copytree(r.root, tmp, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git"))
+            out.append(Repo(tmp))
+            continue
         tmp = tempfile.mkdtemp(prefix="mos-fleet-diff-")
         data = subprocess.run(["git", "-C", r.root, "archive", "--format=tar", rev], capture_output=True)
         if data.returncode != 0:
@@ -662,13 +700,18 @@ def trees(r, base, target):
 def cmd_diff(a):
     r = load(a, check=False)
     subprocess.run(["git", "-C", r.root, "fetch", "-q", "origin"], capture_output=True)
-    base, _, target = (a.range or "origin/main..HEAD").partition("..")
-    target = target or "HEAD"
-    old, new = trees(r, base, target)
-    files = git(r.root, "diff", "--name-only", base, target).split()
+    if a.worktree:
+        base, target = (a.range or "origin/main").split("..")[0], None
+        files = git(r.root, "diff", "--name-only", base).split() + \
+            git(r.root, "ls-files", "--others", "--exclude-standard").split()
+    else:
+        base, _, target = (a.range or "origin/main..HEAD").partition("..")
+        target = target or "HEAD"
+        files = git(r.root, "diff", "--name-only", base, target).split()
     if not files:
         say("No changes.")
         return
+    old, new = trees(r, base, target)
     everyone = any(f in ("common.nix", "flake.nix", "flake.lock", "fleet.toml") for f in files)
     for h in sorted(set(old.hosts) | set(new.hosts)):
         lines = []
@@ -784,6 +827,8 @@ def cmd_remote(a):
 def add_parsers(sub):
     def edit(p):
         p.add_argument("--push", action="store_true", help="also push to the server")
+        p.add_argument("--no-commit", action="store_true",
+                       help="change and check the files only; commit later (mos-fleet commit)")
         return p
 
     x = sub.add_parser("init")
@@ -811,6 +856,10 @@ def add_parsers(sub):
     x.add_argument("--force", action="store_true")
     x = sub.add_parser("diff")
     x.add_argument("range", nargs="?")
+    x.add_argument("--worktree", action="store_true", help="from origin/main to the files as they are now")
+    x = sub.add_parser("commit")
+    x.add_argument("-m", "--message", required=True)
+    x.add_argument("--push", action="store_true")
 
     pe = sub.add_parser("person").add_subparsers(dest="action", required=True)
     x = edit(pe.add_parser("add"))
@@ -928,7 +977,7 @@ def add_parsers(sub):
 
 HANDLERS = {
     "init": cmd_init, "clone": cmd_clone, "admin-key": cmd_admin_key, "validate": cmd_validate, "push": cmd_push,
-    "diff": cmd_diff, "person": cmd_person, "group": cmd_group, "member": cmd_member, "profile": cmd_profile,
+    "diff": cmd_diff, "commit": cmd_commit, "person": cmd_person, "group": cmd_group, "member": cmd_member, "profile": cmd_profile,
     "host": cmd_host, "upgrade": cmd_upgrade, "password": cmd_password, "recover": cmd_recover, "shell": cmd_shell,
 }
 REMOTE = {"status", "logs", "builds", "deployments", "run", "reboot", "switch", "facts", "jobs", "job", "cancel",

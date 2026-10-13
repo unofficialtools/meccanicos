@@ -30,6 +30,7 @@ let
   src = runCommand "mos-fleet-src" { } ''
     mkdir -p $out
     cp -r ${../scripts/mos_fleet} $out/mos_fleet
+    cp ${../scripts/lib/mos_tui.py} $out/mos_tui.py
   '';
   path = lib.makeBinPath [
     git
@@ -64,6 +65,7 @@ let
       export PATH="${path}:/run/wrappers/bin:/run/current-system/sw/bin"
       export MOS_FLEET_SERVE="$out/bin/mos-fleet-serve"
       export MOS_FLEET_HOOK="$out/bin/mos-fleet-hook"
+      export MOS_FLEET_CLI="$out/bin/mos-fleet"
       export MOS_FLEET_LIBCRYPT="${libxcrypt}/lib/libcrypt.so.2"
       exec ${py}/bin/python3 -E -s -c 'import sys; sys.path.insert(0, "${src}"); from mos_fleet.${builtins.elemAt parts 0} import ${builtins.elemAt parts 1} as m; sys.exit(m())' "\$@"
       EOF

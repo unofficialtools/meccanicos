@@ -228,6 +228,16 @@ it waits (or an admin sets a new one).
 All in `~/fleet`. Changes reach the computers within a minute or so of the
 push (a new kernel: at the next restart).
 
+Most of these are also on one screen: `mos-fleet` alone (or `mos-fleet tui`)
+shows the computers, people, groups, profiles, unpushed changes and the
+audit, with buttons that run the same commands ([TUI.md](TUI.md)).
+
+Every edit command commits at once; with `--no-commit` it only changes (and
+checks) the files, and `mos-fleet commit -m MESSAGE` commits everything
+together later (`mos-fleet diff --worktree` shows what it changes where).
+`mos-fleet push` refuses while anything is not committed: only commits reach
+the server, and what was checked is what is sent.
+
 | Task | How |
 |---|---|
 | New person | `mos-fleet person add NAME "Full Name" --group office`, then `mos-fleet password set NAME` |
