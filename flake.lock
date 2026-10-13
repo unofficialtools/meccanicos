@@ -1,21 +1,5 @@
 {
   "nodes": {
-    "comin": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1791828108,
-        "narHash": "sha256-K8jtZcj51AvvLJNXZJV4hShG7+U/1iwyUwRru5Zt9sQ=",
-        "owner": "nlewo",
-        "repo": "comin",
-        "rev": "aad3bfa91975a31abaabc51a7ccaed3fddd910f3",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nlewo",
-        "repo": "comin",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1790920529,
@@ -54,7 +38,6 @@
     },
     "root": {
       "inputs": {
-        "comin": "comin",
         "nixpkgs": "nixpkgs",
         "rigx": "rigx"
       }

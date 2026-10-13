@@ -8,12 +8,13 @@ const LockGlyph = () => (
   <svg width={16} height={18} viewBox="0 0 16 18" style={{ marginRight: 4 }}><path d="M4 8V5a4 4 0 0 1 8 0v3" stroke={C.sand} strokeWidth={2.4} fill="none" /><rect x={1} y={8} width={14} height={10} rx={2} fill={C.sand} /></svg>
 );
 
-// The organization's network, on the stage (1920 x 770): the company and its
-// domain, the server hq with its services, the admin's computer, up to three
-// computers on the office network, the Internet. Things appear, light up and
+// The organization's network, on the stage (1920 x 770): the company, the
+// server hq with what it holds (one SSH account, the repository, the builds,
+// two SQLite databases, Tang), the admin's computer, up to three computers on
+// the office network, the Internet. Things appear, light up and
 // send packets (labelled pills) along the wires, in step with the narration.
 type When = { beat?: number; delay?: number; at?: number };
-export type NodeId = "admin" | "hq" | "idm" | "git" | "cache" | "fleet" | "tang" | "db" | "ws1" | "ws2" | "ws3" | "net";
+export type NodeId = "admin" | "hq" | "ssh" | "git" | "build" | "state" | "secrets" | "tang" | "ws1" | "ws2" | "ws3" | "net";
 export type Flow = When & { from: NodeId; to: NodeId; label: string; dur?: number; color?: string; repeat?: number; every?: number };
 export type Tag = When & { id: NodeId; text: string; color?: string; for?: number };
 export type NetProps = {
@@ -34,11 +35,12 @@ const BUS = 470;
 const HQ = { x: 470, y: 64, w: 680, h: 340 };
 const TILE_W = 206, TILE_H = 128;
 const SERVICES: { id: NodeId; logo: LogoName; name: string; dns: string; col: number; row: number }[] = [
-  { id: "idm", logo: "kanidm", name: "Kanidm", dns: "idm", col: 0, row: 0 },
-  { id: "git", logo: "forgejo", name: "Forgejo", dns: "git", col: 1, row: 0 },
-  { id: "cache", logo: "harmonia", name: "Harmonia", dns: "cache", col: 2, row: 0 },
-  { id: "fleet", logo: "fleet", name: "Fleet", dns: "fleet", col: 0, row: 1 },
-  { id: "tang", logo: "tang", name: "Tang", dns: "tang", col: 1, row: 1 },
+  { id: "ssh", logo: "ssh", name: "SSH", dns: "fleet@hq", col: 0, row: 0 },
+  { id: "git", logo: "git", name: "fleet.git", dns: "the repository", col: 1, row: 0 },
+  { id: "build", logo: "nixos", name: "builds", dns: "nix build", col: 2, row: 0 },
+  { id: "state", logo: "sqlite", name: "state.db", dns: "reports, logs", col: 0, row: 1 },
+  { id: "secrets", logo: "sqlite", name: "secrets.db", dns: "hashes, keys", col: 1, row: 1 },
+  { id: "tang", logo: "tang", name: "Tang", dns: "port 7654", col: 2, row: 1 },
 ];
 const tile = (col: number, row: number) => ({ x: HQ.x + 22 + col * (TILE_W + 10), y: HQ.y + 64 + row * (TILE_H + 10) });
 const WS_X = { ws1: 250, ws2: 650, ws3: 1050 };
@@ -50,7 +52,6 @@ const NET = { x: 1610, y: 70, w: 280, h: 250 };
 const centre = (id: NodeId): [number, number] => {
   const s = SERVICES.find((x) => x.id === id);
   if (s) { const t = tile(s.col, s.row); return [t.x + TILE_W / 2, t.y + TILE_H / 2]; }
-  if (id === "db") { const t = tile(2, 1); return [t.x + TILE_W / 2, t.y + TILE_H / 2]; }
   if (id === "hq") return [HQ.x + HQ.w / 2, HQ.y + HQ.h / 2];
   if (id === "admin") return [ADMIN.x + ADMIN.w / 2, ADMIN.y + ADMIN.h / 2];
   if (id === "net") return [NET.x + NET.w / 2, NET.y + NET.h / 2];
@@ -126,7 +127,7 @@ export const Net: React.FC<NetProps> = ({ show = [], add = [], hi = [], flows = 
       <div style={box("hq", HQ.x, HQ.y, HQ.w, HQ.h, { borderTop: `5px solid ${C.tealHi}` })}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 20px", fontFamily: MONO, fontSize: 26 }}>
           <Machine kind="server" size={40} color={C.tealHi} />
-          <b style={{ color: C.tealHi }}>hq</b><span style={{ color: C.dim, fontSize: 21 }}>the server · 10.0.0.10</span>
+          <b style={{ color: C.tealHi }}>hq</b><span style={{ color: C.dim, fontSize: 21 }}>the server · hq.corp.example.com</span>
         </div>
       </div>
       {SERVICES.map((s) => {
@@ -135,20 +136,10 @@ export const Net: React.FC<NetProps> = ({ show = [], add = [], hi = [], flows = 
           <div key={s.id} style={box(s.id, p.x, p.y, TILE_W, TILE_H, { background: C.raised, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 })}>
             <Logo name={s.logo} size={50} />
             <div style={{ fontFamily: SANS, fontSize: 22, fontWeight: 700, color: C.text }}>{s.name}</div>
-            <div style={{ fontFamily: MONO, fontSize: 17, color: C.sand }}>{s.dns}.corp…</div>
+            <div style={{ fontFamily: MONO, fontSize: 17, color: C.sand }}>{s.dns}</div>
           </div>
         );
       })}
-      {(() => {
-        const p = tile(2, 1);
-        return (
-          <div style={box("db", p.x, p.y, TILE_W, TILE_H, { background: C.ink, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 })}>
-            <div style={{ display: "flex", gap: 14 }}><Logo name="mysql" size={40} /><Logo name="redis" size={40} /><Logo name="nginx" size={40} /></div>
-            <div style={{ fontFamily: SANS, fontSize: 17, color: C.dim, textAlign: "center", lineHeight: 1.2 }}>MySQL · Redis<br />nginx (HTTPS)</div>
-          </div>
-        );
-      })()}
-
       {/* the admin's computer */}
       <div style={box("admin", ADMIN.x, ADMIN.y, ADMIN.w, ADMIN.h, { borderTop: `5px solid ${C.amber}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 })}>
         <Machine kind="laptop" size={84} color={C.amber} />
@@ -172,7 +163,7 @@ export const Net: React.FC<NetProps> = ({ show = [], add = [], hi = [], flows = 
       <div style={box("net", NET.x, NET.y, NET.w, NET.h, { borderTop: `5px solid ${C.dim}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, textAlign: "center" })}>
         <div style={{ fontFamily: SANS, fontSize: 26, fontWeight: 700, color: C.text }}>The Internet</div>
         <Logo name="nixos" size={46} />
-        <div style={{ fontFamily: MONO, fontSize: 18, color: C.dim, lineHeight: 1.35 }}>MeccanicOS on GitHub<br />cache.nixos.org</div>
+        <div style={{ fontFamily: MONO, fontSize: 18, color: C.dim, lineHeight: 1.35 }}>MeccanicOS on GitHub<br />NixOS packages</div>
       </div>
 
       {/* tags, then the packets on top */}

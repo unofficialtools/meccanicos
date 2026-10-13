@@ -1,0 +1,5 @@
+name = "Mario Rossi"
+uid = 2000
+groups = ["fleet-admins"]
+ssh_keys = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMCP6AyUVwtEEOeO6h4R9zhGy3r/3Bp1Z5iB4gFpnLWq"]
+age_recipient = "age186ajpqe543q0cpka0e2rtu9q9yt433rwyelukmfkx2huwpamz5zqzgq23g"

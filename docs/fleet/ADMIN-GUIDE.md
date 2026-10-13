@@ -1,64 +1,60 @@
 # MeccanicOS fleet: set up the server, add computers
 
-> **⚠ Experimental.** Fleet management is new and has not been tested on real
-> hardware or in a real organization yet. Try it on spare machines first, and
-> keep the recovery keys (Part 6) safe from day one. See [DESIGN.md](DESIGN.md)
-> for what it does and why it is built this way, and its known limits.
+> **⚠ Experimental.** Fleet management is new. It is tested end to end in
+> virtual machines (`nix build .#checks.x86_64-linux.fleet`), not yet in a
+> real organization. Try it on spare machines first, and back up your admin
+> key and the server (Part 6) from day one. [DESIGN.md](DESIGN.md) explains
+> how it works and why.
 
 This guide is for whoever runs an organization's MeccanicOS computers. It
-assumes you're at ease in a bash shell, and nothing more. One command,
-`mos-fleet`, does the setting up; the guide says when to run it and what to
-check.
+assumes you're at ease in a bash shell. One command, `mos-fleet`, does the
+work; the guide says when to run it and what to check.
 
 ## The big picture
 
-One **server**, running MeccanicOS, hosts everything the fleet needs:
+- **The fleet repository** is the source of truth: a git repository listing
+  the computers (`hosts/`), the kinds of computers (`profiles/`), the people
+  (`people/`) and the groups (`groups.toml`). Changing a computer means
+  changing a file there, committing and pushing.
+- **The fleet server** is a MeccanicOS computer with one extra account,
+  `fleet`, reached only over SSH. It keeps the repository, builds every
+  computer's system from it, and stores what the computers report (facts,
+  logs, what they ran) in a SQLite database. Password hashes and disk
+  recovery keys go in a second database. It also runs **Tang**, which lets
+  office desktops unlock their disks by themselves, only on the office network.
+- **Every other computer** runs MeccanicOS in **managed mode**. Its agent
+  keeps an SSH connection open to the server, identified by the computer's
+  own SSH key. Through it the computer receives the system it should run
+  (and switches to it within seconds of a build), its people's password
+  hashes, and jobs (run a command, restart); it sends back facts and logs.
+  The connection always goes from the computer to the server, so laptops
+  work from anywhere the server can be reached.
 
-| Name | Service | What it does |
-|---|---|---|
-| `idm.DOMAIN` | **Kanidm** | People, groups, passwords and passkeys. Who may log in where. |
-| `git.DOMAIN` | **Forgejo** | The **fleet repository**: one folder per computer, one file per profile. Changing a computer = changing a file here. |
-| `cache.DOMAIN` | **Harmonia** | The server builds every computer's system and hands it out ready-made. |
-| `fleet.DOMAIN` | **Fleet** (Redis) | Inventory: which computers exist, their health, their versions. |
-| `tang.DOMAIN:7654` | **Tang** | Lets office desktops unlock their disks by themselves, only on the office network. |
+No web services, no extra databases: SSH, git, Nix and SQLite.
 
-Forgejo and Fleet share one database server, MySQL 8.4.
+Who may log in, and where (`groups.toml`):
 
-Every other computer runs MeccanicOS in **managed mode**. It:
+- **`fleet-admins`**: every computer, with `sudo`; and the server (pushing
+  the repository, all `mos-fleet` commands).
+- **Other groups**: the computers of the profiles they list. `mos-fleet
+  profile add office` also makes a group `office` for the `office` computers.
 
-- takes its configuration from the fleet repository and applies it within
-  minutes (with comin), downloading the built system from the server;
-- lets people log in with their organization account, also offline once
-  they've logged in once;
-- reports to Fleet;
-- unlocks its disk with the TPM chip and a PIN (laptops), the TPM and the
-  Tang server (office desktops), or a FIDO2 security key. A key is never sent
-  over the network.
-
-Every computer also has a **recovery key**, encrypted so that only the admins
-can read it, stored in the fleet repository.
-
-Who may log in, and where:
-
-- **`fleet-admins`** (a Kanidm group): every computer, with `sudo`.
-- **One group per profile**, with the profile's name (for example `office`):
-  the computers of that profile.
+Every computer has a **recovery key** for its disk, encrypted so that only the
+admins can read it, kept on the server.
 
 ## Before you start
 
 You need:
 
 - **A server**: any 64-bit PC with 8 GB of RAM or more and 100 GB+ of disk,
-  on the office network, with a **fixed IP address** (ask whoever runs the
-  router for a DHCP reservation).
-- **A domain** the organization owns, here `corp.example.com`, and someone who
-  can add **five DNS names** to it: `idm`, `git`, `cache`, `fleet`, `tang`, all
-  pointing to the server.
-- **Your own computer**, running MeccanicOS, on the same network.
+  on the office network, with a **fixed IP address**, and a **DNS name**
+  (here `hq.corp.example.com`) that the computers can reach.
+- **Your own computer**, running MeccanicOS, with an SSH key
+  (`ssh-keygen -t ed25519` if `~/.ssh/id_ed25519.pub` doesn't exist).
 - **A MeccanicOS USB stick**, made with `mos-usb` or Ventoy as usual. It
-  carries the provisioning files to new computers.
+  carries your SSH key to the server, and each new computer's one-time key.
 
-Replace `corp.example.com`, `Example Corp` and `hq` with your own below.
+Replace `corp.example.com`, `Example Corp`, `hq` and `mrossi` with your own.
 
 ---
 
@@ -70,361 +66,293 @@ Install it from the stick as usual (normal install). Name it `hq`. Pick a
 disk password and **write it down and keep it in a safe**: the server can't
 unlock itself unattended (it's the one running Tang).
 
-After the first login:
-
-```sh
-$ timedatectl | grep synchronized       # "System clock synchronized: yes"
-$ ip -4 addr | grep inet                 # the fixed address
-```
-
 ## 1.2 Set it up
 
+On your own computer, copy your SSH public key to the stick:
+
 ```sh
-$ mos-fleet server init --domain corp.example.com --organization "Example Corp" --lan 10.0.0.0/24
+$ usb-vault stick
+$ cp ~/.ssh/id_ed25519.pub /run/usb-vault/data/
 ```
 
-`--lan` is your office network (repeat it for several). Only computers there
+At the server, with the stick plugged in:
+
+```sh
+$ usb-vault stick
+$ mos-fleet server init --lan 10.0.0.0/24 --admin-key /run/usb-vault/data/id_ed25519.pub
+```
+
+`--lan` is your office network (repeat it for several): only computers there
 can reach Tang. It asks for your password (sudo), then:
 
-1. writes `/etc/nixos/fleet-server.toml` and rebuilds the system with the fleet
-   services (the first time downloads about 1 GB; allow 10–30 minutes);
-2. creates the organization's certificate authority and the server's
-   certificate (`/var/lib/meccanicos-fleet/tls`), and makes the server trust it;
-3. Kanidm: its administrators, and the group `fleet-admins`;
-4. Forgejo: the repository `fleet/config`, an admin account, and a read-only
-   account the computers use;
-5. Fleet: its administrator and the enroll secret;
-6. notes Tang's fingerprint and the cache's public key;
-7. puts the first files in the fleet repository and pins the MeccanicOS version;
-8. writes the **admin kit** (`/var/lib/meccanicos-fleet/kit.toml`), which your own
-   computer fetches in Part 2.
+1. writes `/etc/nixos/fleet-server.toml` and rebuilds the system with the
+   fleet services: the account `fleet`, Tang, the build service;
+2. makes the repository (empty) and the databases, in `/var/lib/mos-fleet`;
+3. lets your SSH key in, as an admin, **for 24 hours**: long enough to create
+   the repository (next part), where your key then stays.
 
-It ends by printing **four passwords**: Kanidm `admin` and `idm_admin`,
-Forgejo `fleet-admin` and Fleet `fleet-admin@corp.example.com`. Put them in
-the company password manager. They're also in
-`/var/lib/meccanicos-fleet/server-state.json`, readable only by root.
+It ends by printing **the server's SSH fingerprint** (`SHA256:…`). Note it:
+your computer checks it in the next step, so that it talks to this server and
+no other.
 
-If it stops with an error, fix what it says and run the same command again:
-every step is skipped when it's already done.
+Running it again is safe. `mos-fleet server admin-key FILE` lets a key in for
+another 24 hours (a new admin, or one who lost theirs): it can push the
+repository, so it can fix `people/` and `groups.toml`.
 
 ## 1.3 DNS
 
-Ask for the five names (`idm`, `git`, `cache`, `fleet`, `tang` under your
-domain) to point to the server's address. The server itself doesn't need
-them; every other computer does.
-
-## 1.4 Make yourself a fleet admin
-
-```sh
-$ mos-fleet person add mrossi "Mario Rossi" --group fleet-admins
-$ mos-fleet person password mrossi
-```
-
-The first command prints a link: open it to set your password or passkey for
-the web pages. The second sets the password for logging in to computers.
-
-Check the server:
-
-```sh
-$ mos-fleet server status
-```
-
-Every line should say `ok`. `FAIL` on a service: `journalctl -b -u NAME`
-says why.
+Ask for the server's name (`hq.corp.example.com`) to point to its address.
 
 ---
 
-# Part 2: your own computer
+# Part 2: your computer, the repository
 
-These commands run as yourself, on your MeccanicOS computer, not the
-server.
+These commands run as yourself, on your own MeccanicOS computer.
 
-```sh
-$ mos-fleet connect you@hq
-```
-
-It copies the admin kit from the server over SSH, and clones the fleet
-repository to `~/fleet`. It needs your SSH key on the server
-(`ssh-copy-id you@hq`) and passwordless sudo there, which is the MeccanicOS
-default.
-
-The kit (`~/.config/mos-fleet/kit.toml`) holds the repository tokens and
-the Fleet enroll secret: keep your computer's disk encrypted, as MeccanicOS
-does.
+## 2.1 Create the fleet repository
 
 ```sh
-$ mos-fleet admin-key
+$ mos-fleet init --server hq.corp.example.com --fingerprint SHA256:… \
+    --organization "Example Corp" --admin mrossi --full-name "Mario Rossi"
 ```
 
-This makes your **admin key**, `~/.config/mos-fleet/admin.key`, and adds its
-public half to `admins.txt` in the repository. Every computer installed from
-now on encrypts its recovery key for all the keys in `admins.txt`.
+It checks the server's fingerprint, makes **your admin key**
+(`~/.config/mos-fleet/admin.key`: recovery keys are encrypted for it), writes
+the repository in `~/fleet` with you in `fleet-admins`, pins the MeccanicOS
+version (`flake.lock`), and pushes it to the server.
 
 **Back up `admin.key` now**, offline: print it (`cat`) and keep the paper in
-the safe. Without at least one admin key, no recovery key can be read. Each
-admin runs `connect` and `admin-key` on their own computer.
+the safe. Without at least one admin key, no recovery key can be read.
 
-Then create a profile for each kind of computer:
+Another admin, on their computer: `mos-fleet clone hq.corp.example.com
+--fingerprint SHA256:…`, then `mos-fleet admin-key` prints the public half of
+their admin key; you add them with `mos-fleet person add NAME "Full Name"
+--group fleet-admins --ssh-key their.pub --age-recipient age1…`.
 
-```sh
-$ mos-fleet profile add office
-```
-
-This adds `profiles/office.nix` to the repository and creates the Kanidm
-group `office`. Edit `~/fleet/profiles/office.nix` to list the profile's
-software, then `git commit -am "office: software"` and `git push`.
-
-Check everything:
+## 2.2 Profiles, people, groups
 
 ```sh
-$ mos-fleet doctor
+$ cd ~/fleet
+$ mos-fleet profile add office                 # profiles/office.nix, and the group office
+$ jed profiles/office.nix                      # the profile's software
+$ mos-fleet person add lbianchi "Laura Bianchi" --group office
+$ mos-fleet validate                           # every file, and every computer evaluated by Nix
+$ mos-fleet push
 ```
+
+Every `mos-fleet` command that edits the repository checks the result and
+commits; `--push` sends it right away, `mos-fleet push` later. Plain git works
+too: edit, `git commit`, then `mos-fleet push` (it validates first).
+
+The server refuses a push that isn't valid (a typo in a file, two people
+with the same uid, a group that doesn't exist, no admin left), and never
+lets `main` be rewritten: undo with a new commit (`git revert`).
+
+`mos-fleet diff` shows what your unpushed commits change on each computer:
+who may log in, whose system changes.
 
 ---
 
 # Part 3: adding a computer
 
-Per computer, decide three things:
-
-| | Example | Choices |
-|---|---|---|
-| **Name** | `ws-001` | lowercase letters, digits, `-` |
-| **Profile** | `office` | one made with `mos-fleet profile add` |
-| **Disk unlock** | `tang` | `tang`: office desktop, unlocks by itself on the office network. `tpm-pin`: laptop, a PIN at power-on. `fido2`: a security key at power-on. |
-
 ## 3.1 (Optional) the disk's serial number
 
-You can pin the installation to one disk, so that no other disk can be
-erased by mistake. Boot the computer from the MeccanicOS stick, open a
-terminal and run:
-
-```sh
-$ lsblk -d -o NAME,SIZE,MODEL,SERIAL
-NAME     SIZE MODEL                SERIAL
-nvme0n1  477G Samsung SSD 980 PRO  S6PNNF0R123456X
-sda       29G USB Flash Disk       0412345678
-```
-
-The internal disk's serial is `S6PNNF0R123456X`. Without one, the installer
-lets whoever installs pick the disk.
+If the computer has several disks, note the serial number of the one to
+install on (`lsblk -o NAME,SIZE,MODEL,SERIAL` from the live stick), so the
+installer can't pick the wrong one.
 
 ## 3.2 Prepare the stick
 
-Plug the MeccanicOS stick into your computer:
-
 ```sh
-$ mos-fleet prepare ws-001 --profile office --unlock tang --disk-serial S6PNNF0R123456X
+$ mos-fleet host prepare ws-001 --profile office --unlock tang
 ```
 
-It writes the folder `meccanicos/fleet/ws-001/` on the stick:
-`corporate.config` and the files the installation needs. To use another
-stick or folder, add `--to DIR`.
+`--unlock` is how its disk opens at power-on: `tang` (office desktops:
+automatic on the office network, with the TPM chip), `tpm-pin` (laptops: the
+TPM chip and a PIN) or `fido2` (a security key). Add `--disk-serial S` from 3.1.
 
-The stick now holds the repository token and the enroll secret: keep it
-with you. The installer removes them from the stick when it's done.
+It writes `meccanicos/fleet/ws-001/` on the stick: the settings, the admins'
+public keys (for its recovery key), and a **one-time key** that lets the new
+computer introduce itself to the server, once, within 7 days.
 
 ## 3.3 Install
 
-1. Connect the computer to the network. For `tang`, use a **network cable on
-   the office network**.
-2. Boot it from the stick and open **Install**. The installer finds
-   `corporate.config` and offers **Organization install: ws-001 (office) for
-   Example Corp**.
-3. In the form, choose the language, keyboard and time zone, and Wi-Fi if
-   there's no cable. For `tpm-pin`, set the **disk PIN**. The organization
-   decides the name, the disk and the unlocking.
-4. **Install now**, then type `YES`. First it checks it can reach every server.
-   If one fails, nothing has been erased yet.
-5. Unlocking:
-   - `tang`: nothing to do;
-   - `tpm-pin`: the PIN from the form;
-   - `fido2`: plug in the security key and touch it when it blinks.
-6. It downloads and installs the managed system. The very first computer
-   takes longer: it compiles two small programs the server hasn't built yet.
-7. At the end it writes `meccanicos/fleet/ws-001/result/` on the stick: the
-   computer's own files and its recovery key, encrypted for the admins.
+Boot the computer from the stick and choose **Install**: the installer finds
+the folder and offers the **organization install**. Name, disk and disk
+unlocking come from the stick; you choose language, keyboard and Wi-Fi.
+For Tang, the computer must be on the office network (a cable).
 
-Reboot. The computer starts in managed mode: `fleet-admins` and the `office`
-group can log in already.
+At the end it shows the computer's **SSH key fingerprint**: note it. It also
+leaves a copy of the recovery key (encrypted) in `result/` on the stick.
 
 ## 3.4 Add it to the fleet
 
-Back on your computer, with the stick:
+At its first start, the computer introduces itself to the server with the
+one-time key (which then stops working): its SSH key, its hardware
+configuration, its encrypted recovery key. Then:
 
 ```sh
-$ mos-fleet add ws-001
+$ mos-fleet host pending                 # ws-001 … waiting for: mos-fleet host add
+$ mos-fleet host add ws-001
 ```
 
-It copies `result/` into the repository as `hosts/ws-001/`, checks that it
-evaluates, commits, pushes, and clears the folder from the stick. Within
-minutes the server builds it and the computer switches to its full
-configuration (its profile and `common.nix`).
+It shows the fingerprint the computer sent: **compare it** with the one the
+installer showed. Then it writes `hosts/ws-001/` and commits. Look at the
+files there (the computer wrote its own `hardware-configuration.nix` and
+`local.nix`), and push:
 
 ```sh
-$ mos-fleet status ws-001
-ws-001     build: ok 3f2a1c9     Fleet: online, seen 2026-10-12T14:03   NixOS 26.05
+$ mos-fleet push
+$ mos-fleet status ws-001                # building … then up to date
 ```
 
-Then log in on it as a person in the `office` group.
+The server builds the computer's system; the computer switches to it. Until
+then nobody can log in on it: its people come with that system.
+
+## 3.5 Passwords
+
+```sh
+$ mos-fleet password set lbianchi
+```
+
+The hash is made on your computer; only the hash goes to the server, and from
+there to the computers where `lbianchi` may log in. People change their own
+with **`mos-passwd`** (`passwd` on managed computers): on any computer, once,
+for all of them. It needs the current password; after 5 wrong ones in an hour
+it waits (or an admin sets a new one).
 
 ---
 
 # Part 4: everyday tasks
 
-Everything that changes a computer is a change in the fleet repository
-(`~/fleet`). `git log` shows who changed what, and when.
+All in `~/fleet`. Changes reach the computers within a minute or so of the
+push (a new kernel: at the next restart).
 
 | Task | How |
 |---|---|
-| New person | `mos-fleet person add NAME "Full Name" --group office`, then `mos-fleet person password NAME` |
-| Person leaves | `mos-fleet person remove NAME` |
+| New person | `mos-fleet person add NAME "Full Name" --group office`, then `mos-fleet password set NAME` |
+| Person leaves | `mos-fleet person disable NAME` (or `remove`); push |
 | Let someone use a profile's computers | `mos-fleet member add office NAME` (`member remove` to undo) |
-| A forgotten password | `mos-fleet person reset NAME` (a new setup link) |
-| Software for a profile | edit `~/fleet/profiles/office.nix`, `git commit -am …`, `git push` |
-| Software for everyone | edit `~/fleet/common.nix`, commit, push |
-| Software for one computer | edit `~/fleet/hosts/NAME/local.nix`, commit, push |
-| Move a computer to another profile | change `profile` in `~/fleet/hosts/NAME/fleet.toml`; also update its Kanidm group if needed |
+| Someone may use more profiles | `mos-fleet group edit office --add-profile lab` |
+| sudo for a group | `mos-fleet group edit lab --sudo` |
+| Software for a profile | edit `profiles/office.nix`, commit, push |
+| Software for everyone | edit `common.nix`, commit, push |
+| Software for one computer | edit `hosts/NAME/local.nix`, commit, push |
+| Move a computer to another profile | `mos-fleet host set NAME --profile lab` |
 | New MeccanicOS for everyone | `mos-fleet upgrade` |
-| Try it on a few computers first | in their `hosts/NAME/fleet.toml`, set `branch = "testing"` under `[repo]` (commit, push); then `mos-fleet upgrade --testing`; when they're fine, `mos-fleet upgrade` |
-| What runs where | `mos-fleet status`, or Fleet's web page |
-| Retire a computer | `mos-fleet retire NAME`, and delete it in Fleet's web page |
-
-Computers apply changes within minutes. A new kernel takes effect at the
-next restart.
+| Try it on a few computers first | `mos-fleet host set NAME --branch testing` (push); `mos-fleet upgrade --testing`; when they're fine, `mos-fleet upgrade` |
+| What runs where | `mos-fleet status` (`status NAME`: details) |
+| A command on computers | `mos-fleet run --host NAME -- COMMAND…` or `--profile office`: as root, at once on those online, when they connect otherwise (`jobs`, `job ID`, `cancel ID`) |
+| A shell on a computer | `mos-fleet shell NAME` (SSH through the server, with your own key: end to end) |
+| Restart a computer | `mos-fleet reboot NAME` |
+| Its logs | `mos-fleet logs NAME [--unit U] [--since 2h] [-f]` (warnings and worse, and `fleet.toml [logs] units`) |
+| Who did what | `mos-fleet audit`; `git log` for the repository |
+| Retire a computer | `mos-fleet host retire NAME --push` (its recovery key stays on the server) |
 
 ---
 
 # Part 5: when something goes wrong
 
-**A computer doesn't unlock its disk.** For example: a Tang desktop away
-from the office, a broken TPM, or a lost security key. On your computer:
+**A computer doesn't unlock its disk** (a Tang desktop away from the office,
+a broken TPM, a lost security key). On your computer:
 
 ```sh
 $ mos-fleet recover ws-001
 ```
 
-It prints the recovery key: type it at the disk prompt.
+prints its recovery key (it needs your admin key). Type it when the computer
+asks for the disk password.
 
-**A computer doesn't take its configuration:**
+**A computer doesn't update.** `mos-fleet status ws-001`: `build failed` shows
+the build's error (the computer keeps running its previous system); `update
+pending (offline)` means it hasn't connected. `mos-fleet builds ws-001 --log`,
+`mos-fleet deployments ws-001`.
 
-```sh
-$ mos-fleet status ws-001          # build failed? the error follows
-$ journalctl -u comin -n 50        # on the computer: can it reach git.corp.example.com?
-```
+**A change broke something.** `git revert COMMIT && mos-fleet push`. On the
+computer itself, the boot menu still lists the previous systems.
 
-A bad commit is undone with `git revert COMMIT && git push`. A computer that
-doesn't start after an update: pick the previous entry in its boot menu.
+**You can't reach the server** (lost SSH key, broken `people/` file): at the
+server's console, `mos-fleet server admin-key FILE`, then fix the repository
+and push.
 
-**A service on the server is down:** `mos-fleet server status`, then
-`journalctl -b -u NAME` and `sudo systemctl restart NAME` on the server.
-
-**The admin kit leaked** (a stolen, unlocked computer):
-
-- In Forgejo, make new tokens for `fleet-reader` and `fleet-admin` and delete
-  the old ones.
-- In Fleet (Hosts > Manage enroll secret), make a new enroll secret.
-- Put the new values in `/var/lib/meccanicos-fleet/server-state.json` on the
-  server and run `mos-fleet server init` again with the same options.
-- Each computer keeps its token in `/etc/secrets/meccanicos/repo.token`, and
-  needs the new one there.
-
-**Certificates:** the server's certificate renews itself 30 days before it
-expires; the CA lasts 10 years.
+**The server's services:** `mos-fleet server status` (at its console);
+`journalctl -u mos-fleet-build` for builds, `journalctl -u sshd` for logins.
 
 ---
 
 # Part 6: backups
 
-Back up the server every night (MeccanicOS's backup tool, or any other), in
-particular these:
+```sh
+$ mos-fleet server backup /run/usb-vault/data/fleet-backup      # at the server
+```
+
+copies the repository, both databases (consistent copies), Tang's keys and
+the server's SSH keys. It holds password hashes: keep it offline, encrypted
+(a USB Vault). Also keep:
 
 | What | Where | Why |
 |---|---|---|
-| Keys and certificates | `/var/lib/meccanicos-fleet/` | without the CA key no new certificates; without `cache.sec` computers refuse new systems. Also the passwords and the kit |
-| Tang's keys | `/var/lib/tang/` | **without them, Tang computers never unlock by themselves again** (the recovery key still works) |
-| People and groups | `/var/lib/kanidm/` | Kanidm also keeps daily backups there |
-| The fleet repository | `/var/lib/forgejo/`, and its database dump in `/var/backup/mysql` | every admin's `~/fleet` is also a full copy |
-| Fleet's inventory | its database dump in `/var/backup/mysql` | can be rebuilt (computers report again), history is lost |
-| The server's own configuration | `/etc/nixos/` | |
-| **Each admin's key** | `~/.config/mos-fleet/admin.key`, and the paper copy | **the only way to read recovery keys** |
+| Admin keys | each admin's `~/.config/mos-fleet/admin.key`, on paper | without one, no recovery key can be read |
+| The server's disk password | the safe | it doesn't unlock itself |
+| The repository | every admin's `~/fleet` is a full copy | |
+
+Restoring: install MeccanicOS on a new server with the same name, `mos-fleet
+server init`, then put the backup back in `/var/lib/mos-fleet` (owned by
+`fleet`), `/var/lib/tang` and `/etc/ssh`, and restart it.
 
 ---
 
-# Appendix: what `mos-fleet` sets up, and where
+# Part 7: how it stays safe
 
-For whoever wants to look under the hood, or fix things by hand.
+| Who | What it may do |
+|---|---|
+| An admin's SSH key (`fleet-admins`, in `people/`) | push the repository; every `mos-fleet` command; `shell` into computers (with their own key, end to end) |
+| A computer's SSH key (`hosts/NAME/host.toml`) | its own session: report, receive its own system, its people's hashes, its jobs. Not another computer's system, nothing else |
+| A one-time key (from `host prepare`) | introduce that one computer, once, within 7 days |
+| A key at the console (`server admin-key`) | push the repository, for 24 hours |
+| Anyone else | nothing: the server answers no other key |
 
-**On the server** (module `modules/fleet-server.nix`, enabled by
-`/etc/nixos/fleet-server.toml`):
+- The account `fleet` has no shell, no port forwarding, no terminal: every
+  key gets one forced command (sshd's `AuthorizedKeysCommand`).
+- The server's SSH key is pinned everywhere (`fleet.toml`, the stick, each
+  computer), so nobody can pretend to be the server.
+- Pushes are checked before they're accepted; `main` can't be rewritten; every
+  push, job, password change and recovery-key read is in `mos-fleet audit`.
+- Computers never send passwords: a person changing theirs proves the current
+  one to the server, which keeps only hashes. Repeated wrong guesses lock it.
+- Whoever controls the server controls the fleet: it decides what computers
+  run. Keep it in a locked room, its disk encrypted, its backups offline.
 
-- nginx terminates HTTPS for the four web names with the organization's CA.
-- Kanidm runs on `127.0.0.1:8443`, Forgejo on `:3000`, Harmonia on `:5000`,
-  and Fleet on `:8080` (with Redis). Forgejo and Fleet share MySQL 8.4: each
-  has its own database, dumped nightly to `/var/backup/mysql`.
-- Tang listens on port 7654, allowed from `--lan` and the server itself.
-- `meccanicos-fleet-secrets` (at boot) creates the CA, the certificate, the
-  cache key and Fleet's keys; `fleet-db-setup` creates Fleet's MySQL account.
-- `fleet-build` runs every 5 minutes. It fetches the repository and builds
-  each `hosts/NAME`, keeping the results for the cache. Each computer's
-  result goes in `/var/lib/fleet-build/status/NAME`.
-- `fleet-forgejo …` is Forgejo's command line. `fleetctl --config
-  /var/lib/meccanicos-fleet/fleetctl.yml …` and `kanidm … -D idm_admin` are
-  the others.
+---
 
-**On a managed computer** (module `modules/managed.nix`, enabled by
-`/etc/nixos/fleet.toml`):
+# Reference
 
-- **comin** polls the repository with `/etc/secrets/meccanicos/repo.token`.
-- The **Fleet agent** (orbit, vendored from nixos-unstable) uses
-  `/etc/secrets/meccanicos/fleet.secret`.
-- **kanidm-unixd** provides logins and caches them for offline use.
-- For `tang`, the boot stage brings up the wired network and Clevis opens
-  `/etc/secrets/meccanicos/cryptroot.jwe`.
-- MeccanicOS's own automatic updates are off: the repository's `flake.lock`
-  decides the version.
+**The repository**
 
-**The fleet repository:**
-
-```text
-flake.nix          every folder in hosts/ is a computer
-common.nix         every computer
-profiles/NAME.nix  one per profile
-hosts/NAME/        local.nix, hardware-configuration.nix, fleet.toml, ca.crt, recovery.age
-retired/NAME/      retired computers (their recovery keys)
-admins.txt         the admins' age public keys
+```
+fleet.toml                organization, server (NAME[:PORT]), server_host_key,
+                          [tang] url, thumbprint; [checkin] interval;
+                          [logs] min_priority, units, keep_days
+groups.toml               [GROUP] gid, profiles (names, or "*"), sudo, description
+people/NAME.toml          name, email, uid, groups, ssh_keys, age_recipient, disabled
+profiles/NAME.nix         a NixOS module: the profile's software and settings
+hosts/NAME/host.toml      profile, branch ("main"), unlock, host_key, disk_serial
+hosts/NAME/*.nix          hardware-configuration.nix, local.nix (from the installation)
+common.nix                a NixOS module for every computer
+flake.nix, flake.lock     MeccanicOS's mkFleet; the pinned MeccanicOS version
 ```
 
-**`corporate.config`** (written by `mos-fleet prepare`, read by the
-installer):
+**Settings:** `mos-fleet`'s own (where the repository is, uid ranges, how long
+one-time keys last, log retention…) are in
+[`scripts/mos_fleet/defaults.toml`](../../scripts/mos_fleet/defaults.toml);
+override them in `/etc/mos-fleet/config.toml` (NixOS:
+`meccanicos.fleet.config`) or your `~/.config/mos-fleet/config.toml`.
 
-```toml
-version = 1
-organization = "Example Corp"
-hostname = "ws-001"
-profile = "office"
+**On the server:** `/var/lib/mos-fleet`: `fleet.git` (the repository),
+`state.db`, `secrets.db`, `main/` (the newest valid main), `roots/` (the
+built systems). Services: `mos-fleet-setup`, `mos-fleet-build` (after every
+push, and every 10 minutes), `mos-fleet-prune` (daily), `tangd`.
 
-[install]
-disk_serial = "S6PNNF0R123456X"     # optional
-
-[repo]
-url = "https://git.corp.example.com/fleet/config.git"
-branch = "main"
-username = "fleet-reader"
-
-[cache]
-url = "https://cache.corp.example.com"
-public_key = "cache.corp.example.com-1:…"
-
-[fleet]
-url = "https://fleet.corp.example.com"
-
-[kanidm]
-url = "https://idm.corp.example.com"
-
-[unlock]
-method = "tang"                     # tang | tpm-pin | fido2
-tang_url = "http://tang.corp.example.com:7654"
-tang_thumbprint = "…"
-```
-
-Next to it: `ca.crt`, `repo.token`, `fleet.secret` and `admins.txt`.
+**On a computer:** `mos-fleet-agent` (`journalctl -u mos-fleet-agent`);
+`/etc/mos-fleet/client.json`, `/etc/mos-fleet/known_hosts`;
+`/var/lib/mos-fleet` (password hashes, the log cursor).

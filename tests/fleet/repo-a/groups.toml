@@ -1,0 +1,9 @@
+[fleet-admins]
+gid = 3000
+profiles = ["*"]
+sudo = true
+
+[office]
+gid = 3001
+profiles = ["office"]
+sudo = false

@@ -1,192 +1,252 @@
-# Managed mode (EXPERIMENTAL): a computer that belongs to an organization's
-# fleet. On by itself when /etc/nixos/fleet.toml exists (the installer writes
-# it from the corporate.config found on the USB stick; see
-# docs/fleet/ADMIN-GUIDE.md and mos-fleet).
+# Managed mode (EXPERIMENTAL): a computer of an organization's fleet.
 #
-#   comin ....... pulls the organization's fleet repository and switches to
-#                 its configuration for this computer (nixosConfigurations.<hostname>),
-#                 downloading it from the organization's cache
-#   Fleet ....... the agent (fleetd/orbit) reports to the Fleet server
-#   Kanidm ...... people log in with their organization account (cached
-#                 for offline use). Who may log in: the Kanidm group named
-#                 after the profile, and fleet-admins (who also get sudo);
-#                 more with meccanicos.managed.loginGroups
-#   disk unlock . TPM + PIN, FIDO2 key or Tang (enrolled by the installer);
-#                 Tang needs the network in the boot stage, set up here
+# Two stages:
+#   just installed  /etc/nixos/fleet.toml (written by the installer from the
+#                   stick's corporate.config) turns this on: the agent
+#                   introduces the computer to the fleet server, once, and
+#                   waits for an admin to add it to the fleet repository.
+#                   Nobody can log in yet.
+#   in the fleet    the fleet server builds this computer's system from the
+#                   repository (meccanicos.lib.mkFleet sets the options
+#                   below, `final`), and the agent switches to it: its people,
+#                   its profile, the organization's settings.
 #
-# Secrets live outside the store, in /etc/secrets/meccanicos: repo.token
-# (read-only access to the repository), fleet.secret (Fleet enroll secret),
-# cryptroot.jwe (Tang/TPM-sealed disk key, Tang machines only).
+# The agent (mos-fleet-agent) keeps one SSH connection to the server, with
+# this computer's SSH host key; the server's key is pinned. People's
+# passwords come from the server as hashes (/var/lib/mos-fleet/passwords,
+# hashedPasswordFile); mos-passwd changes one's own, everywhere.
 #
-# fleet.toml (all keys written by the installer):
+# fleet.toml (just installed):
 #   organization = "Example Corp"
-#   profile = "office"                        # profiles/office.nix in the repository
-#   [repo]   url, branch ("main"), username ("fleet-reader")
-#   [cache]  url, public_key
-#   [fleet]  url
-#   [kanidm] url
-#   [unlock] method = "tang" | "tpm-pin" | "fido2"
-# The organization's CA certificate is /etc/nixos/ca.crt.
+#   hostname = "ws-001"
+#   profile = "office"
+#   server = "hq.corp.example.com"          # [:PORT]
+#   server_host_key = "ssh-ed25519 AAAA…"
+#   [unlock] method = "tang" | "tpm-pin" | "fido2" | "password"
+#            (tang: tang_url, tang_thumbprint; the sealed key in
+#             /etc/secrets/meccanicos/cryptroot.jwe)
 {
   config,
+  options,
   lib,
   pkgs,
   meccanicosRoot,
-  cominSrc,
   ...
 }:
 let
   cfg = config.meccanicos.managed;
   file = meccanicosRoot + "/fleet.toml";
-  caFile = meccanicosRoot + "/ca.crt";
   s = if builtins.pathExists file then builtins.fromTOML (builtins.readFile file) else { };
-  get =
-    path: default:
-    lib.attrByPath path default s;
+  get = path: default: lib.attrByPath path default s;
+  mos-fleet = pkgs.callPackage ./mos-fleet-package.nix { };
   secrets = "/etc/secrets/meccanicos";
-  unlock = get [ "unlock" "method" ] "";
+  # A person's groups on a MeccanicOS desktop (as the installer gives them).
+  desktopGroups = [
+    "networkmanager"
+    "video"
+    "audio"
+    "input"
+    "dialout"
+    "lp"
+    "scanner"
+  ];
+  has = path: lib.hasAttrByPath path options;
+  str = lib.types.str;
 in
 {
-  imports = [
-    ./vendor/orbit.nix
-    (import "${cominSrc}/nix/module.nix" { self.packages = { }; })
-  ];
+  imports = [ ./fleet-config.nix ];
 
   options.meccanicos.managed = {
     enable = lib.mkOption {
       type = lib.types.bool;
       default = builtins.pathExists file;
-      description = "Managed mode: this computer follows its organization's fleet repository (on when /etc/nixos/fleet.toml exists).";
+      description = "Managed mode: this computer belongs to an organization's fleet.";
     };
-    loginGroups = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      example = [
-        "office"
-        "fleet-admins"
-      ];
-      description = "More Kanidm groups whose members may log in on this computer (besides fleet-admins and the profile's group).";
-    };
-    fleetDesktop = lib.mkOption {
+    final = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Fleet Desktop: a tray icon showing the user what Fleet knows about this computer.";
+      description = "Built from the fleet repository (people, profile), not just installed.";
     };
-    fleetScripts = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Let Fleet administrators run scripts on this computer (as root).";
+    organization = lib.mkOption {
+      type = str;
+      default = get [ "organization" ] "";
     };
-  };
-
-  config = lib.mkIf cfg.enable {
-    assertions = [
-      {
-        assertion = s ? repo.url && s ? cache.url && s ? fleet.url && s ? kanidm.url;
-        message = "managed.nix: ${toString file} needs [repo] url, [cache] url, [fleet] url and [kanidm] url.";
-      }
-      {
-        assertion = builtins.pathExists caFile;
-        message = "managed.nix: the organization's CA certificate ${toString caFile} is missing.";
-      }
-    ];
-
-    # The fleet repository decides what runs here, and when: no MeccanicOS
-    # updates of its own (the repository pins the MeccanicOS version).
-    meccanicos.autoUpgrade = lib.mkForce false;
-
-    environment.etc."meccanicos/fleet".text = ''
-      organization=${get [ "organization" ] ""}
-      profile=${get [ "profile" ] ""}
-      repo=${get [ "repo" "url" ] ""}
-      fleet=${get [ "fleet" "url" ] ""}
-      kanidm=${get [ "kanidm" "url" ] ""}
-      unlock=${unlock}
-    '';
-
-    # ---- Trust: the organization's CA and binary cache ---------------------
-    security.pki.certificateFiles = [ caFile ];
-    nix.settings = {
-      extra-substituters = [ (get [ "cache" "url" ] "") ];
-      extra-trusted-public-keys = [ (get [ "cache" "public_key" ] "") ];
+    host = lib.mkOption {
+      type = str;
+      default = get [ "hostname" ] config.networking.hostName;
     };
-
-    # ---- Configuration: comin pulls the fleet repository --------------------
-    services.comin = {
-      enable = true;
-      package = pkgs.callPackage "${cominSrc}/nix/package.nix" { };
-      remotes = [
-        {
-          name = "origin";
-          url = get [ "repo" "url" ] "";
-          auth = {
-            access_token_path = "${secrets}/repo.token";
-            username = get [ "repo" "username" ] "fleet-reader";
+    profile = lib.mkOption {
+      type = str;
+      default = get [ "profile" ] "";
+    };
+    server = lib.mkOption {
+      type = str;
+      default = get [ "server" ] "";
+      description = "The fleet server: NAME or NAME:PORT (SSH).";
+    };
+    serverHostKey = lib.mkOption {
+      type = str;
+      default = get [ "server_host_key" ] "";
+      description = "The fleet server's SSH host key (pinned).";
+    };
+    unlock = {
+      method = lib.mkOption {
+        type = str;
+        default = get [ "unlock" "method" ] "";
+      };
+    };
+    interval = lib.mkOption {
+      type = lib.types.int;
+      default = 300;
+      description = "Seconds between facts reports.";
+    };
+    logs = {
+      minPriority = lib.mkOption {
+        type = lib.types.int;
+        default = 4;
+      };
+      units = lib.mkOption {
+        type = lib.types.listOf str;
+        default = [ "mos-fleet-agent" ];
+      };
+    };
+    people = lib.mkOption {
+      default = { };
+      description = "Who may log in here (from the fleet repository).";
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            fullName = lib.mkOption { type = str; };
+            uid = lib.mkOption { type = lib.types.int; };
+            groups = lib.mkOption {
+              type = lib.types.listOf str;
+              default = [ ];
+            };
+            sshKeys = lib.mkOption {
+              type = lib.types.listOf str;
+              default = [ ];
+            };
+            sudo = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+            };
           };
-          branches.main.name = get [ "repo" "branch" ] "main";
         }
-      ];
+      );
     };
-
-    # ---- Inventory: the Fleet agent ----------------------------------------
-    services.orbit = {
-      enable = true;
-      orbitPackage = pkgs.callPackage ./vendor/fleet-orbit/package.nix { };
-      fleetUrl = get [ "fleet" "url" ] "";
-      enrollSecretPath = "${secrets}/fleet.secret";
-      fleetCertificate = config.security.pki.caBundle;
-      desktop.enable = cfg.fleetDesktop;
-      enableScripts = cfg.fleetScripts;
-      hostIdentifier = "uuid";
-    };
-
-    # ---- People: Kanidm accounts, cached for offline logins ------------------
-    # Already right after the installation, before the fleet repository has
-    # this computer: its profile's people, and the fleet admins (with sudo).
-    meccanicos.managed.loginGroups = [ "fleet-admins" ] ++ lib.optional (s ? profile) s.profile;
-    security.sudo.extraRules = [
-      {
-        groups = [ "fleet-admins" ];
-        commands = [ "ALL" ];
-      }
-    ];
-    services.kanidm = {
-      package = pkgs.kanidm_1_11;
-      client.enable = true;
-      client.settings = {
-        uri = get [ "kanidm" "url" ] "";
-        ca_path = "${caFile}";
-      };
-      unix.enable = true;
-      unix.sshIntegration = true;
-      unix.settings = {
-        kanidm.pam_allowed_login_groups = cfg.loginGroups;
-        # Plain names (mrossi, office), not mrossi@idm.example.com.
-        uid_attr_map = "name";
-        gid_attr_map = "name";
-        home_alias = "name";
-        default_shell = "/run/current-system/sw/bin/bash";
-        use_etc_skel = true;
-      };
-    };
-    # No local accounts to pick from: the login screen asks for the name.
-    services.xserver.displayManager.lightdm.extraSeatDefaults = ''
-      greeter-show-manual-login=true
-      greeter-hide-users=true
-    '';
-
-    # ---- Disk unlock with Tang (+ TPM): the sealed key and the boot-stage network
-    boot.initrd.clevis = lib.mkIf (unlock == "tang") {
-      enable = true;
-      useTang = true;
-      devices.cryptroot.secretFile = "${secrets}/cryptroot.jwe";
-    };
-    meccanicos.initrdNetwork = lib.mkIf (unlock == "tang") true;
-    # Away from the office network, don't wait long for it: the recovery key
-    # is asked for instead.
-    boot.initrd.systemd.network.wait-online = lib.mkIf (unlock == "tang") {
-      anyInterface = true;
-      timeout = 30;
+    groups = lib.mkOption {
+      default = { };
+      type = lib.types.attrsOf (
+        lib.types.submodule { options.gid = lib.mkOption { type = lib.types.int; }; }
+      );
     };
   };
+
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge [
+      {
+        assertions = [
+          {
+            assertion = cfg.server != "" && cfg.serverHostKey != "";
+            message = "managed.nix: the fleet server and its SSH key are needed (fleet.toml: server, server_host_key).";
+          }
+        ];
+
+        environment.etc."mos-fleet/client.json".text = builtins.toJSON {
+          inherit (cfg) organization host profile server interval;
+          final = cfg.final;
+          logs = {
+            min_priority = cfg.logs.minPriority;
+            inherit (cfg.logs) units;
+          };
+        };
+        environment.etc."mos-fleet/known_hosts".text = "mos-fleet-server ${cfg.serverHostKey}\n";
+        environment.etc."meccanicos/fleet".text = ''
+          organization=${cfg.organization}
+          profile=${cfg.profile}
+          server=${cfg.server}
+        '';
+
+        environment.systemPackages = [ mos-fleet ];
+        # The agent uses this computer's SSH host key as its identity.
+        services.openssh.enable = true;
+
+        systemd.services.mos-fleet-agent = {
+          description = "MeccanicOS fleet agent";
+          wantedBy = [ "multi-user.target" ];
+          wants = [ "network-online.target" ];
+          after = [
+            "network-online.target"
+            "sshd-keygen.service"
+            "sshd.service"
+          ];
+          # Switching the system must not restart it mid-switch: it restarts
+          # itself once the switch is reported.
+          restartIfChanged = false;
+          path = [
+            config.nix.package
+            config.systemd.package
+            pkgs.shadow
+            pkgs.util-linux
+            pkgs.iproute2
+            pkgs.openssh
+            pkgs.mkpasswd
+          ];
+          serviceConfig = {
+            ExecStart = "${mos-fleet}/bin/mos-fleet-agent";
+            Restart = "always";
+            RestartSec = 10;
+            StateDirectory = "mos-fleet";
+            StateDirectoryMode = "0700";
+            RuntimeDirectory = "mos-fleet";
+            RuntimeDirectoryMode = "0755";
+          };
+        };
+
+        # ---- Disk unlock with Tang (+ TPM): the sealed key and the boot-stage network
+        boot.initrd.clevis = lib.mkIf (cfg.unlock.method == "tang") {
+          enable = true;
+          useTang = true;
+          devices.cryptroot.secretFile = "${secrets}/cryptroot.jwe";
+        };
+        # Away from the office network, don't wait long for it: the recovery
+        # key is asked for instead.
+        boot.initrd.systemd.network.wait-online = lib.mkIf (cfg.unlock.method == "tang") {
+          anyInterface = true;
+          timeout = 30;
+        };
+      }
+
+      # MeccanicOS's own options, when this is MeccanicOS (not in the tests' small systems).
+      (lib.optionalAttrs (has [ "meccanicos" "autoUpgrade" ]) {
+        # The fleet repository decides what runs here, and when.
+        meccanicos.autoUpgrade = lib.mkForce false;
+      })
+      (lib.optionalAttrs (has [ "meccanicos" "initrdNetwork" ]) {
+        meccanicos.initrdNetwork = lib.mkIf (cfg.unlock.method == "tang") true;
+      })
+
+      # ---- People, from the repository -------------------------------------
+      (lib.mkIf cfg.final {
+        users.mutableUsers = lib.mkForce false;
+        users.users = lib.mapAttrs (name: p: {
+          isNormalUser = true;
+          inherit (p) uid;
+          description = p.fullName;
+          extraGroups = desktopGroups ++ p.groups ++ lib.optional p.sudo "wheel";
+          openssh.authorizedKeys.keys = p.sshKeys;
+          # Written by the agent from the server; read at every activation.
+          hashedPasswordFile = "/var/lib/mos-fleet/passwords/${name}";
+        }) cfg.people;
+        users.groups = lib.mapAttrs (_: g: { inherit (g) gid; }) cfg.groups;
+        # People have passwords now: sudo asks for it.
+        security.sudo.wheelNeedsPassword = lib.mkForce true;
+        services.xserver.displayManager.lightdm.extraSeatDefaults = ''
+          greeter-show-manual-login=true
+          greeter-hide-users=true
+        '';
+        environment.shellAliases.passwd = "mos-passwd";
+      })
+    ]
+  );
 }

@@ -1,207 +1,175 @@
 # MeccanicOS fleet management: design
 
-> **⚠ Experimental** (October 2026). Implemented, not yet tested on real
-> hardware or in a real organization. How to use it: [ADMIN-GUIDE.md](ADMIN-GUIDE.md).
+> Experimental. How to use it: [ADMIN-GUIDE.md](ADMIN-GUIDE.md).
 
-**The idea:** an organization runs MeccanicOS on every computer, servers
-included, and manages them from one place. MeccanicOS doesn't write its own
-fleet server, key server, update protocol or user directory. It wires
-together **standard, maintained tools**, all NixOS services:
+An organization runs many MeccanicOS computers and wants to manage them from
+one place: who may log in where, what software each kind of computer has,
+when everyone moves to a new MeccanicOS, what each computer is doing, and how
+to open a disk whose owner lost the key.
 
-- **Kanidm** for people;
-- **comin** and a binary cache for configuration;
-- **Tang/Clevis**, the TPM and FIDO2 for disk unlocking;
-- **Fleet** for inventory.
+NixOS already makes most of this a matter of files: a computer *is* its
+configuration. So the design keeps everything an admin decides in **one git
+repository**, and adds the least possible around it: **SSH** for every
+connection, **Nix** to build each computer's system, **SQLite** for what the
+computers report. No web services, no directory server, no extra databases.
 
-The MeccanicOS part is the glue: two NixOS modules, an organization mode in
-the installer, and the `mos-fleet` command.
+(An earlier version used Kanidm, Forgejo, Harmonia, FleetDM, MySQL, Redis and
+nginx. Each did its job well, but together they were a lot to run, secure,
+upgrade and back up for what the fleet needs. This version replaces them.)
 
-## 1. The jobs, and the tool for each
+## 1. The jobs, and how each is done
 
-| Job | Tool | MeccanicOS piece |
+| Job | How | Where |
 |---|---|---|
-| People, groups, who may log in where | **Kanidm** (`services.kanidm`): passwords, passkeys, POSIX groups, offline login cache | `managed.nix` (client), `fleet-server.nix` (server), `mos-fleet person/group/member` |
-| sudo and other rights | NixOS configuration in the fleet repository, keyed on Kanidm groups | `fleet-admins` everywhere with sudo; one group per profile |
-| Configuration and upgrades | **comin** pulls a Git repository (Forgejo); **fleet-build** builds every computer into a **Harmonia** cache signed with a Nix key | `managed.nix`, `fleet-server.nix`, `mos-fleet profile/add/upgrade` |
-| Disk unlock without typing the disk password | **TPM2 + PIN**, **Tang + TPM2** (Clevis), **FIDO2** key | the installer's organization mode |
-| Disk recovery | systemd-cryptenroll's **recovery key**, encrypted with **age** for the admins, in the repository | the installer; `mos-fleet recover` |
-| Inventory, health | **Fleet** (osquery/orbit), MySQL 8 + Redis | `managed.nix` (agent), `fleet-server.nix`; `mos-fleet status` |
-| Audit | Git history of the repository, Fleet's activity log, Kanidm's log | |
+| Who the computers, profiles, people and groups are | the fleet repository: TOML files and NixOS modules | `hosts/`, `profiles/`, `people/`, `groups.toml`, `fleet.toml` |
+| What each computer runs | `meccanicos.lib.mkFleet`: one NixOS system per `hosts/NAME`, built by the server from the branch it follows | `flake.nix`, `mos-fleet-build` |
+| Getting it there | the agent fetches exactly that system's missing store paths over SSH, then switches | `agent.py`, `server.py` (`fetch`) |
+| People and their rights | declarative users (`users.mutableUsers = false`): on each computer, the people whose groups allow its profile; sudo by group | `managed.nix` |
+| Passwords | hashes only, in `secrets.db`; delivered to the computers where the person may log in (`hashedPasswordFile`); `mos-passwd` changes one's own everywhere, proving the current one | `server.py`, `agent.py` |
+| Inventory, health, logs | facts, journald (warnings and up, plus chosen units), deployments, in `state.db` | `agent.py`, `server.py` |
+| Remote actions | jobs (run, reboot, switch, facts), delivered at once on the open session; `shell` relays SSH end to end | `server.py`, `agent.py` |
+| Disk unlock and recovery | LUKS2 with Tang (+TPM), TPM+PIN or FIDO2; a systemd-cryptenroll recovery key encrypted with age for the admins, in `secrets.db` | `mos-install`, `managed.nix` |
+| Enrollment | a one-time SSH key on the stick, 7 days; the computer sends its host key, hardware configuration and recovery key; an admin adds it to the repository | `host prepare`, `enroll`, `host add` |
+| Audit | git history; `audit` table (pushes, jobs, passwords, recovery reads, enrollments) | `state.db` |
 
-## 2. How other systems do it
-
-| | Enrollment / inventory | Disk keys | Config / updates | Identity |
-|---|---|---|---|---|
-| **Windows**: Intune + Autopilot | The vendor registers the hardware ID | BitLocker: TPM, recovery key escrowed in Entra | Policies, update rings | Entra ID |
-| **macOS**: Jamf, Kandji, Intune | Apple Business Manager | FileVault recovery key escrowed | Config profiles, OS update deadlines | Entra, Okta, LDAP |
-| **ChromeOS**: Google Admin | Enroll once, cloud managed | Automatic, TPM-backed | Policies, staged updates | Google accounts |
-| **RHEL / Fedora**: Satellite or Foreman + IdM | Kickstart, `ipa-client-install` | **Clevis + Tang**, TPM2 | Content views, Ansible | FreeIPA |
-| **Ubuntu**: Landscape | Registration key, admin approves | Nothing built in | Package updates, scripts | AD/LDAP via SSSD |
-| **SUSE**: Uyuni / SUSE Manager | Bootstrap + Salt keys | Nothing built in | Salt states, patching | Varies |
-| **Fleet** (open source) | Enroll secret; Linux, macOS, Windows, NixOS | LUKS escrow on Ubuntu/Fedora (NixOS planned) | Scripts, policies | Through an identity provider |
-| **MeccanicOS fleet** | `corporate.config` on the stick, Fleet enroll secret | Tang+TPM / TPM+PIN / FIDO2; age-encrypted recovery key | comin + signed cache, Git as the source of truth | Kanidm |
-
-What these systems have in common, and MeccanicOS follows:
-
-- **The disk key never travels.** The TPM, or Tang, opens the disk. Tang's
-  server and the client *derive* the key together: the server never learns
-  it, so a stolen Tang server unlocks nothing. Only a recovery key is kept
-  aside, for emergencies.
-- **Configuration is built once and shipped built.** On NixOS that means a
-  binary cache signed with a Nix key. Each computer switches to that exact
-  system, with the previous one still in the boot menu.
-
-## 3. Architecture
+## 2. Architecture
 
 ```
-            fleet repository (Forgejo)  ──fleet-build──▶  Harmonia cache (signed)
-            hosts/*, profiles/*.nix                          │
-                  ▲  pull (comin)                            │  download
-  ┌───────────────┴──────────────────────────────────────────┴──────┐
-  │ managed MeccanicOS computer   (/etc/nixos/fleet.toml)            │
-  │   comin ........... switches to nixosConfigurations.<hostname>   │
-  │   orbit ........... inventory                                    │──▶ Fleet
-  │   kanidm-unixd .... logins and groups, cached for offline use   │──▶ Kanidm
-  │   boot stage ...... LUKS: TPM2+PIN | Tang+TPM2 | FIDO2          │──▶ Tang (LAN)
-  └──────────────────────────────────────────────────────────────────┘
+ admin's computer                      fleet server (hq)                      managed computer
+ ───────────────                      ──────────────────                     ────────────────
+ ~/fleet (git)  ── git push ──▶  sshd ─ fleet.git ─ hooks: validate,        mos-fleet-agent
+ mos-fleet      ── ssh fleet@ ─▶  │      refresh keys, trigger build         (its host key)
+   status, logs, run, shell …     │                                              │
+                                  ├─ mos-fleet-keys: which key is whom ◀─── ssh fleet@hq session
+                                  ├─ mos-fleet-serve host|admin|enroll        facts, logs, results ─▶
+                                  │                                        ◀─ desired system, hashes, jobs
+                                  ├─ mos-fleet-build (as fleet, nix build)    ssh fleet@hq fetch
+                                  │     git+file://fleet.git?ref=…#ws-001  ─▶ nix-store --export of the
+                                  ├─ state.db   secrets.db                    missing paths of its system
+                                  └─ Tang (port 7654, office network)    ◀─── initrd: clevis (Tang + TPM)
 ```
 
-All boxes on the right run on one MeccanicOS server
-(`/etc/nixos/fleet-server.toml`).
+**One account, forced commands.** sshd runs `mos-fleet-keys` as its
+`AuthorizedKeysCommand` for the account `fleet`. It answers from `keys.json`,
+which the server writes from the newest *valid* `main` branch: each admin's
+keys (people in `fleet-admins`), each computer's host key, and pending
+one-time enrollment keys. The answer is an authorized_keys line with
+`restrict` and a forced command naming the role and the name
+(`mos-fleet-serve host ws-001`): the client can't choose who it is, and gets no
+shell, terminal or forwarding. A key at the console (`server admin-key`) is
+valid for a day and may only push the repository.
 
-### 3.1 People: Kanidm
+**The repository is only written by admins.** The pre-receive hook checks
+every pushed commit with the same rules as `mos-fleet validate`
+(`repo.py`), refuses deleting or rewriting `main`, and records the push. The
+post-receive hook refreshes `main/`, the computer table and `keys.json`, and
+touches a file a systemd path unit watches: `mos-fleet-build` starts. It
+also runs every 10 minutes, and loops while new pushes arrive.
 
-Kanidm has first-class NixOS support: `services.kanidm` sets up the server,
-the admin client and `kanidm-unixd`, which provides PAM/NSS on each computer.
+**Builds.** As the unprivileged user `fleet`, `nix build
+git+file:///var/lib/mos-fleet/fleet.git?ref=BRANCH&rev=REV#nixosConfigurations.HOST…`,
+for each computer from the branch its `host.toml` names (`main`, or `testing`
+for canaries). The result is kept as a GC root and becomes that computer's
+*desired system*. A failed build is recorded; the computer stays on the
+previous one.
 
-- **Offline logins:** `kanidm-unixd` caches users, groups and credentials for
-  laptops away from the office, protected by the TPM when there is one.
-- **Who may log in:** `pam_allowed_login_groups` = `fleet-admins`, plus the
-  computer's profile group, plus `meccanicos.managed.loginGroups`.
-- **Names:** `uid_attr_map = "name"`, so people are `mrossi`, not
-  `mrossi@idm.corp.example.com`.
-- **sudo:** Kanidm has no sudo rules. MeccanicOS gives `fleet-admins` sudo
-  everywhere; anything finer goes in the repository
-  (`security.sudo.extraRules`).
-- **Versions:** nixpkgs carries versioned Kanidm packages because Kanidm must
-  be upgraded one minor version at a time. MeccanicOS pins `kanidm_1_11`, the
-  newest in its nixpkgs.
-- **Not FreeIPA:** FreeIPA isn't packaged for NixOS and is only supported on
-  Fedora/RHEL, but every machine here runs MeccanicOS. Giving up FreeIPA means
-  giving up Kerberos (Kerberized file shares). If that's ever needed, the
-  fallback is NixOS's own Kerberos server, not FreeIPA.
+**Deploying.** The agent's session receives the desired system's store path.
+It asks `fetch` for it: the server checks it's that computer's desired system,
+lists its closure, the agent says which paths it lacks, and the server
+streams them (`nix-store --export`). Nothing else on the server can be asked
+for. The agent imports them (as root: no signature needed; the SSH channel
+authenticates the server), sets the system profile and switches, in a
+separate systemd unit so restarts can't interrupt it, then reports and
+restarts itself (the new system may carry a new agent).
 
-### 3.2 Disk unlock and recovery
+**The protocol.** One JSON object per line, both ways, on the session's
+stdin/stdout, with size caps: `hello`, `facts`, `logs` (acknowledged by
+cursor, so nothing is lost or sent twice), `deploy`, `job-done`, `passwd` from
+the agent; `desired`, `passwords`, `job`, `logs-ok`, `passwd-result`, `bye`
+from the server. The server's end polls SQLite every second for new jobs,
+builds and password changes.
 
-| Computer | Day to day | How the installer sets it up |
-|---|---|---|
-| Office desktop (`tang`) | By itself, only on the office network and only in its own case | A random LUKS key, sealed with `clevis encrypt sss` to Tang **and** the TPM (`t=2`; Tang alone if there's no TPM), in `/etc/secrets/meccanicos/cryptroot.jwe`. NixOS's `boot.initrd.clevis` opens it, after the boot stage brings up the wired network. |
-| Laptop (`tpm-pin`) | A PIN at power-on | `systemd-cryptenroll --tpm2-with-pin` (PCR 7) |
-| Anything (`fido2`) | A security key at power-on | `systemd-cryptenroll --fido2-device` |
+**The shell.** `mos-fleet shell ws-001` runs `ssh mrossi@ws-001` with a
+ProxyCommand that opens `relay` on the server. The server queues a relay job
+with a random token, the computer connects back with it, and the server joins
+the two streams. SSH runs end to end: the admin authenticates to the computer
+with their own key (from `people/`), and checks its host key (from
+`hosts/`). The server only sees encrypted bytes.
 
-On every computer the installer also does two things:
+## 3. Data
 
-- It enrolls a **recovery key** (`systemd-cryptenroll --recovery-key`) and
-  encrypts it with `age` for every public key in `admins.txt`. The encrypted
-  copy goes to `hosts/<name>/recovery.age`; the plain key is never written to
-  any disk.
-- It removes the temporary key the disk was formatted with. After that, only
-  the methods above and the recovery key open the disk.
+**The repository** (`repo.py` has the rules; `mkFleet` reads the same files):
+`fleet.toml`, `groups.toml`, `people/*.toml`, `profiles/*.nix`,
+`hosts/*/host.toml` (+ the computer's own `.nix` files), `common.nix`,
+`flake.nix`/`flake.lock`. Strict: unknown keys, duplicate uids/gids/keys,
+groups or profiles that don't exist, or no admin with an SSH key and an age
+key: refused.
 
-Fleet will escrow LUKS keys on NixOS too ([fleetdm/fleet#54422][54422],
-planned for 5.3.0, Fleet Premium). It could replace the age-encrypted files
-then, but they work without Premium and without Fleet.
+**state.db** (pydal, SQLite in WAL mode): `host` (profile, branch, last seen,
+current and desired system), `revision`, `build`, `deployment`, `report`
+(facts), `log`, `job`, `session`, `audit`, `enrollment`. Rebuilt by itself
+from the repository and the next check-ins, except logs and history.
 
-### 3.3 Configuration: comin, fleet-build, Harmonia
+**secrets.db**: `password` (hashes: yescrypt or SHA-512), `recovery_key`
+(age ciphertext; confirmed once `hosts/NAME` has the same host key),
+`passwd_attempt`.
 
-The fleet repository is a flake: `meccanicos.lib.mkInstalled` for every folder
-in `hosts/`. Each folder holds what the installer wrote into that computer's
-`/etc/nixos`, so its configuration in the repository is exactly what it ran
-locally, plus `common.nix` and its profile.
+Both belong to `fleet`, mode 600; root's commands use them through
+`runuser -u fleet` so no file becomes root's. `mos-fleet server backup` takes
+consistent copies (SQLite's backup API) and a bundle of the repository.
 
-- **comin** (vendored as a flake input; its module is imported from its
-  source) polls the repository and switches to
-  `nixosConfigurations.<hostname>`. It authenticates with a read-only Forgejo
-  token.
-- **fleet-build** (on the server, every 5 minutes) builds every host. The
-  results are kept as GC roots, so Harmonia serves them, signed with the
-  server's Nix key.
-- MeccanicOS's own automatic updates are off on managed computers: the
-  repository's `flake.lock` pins the MeccanicOS version, and
-  `mos-fleet upgrade` moves it.
-- **Staged rollouts:** a computer whose `fleet.toml` says
-  `branch = "testing"` follows that branch.
+## 4. Security
 
-### 3.4 Inventory: Fleet
-
-- **Agent:** orbit with osquery. Its NixOS module and package exist only in
-  nixos-unstable, so they're vendored in `modules/vendor/` (fleet-orbit 1.55.0
-  with nixpkgs' NixOS patches). Drop the copies when MeccanicOS's nixpkgs has
-  them.
-- **Server:** `fleet serve` as a systemd service, with MySQL 8.4 and Redis.
-  Fleet supports neither PostgreSQL nor MariaDB, so NixOS's `services.mysql`
-  is given `pkgs.mysql84`. Forgejo, the only other service with a database,
-  supports MySQL too and uses the same server: one database server to run
-  and back up.
-
-### 3.5 The server
-
-| Service | NixOS | Behind nginx at |
-|---|---|---|
-| Kanidm | `services.kanidm` | `idm.DOMAIN` |
-| Forgejo | `services.forgejo` | `git.DOMAIN` |
-| Harmonia | `services.harmonia` | `cache.DOMAIN` |
-| Fleet + Redis | own systemd unit | `fleet.DOMAIN` |
-| MySQL 8.4 (Forgejo's and Fleet's databases) | `services.mysql` | local only |
-| Tang | `services.tang` | `tang.DOMAIN:7654` (direct) |
-
-At boot, `meccanicos-fleet-secrets` creates the organization's CA, a
-`*.DOMAIN` certificate (renewed 30 days before it expires), the cache signing
-key and Fleet's keys, all in `/var/lib/meccanicos-fleet`.
-`mos-fleet server init` does the one-time setup that can't be declared:
-accounts, tokens, the repository, the enroll secret.
-
-## 4. The glue, file by file
-
-| File | What |
-|---|---|
-| `modules/managed.nix` | Managed mode: on when `/etc/nixos/fleet.toml` exists |
-| `modules/fleet-server.nix` | The server: on when `/etc/nixos/fleet-server.toml` exists. Also installs `mos-fleet` everywhere |
-| `modules/vendor/` | The Fleet agent's module and package, from nixos-unstable |
-| `scripts/mos-install.py` | Organization install: finds `meccanicos/fleet/*/corporate.config` on the stick |
-| `scripts/mos-fleet.py` | `mos-fleet`: the server's setup, people, profiles, provisioning, recovery |
-| `flake.nix` | the `comin` input; it's also pinned in installed computers' `/etc/nixos` lock |
+- **Authentication** is SSH keys only, both ways: computers and admins know
+  the server's key from `fleet.toml` (checked against the fingerprint the
+  console printed, at `init`/`clone`); the server knows theirs from the
+  repository.
+- **Least privilege per key**: a computer gets its own session, its own
+  system's paths, its own people's hashes, its own jobs. One-time keys enroll
+  one computer once. Builds run as an untrusted Nix user.
+- **Passwords**: never sent by computers; a change needs the current
+  password, checked on the server against the stored hash; 5 wrong ones an
+  hour lock changes for that person (an admin's `password set` unlocks).
+  A computer only receives the hashes of people allowed on it, and drops the
+  rest.
+- **Recovery keys** are age-encrypted on the new computer for the admins'
+  keys; the server never sees them in clear. `recover` decrypts on the admin's
+  computer.
+- **What the stick carries** is a settings file, the admins' public keys and a
+  one-time key: no long-lived secret. The installer pins the server's key and
+  shows the new computer's fingerprint for the admin to compare at `host add`.
+- **Trust**: the server decides what every computer runs; whoever controls it
+  (or the repository's admins) controls the fleet. Keep it physically safe and
+  its disk encrypted. `audit` and git history say who did what.
 
 ## 5. Known limits
 
-- **Not tested yet** on real hardware, a real TPM, a real Tang server or a
-  real Fleet enrollment. The modules evaluate and the managed system builds.
-- **Shared credentials:** every computer uses the same read-only repository
-  token and the same Fleet enroll secret. Both can be replaced (see the
-  guide), but not per computer yet.
-- **The very first install compiles** comin and the Fleet agent, until the
-  server's cache has a built computer.
-- **Laptops away from the office** need the repository, the cache and Fleet
-  reachable: a VPN (WireGuard, Headscale) is the way. Tang stays LAN-only by
-  design.
-- **One server**, no replication: Kanidm can replicate, and a second Tang
-  server is one line in the Clevis policy. Neither is set up yet.
-- **To check before relying on them:**
-  - Fleet Desktop on Xfce;
-  - Kanidm's offline cache (how long it's honoured);
-  - Tang's boot-stage network timeout away from the office.
+- No web pages: no self-service password reset, no dashboards (a read-only
+  page over `state.db` would be easy to add). No passkeys yet: FIDO2 logins
+  (pam_u2f) and a web login are planned for later versions.
+- Removing a person takes effect as each computer next connects; an offline
+  laptop keeps them until then.
+- Hashes in `secrets.db` and logs in `state.db` make the server a valuable
+  target: its backups too.
+- One server: no failover. Computers keep working without it (their last
+  system, their people, their passwords); they just don't change.
+- Tested end to end in VMs (`tests/fleet.nix`), not yet on real hardware with
+  Tang, TPMs and FIDO2 keys.
 
-## Sources
+## 6. The files
 
-- Fleet on NixOS: [fleetdm/fleet#54421](https://github.com/fleetdm/fleet/pull/54421),
-  LUKS escrow on NixOS: [fleetdm/fleet#54422][54422],
-  [Fleet Linux management](https://fleetdm.com/linux-management)
-- Fleet and MySQL 8 (no PostgreSQL, no MariaDB):
-  [osquery Slack](https://chat.osquery.io/t/22710220/rotating-light-hello-this-message-is-to-prepare-you-for-flee)
-- comin: [nlewo/comin](https://github.com/nlewo/comin)
-- Clevis/Tang on NixOS: [`boot.initrd.clevis`](https://mynixos.com/options/boot.initrd.clevis),
-  [FOSDEM 2024](https://fosdem.org/schedule/event/fosdem-2024-3044-clevis-tang-unattended-boot-of-an-encrypted-nixos-system)
-- Kanidm unix integration:
-  [Kanidm book: PAM and nsswitch](https://kanidm.github.io/kanidm/stable/integrations/pam_and_nsswitch.html)
-
-[54422]: https://github.com/fleetdm/fleet/issues/54422
+| File | What |
+|---|---|
+| `scripts/mos_fleet/repo.py` | the repository's rules |
+| `scripts/mos_fleet/server.py` | sessions, fetch, relay, enroll, admin commands, hooks, builds |
+| `scripts/mos_fleet/keys.py` | sshd's AuthorizedKeysCommand |
+| `scripts/mos_fleet/agent.py` | the agent, `mos-passwd` |
+| `scripts/mos_fleet/admin.py`, `console.py`, `cli.py` | `mos-fleet` |
+| `scripts/mos_fleet/defaults.toml`, `settings.py` | settings, overridable |
+| `modules/fleet-server.nix` | the server: account, sshd, services, Tang |
+| `modules/managed.nix` | a managed computer: agent, people, disk unlock |
+| `modules/fleet-config.nix` | `/etc/mos-fleet/config.toml` |
+| `modules/mos-fleet-package.nix` | the commands |
+| `flake.nix` (`mkFleet`) | a fleet repository's systems |
+| `scripts/mos-install.py` | the organization install |
+| `tests/fleet.nix`, `tests/fleet/` | the VM test |

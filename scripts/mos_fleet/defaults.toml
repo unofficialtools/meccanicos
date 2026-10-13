@@ -1,0 +1,44 @@
+# mos-fleet's settings, with their defaults. Override them in
+#   /etc/mos-fleet/config.toml     the computer's (NixOS: meccanicos.fleet.config)
+#   ~/.config/mos-fleet/config.toml   yours (the admin commands only)
+# Same tables and keys; what's left out keeps the value here.
+
+[admin]
+# The MeccanicOS a new fleet repository follows (its flake.lock pins it).
+# MeccanicOS systems set it from the distribution's repository.
+meccanicos = "github:unofficialtools/meccanicos/latest"
+repo = "~/fleet"                    # where the fleet repository is cloned
+first_uid = 2000                    # people: the next free number from here
+admins_gid = 3000                   # the group fleet-admins
+first_gid = 3001                    # other groups
+enroll_days = 7                     # how long a stick's one-time key works
+stick = "/run/usb-vault/data"       # the MeccanicOS stick's files (usb-vault stick)
+
+# What `mos-fleet init` writes into fleet.toml (then the repository rules).
+[admin.new_fleet]
+checkin_interval = 300              # seconds between facts reports
+log_min_priority = 4                # journald: warning and worse...
+log_units = ["mos-fleet-agent"]     # ...and everything from these units
+log_keep_days = 30
+
+[server]
+state = "/var/lib/mos-fleet"
+tang_port = 7654
+lan = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]   # who may reach Tang
+console_key_hours = 24              # `server admin-key`: how long it works
+password_attempts_per_hour = 5      # wrong current passwords (mos-passwd), per person
+relay_wait_seconds = 45             # `mos-fleet shell`: waiting for the computer
+max_enroll_days = 30
+max_job_seconds = 86400
+keep_reports_days = 14
+keep_jobs_days = 180
+keep_deployments_days = 365
+keep_sessions_days = 30
+
+[agent]
+state = "/var/lib/mos-fleet"
+reconnect_max_seconds = 300         # back-off between connection attempts
+logs_every_seconds = 60
+log_batch = 3000                    # journal entries per message, at most
+job_timeout_seconds = 600           # `run` jobs without their own
+min_password = 8

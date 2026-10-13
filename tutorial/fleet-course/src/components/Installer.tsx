@@ -6,8 +6,9 @@ import { Markup } from "./Markup";
 import { Window } from "./Window";
 
 // mos-install, as on screen (a full-screen terminal program), in its
-// organization mode: the form, then the checks, the unlocking, the download
-// and the files written back to the stick. Each stage starts on a beat.
+// organization mode: the form, then the checks (the fleet server's key,
+// Tang), the unlocking, the installation (from the stick), and the new
+// computer's SSH fingerprint. Each stage starts on a beat.
 const UNLOCK = {
   tang: "automatic on the office network (Tang server + this PC's TPM)",
   "tpm-pin": "a PIN at power-on (this PC's TPM chip)",
@@ -15,9 +16,9 @@ const UNLOCK = {
 } as const;
 
 export const Installer: React.FC<{
-  host: string; unlock: keyof typeof UNLOCK;
+  host: string; unlock: keyof typeof UNLOCK; fp?: string;
   at: { form?: number; install?: number; checks?: number; unlock?: number; download?: number; done?: number };
-}> = ({ host, unlock, at }) => {
+}> = ({ host, unlock, at, fp = "SHA256:Qm4x…7Ka0" }) => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
   const beats = useBeats();
@@ -40,24 +41,25 @@ export const Installer: React.FC<{
   const log: string[] = [];
   if (installing) log.push("Type YES to erase nvme0n1 and install: {a}YES{/}");
   if (f >= b(at.checks)) {
-    const names = ["idm", "git", "cache", "fleet", ...(unlock === "tang" ? ["tang"] : [])];
-    const n = Math.floor((f - b(at.checks)) / 8);
-    names.slice(0, n).forEach((x) => log.push(`  {g}ok{/}  ${x}.corp.example.com`));
+    const names = ["fleet server hq.corp.example.com (its key matches)", ...(unlock === "tang" ? ["Tang  http://hq.corp.example.com:7654"] : [])];
+    const n = Math.floor((f - b(at.checks)) / 10);
+    names.slice(0, n).forEach((x) => log.push(`  {g}ok{/}  ${x}`));
   }
   if (f >= b(at.unlock)) {
-    log.push(unlock === "tang" ? "Disk: bound to tang.corp.example.com and this PC's TPM"
+    log.push(unlock === "tang" ? "Disk: bound to Tang (hq.corp.example.com) and this PC's TPM"
       : unlock === "tpm-pin" ? "Disk: sealed to this PC's TPM, with your PIN"
       : "Disk: touch the security key now… {g}done{/}");
-    log.push("Recovery key: encrypted for the admins (recovery.age)");
+    log.push("Recovery key: encrypted for the admins (on the stick, and for the server)");
   }
   if (f >= b(at.download)) {
     const p = interpolate(f, [b(at.download), b(at.download) + 4 * fps], [0, 1], { extrapolateRight: "clamp" });
     const bar = "█".repeat(Math.round(p * 30)).padEnd(30, "░");
-    log.push(`Downloading the managed system from cache.corp.example.com`);
+    log.push(`Installing MeccanicOS (from the stick)`);
     log.push(`  ${bar} ${Math.round(p * 100)}%`);
   }
   if (f >= b(at.done)) {
-    log.push(`{g}Done.{/} Written to the stick: meccanicos/fleet/${host}/result/`);
+    log.push(`{g}Done.{/} This computer's SSH key: {a}${fp}{/}`);
+    log.push(`(the admin compares it in: mos-fleet host add ${host})`);
     log.push("Remove the stick and restart.");
   }
   return (

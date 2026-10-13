@@ -6,16 +6,16 @@ offline by Piper. It shares its framework with [the shell course](../shell-cours
 
 | | Chapter | On screen |
 |---|---|---|
-| | Welcome | why manage computers from one place; why NixOS makes it easier |
-| 1 | The big picture | the network map: Example Corp, `corp.example.com`, the server hq and its services, three computers; how information flows |
-| 2 | Before you start | a server, a domain and five DNS names, your computer, a stick |
-| 3 | The server | `mos-fleet server init`, a fleet admin, `server status` |
-| 4 | Your computer | `connect`, `admin-key`, `profile add`, `doctor` |
-| 5 | Adding computers | LUKS and the ways to unlock it (Tang, TPM + PIN, FIDO2, recovery key); `prepare`, the installer, `add`; three computers |
-| 6 | Every day | a change flows from a commit to every computer; people; `upgrade`; `retire` |
-| 7 | When something goes wrong | `recover`, failed builds, `git revert`, the boot menu, the server's services |
-| 8 | Backups | what to keep |
-| | Cheat sheet | every `mos-fleet` command |
+| | Welcome | why manage computers from one place; why NixOS makes it easier; git, SSH, Nix, SQLite |
+| 1 | The big picture | the network map: Example Corp, the server hq (one SSH account, the repository, builds, two databases, Tang), three computers keeping a connection open; the repository's files; groups |
+| 2 | Before you start | a server with a name, your computer with an SSH key, a stick |
+| 3 | The server | your key on the stick; `mos-fleet server init`; `server status` |
+| 4 | The repository | `init` (the fingerprint, your admin key, the first push), `profile add`, `person add`, `validate`, `push`; what the server refuses |
+| 5 | Adding computers | LUKS and the ways to unlock it (Tang, TPM + PIN, FIDO2, recovery key); `host prepare`, the installer, the one-time key, `host add` (compare the fingerprint); three computers |
+| 6 | Every day | a change flows from a commit to every computer; passwords (`password set`, `mos-passwd`); `run`, `logs`, `shell`; `upgrade --testing`; `retire` |
+| 7 | When something goes wrong | `recover`, failed builds, `git revert`, the boot menu, a key at the console |
+| 8 | Backups, and safety | `server backup`, the admin key on paper; one job per key; `audit` |
+| | Cheat sheet | the `mos-fleet` commands |
 
 ## Make it
 
@@ -37,7 +37,7 @@ beats). Visuals specific to this video:
 
 - `net({...})`: the network map (`src/components/Net.tsx`): which computers
   are there or appear (`show`, `add`), what lights up (`hi`), the packets
-  sent between them (`flows`, e.g. `{ from: "cache", to: "ws1", label: "system", beat: 1 }`)
+  sent between them (`flows`, e.g. `{ from: "build", to: "ws1", label: "system", beat: 1 }`)
   and labels on them (`tags`);
 - `vaults([...])`: an encrypted disk and the way it unlocks
   (`src/components/Vault.tsx`: `password`, `tang`, `tpm-pin`, `fido2`,
@@ -47,7 +47,6 @@ beats). Visuals specific to this video:
   computer it is, another one what each new command does (`src/commands.ts`);
 - `<Installer>`: mos-install's organization mode.
 
-The logos are the projects' own: Kanidm's (`public/logos/kanidm.png`, from
-its repository's artwork), Fleet's (`public/logos/fleet.png`), and the
-others from [simple-icons](https://simpleicons.org). Tang and comin have
-none: they are drawn (a key, two arrows).
+The logos are the projects' own, from [simple-icons](https://simpleicons.org)
+(git, NixOS, SQLite, in a lighter blue); SSH and Tang have none: they are
+drawn (a terminal, a key).

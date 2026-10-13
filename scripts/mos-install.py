@@ -6,11 +6,12 @@ Installs the prebuilt MeccanicOS system (shipped inside the ISO) onto a disk:
 GPT -> 1 GiB EFI + LUKS2 -> ext4, systemd-boot. No network needed.
 
 Organization install (EXPERIMENTAL): when the USB stick holds
-meccanicos/fleet/<computer>/corporate.config (written by `mos-fleet prepare`),
-the installer offers to install that computer as a managed member of the
-organization's fleet: name, disk and disk unlocking come from the file, no
-local account is made (people log in with their organization account), and
-it needs the network. See docs/fleet/ADMIN-GUIDE.md.
+meccanicos/fleet/<computer>/corporate.config (written by `mos-fleet host
+prepare`), the installer offers to install that computer as a managed member
+of the organization's fleet: name, disk and disk unlocking come from the
+file, and no local account is made (people come from the fleet repository).
+At its first start the computer introduces itself to the fleet server with
+the one-time key from the stick. See docs/fleet/ADMIN-GUIDE.md.
 
 Environment (set by the Nix wrapper):
   MECCANICOS_SYSTEM   store path of the installed system's toplevel
@@ -58,6 +59,7 @@ LOG = "/tmp/mos-install.log"
 USER_GROUPS = "wheel,networkmanager,video,audio,input,dialout,lp,scanner"
 # Organization install (corporate.config): where its files go on the disk.
 FLEET_SECRETS = "/etc/secrets/meccanicos"
+FLEET_STATE = "/var/lib/mos-fleet"  # the agent's: enroll.key, recovery.age
 UNLOCK_METHODS = {
     "tang": "automatic on the office network (Tang server + this PC's TPM)",
     "tpm-pin": "a PIN at power-on (this PC's TPM chip)",
@@ -490,15 +492,14 @@ def fleet_bundles():
 
 
 def load_bundle(d):
-    """Read and check a corporate.config folder (mos-fleet prepare). Raises
+    """Read and check a corporate.config folder (mos-fleet host prepare). Raises
     ValueError saying what is wrong."""
     with open(os.path.join(d, "corporate.config"), "rb") as fh:
         try:
             c = tomllib.load(fh)
         except tomllib.TOMLDecodeError as e:
             raise ValueError(f"corporate.config: {e}") from None
-    need = [("organization",), ("hostname",), ("profile",), ("repo", "url"), ("cache", "url"),
-            ("cache", "public_key"), ("fleet", "url"), ("kanidm", "url"), ("unlock", "method")]
+    need = [("organization",), ("hostname",), ("profile",), ("server",), ("server_host_key",), ("unlock", "method")]
     for path in need:
         x = c
         for k in path:
@@ -512,9 +513,13 @@ def load_bundle(d):
         raise ValueError(f"corporate.config: unlock method must be one of {', '.join(UNLOCK_METHODS)}")
     if m == "tang" and not (c["unlock"].get("tang_url") and c["unlock"].get("tang_thumbprint")):
         raise ValueError("corporate.config: tang needs unlock.tang_url and unlock.tang_thumbprint")
-    for f in ("ca.crt", "repo.token", "fleet.secret", "admins.txt"):
+    if c.get("version") != 2:
+        raise ValueError("corporate.config: from an older mos-fleet: prepare it again (mos-fleet host prepare)")
+    if not re.fullmatch(r"ssh-ed25519 [A-Za-z0-9+/]+={0,2}", c["server_host_key"]):
+        raise ValueError("corporate.config: server_host_key is not an SSH ed25519 key")
+    for f in ("enroll.key", "admins.txt"):
         if not os.path.isfile(os.path.join(d, f)):
-            raise ValueError(f"{f} is missing next to corporate.config")
+            raise ValueError(f"{f} is missing next to corporate.config (already used? prepare it again)")
     if not admin_keys(d):
         raise ValueError("admins.txt has no age public key (age1...): nobody could read the recovery key")
     return c
@@ -534,19 +539,13 @@ def toml_str(x):
 
 
 def fleet_toml(c):
-    """/etc/nixos/fleet.toml: what managed.nix reads (no secrets, no install section)."""
+    """/etc/nixos/fleet.toml: what managed.nix reads until the fleet
+    repository has this computer (no secrets, no install section)."""
     lines = [
         "# Written by mos-install from corporate.config. Read by managed.nix.",
-        "version = 1",
-        f"organization = {toml_str(c['organization'])}",
-        f"profile = {toml_str(c['profile'])}",
-    ]
-    for table, keys in (("repo", ("url", "branch", "username")), ("cache", ("url", "public_key")),
-                        ("fleet", ("url",)), ("kanidm", ("url",)), ("unlock", ("method",))):
-        lines.append(f"\n[{table}]")
-        for k in keys:
-            if c.get(table, {}).get(k):
-                lines.append(f"{k} = {toml_str(c[table][k])}")
+        "version = 2",
+    ] + [f"{k} = {toml_str(c[k])}" for k in ("organization", "hostname", "profile", "server", "server_host_key")]
+    lines += ["", "[unlock]", f"method = {toml_str(c['unlock']['method'])}"]
     return "\n".join(lines) + "\n"
 
 
@@ -937,7 +936,7 @@ def edit(scr, f, key):
         elif err:
             f.msg, f.err = err, True
     elif key in ("organization", "computer"):
-        f.msg = "From corporate.config on the USB stick (mos-fleet prepare)."
+        f.msg = "From corporate.config on the USB stick (mos-fleet host prepare)."
     elif key == "disk" and f.org and f.org[1].get("install", {}).get("disk_serial"):
         f.msg = f"The organization chose the disk with serial {f.org[1]['install']['disk_serial']}."
     elif key == "disk":
@@ -1212,17 +1211,6 @@ def secret_file(name, text):
     return path
 
 
-def ca_bundle(d):
-    """The usual CAs plus the organization's, for talking to its servers."""
-    os.makedirs(RUNDIR, mode=0o700, exist_ok=True)
-    path = os.path.join(RUNDIR, "ca-bundle.crt")
-    with open(path, "w") as out:
-        for f in ("/etc/ssl/certs/ca-certificates.crt", os.path.join(d, "ca.crt")):
-            if os.path.exists(f):
-                out.write(open(f).read().rstrip("\n") + "\n")
-    return path
-
-
 def connect_wifi(v):
     """Join the chosen Wi-Fi network now (the organization install downloads)."""
     cmd = ["nmcli", "device", "wifi", "connect", v["wifi"]]
@@ -1232,30 +1220,27 @@ def connect_wifi(v):
     print(f"    Wi-Fi {v['wifi']}: {'connected' if r.returncode == 0 else 'could not connect (' + r.stderr.strip()[:80] + ')'}")
 
 
-def preflight(c, d, bundle):
-    """Reach every server the install and the first boot need, before erasing."""
-    token = open(os.path.join(d, "repo.token")).read().strip()
-    checks = [
-        ("binary cache", c["cache"]["url"].rstrip("/") + "/nix-cache-info", []),
-        ("fleet repository", c["repo"]["url"].rstrip("/") + "/info/refs?service=git-upload-pack",
-         ["-H", f"Authorization: token {token}"]),
-        ("Fleet", c["fleet"]["url"].rstrip("/") + "/healthz", []),
-        ("Kanidm", c["kanidm"]["url"].rstrip("/") + "/status", []),
-    ]
+def preflight(c, d):
+    """Before erasing: Tang must answer (it seals the disk key now); the fleet
+    server need not (the computer introduces itself at its first start)."""
+    host, _, port = c["server"].partition(":")
+    r = subprocess.run(["ssh-keyscan", "-T", "10", "-t", "ed25519", "-p", port or "22", host],
+                       capture_output=True, text=True)
+    keys = [" ".join(l.split()[1:3]) for l in r.stdout.splitlines() if l and not l.startswith("#")]
+    if c["server_host_key"] in keys:
+        print(f"    ok   fleet server {c['server']} (its key matches)")
+    elif keys:
+        raise RuntimeError(f"{c['server']} answers with another SSH key than the organization's: "
+                           "stop and ask the admins. Nothing was erased.")
+    else:
+        print(f"    --   fleet server {c['server']} not reachable now: the computer introduces itself later")
     if c["unlock"]["method"] == "tang":
-        checks.append(("Tang", c["unlock"]["tang_url"].rstrip("/") + "/adv", []))
-    bad = []
-    for name, url, extra in checks:
-        r = subprocess.run(["curl", "-fsS", "-o", "/dev/null", "--max-time", "15", "--cacert", bundle] + extra + [url],
-                           capture_output=True, text=True)
-        print(f"    {'ok  ' if r.returncode == 0 else 'FAIL'} {name}  {url.split('?')[0]}")
+        url = c["unlock"]["tang_url"].rstrip("/") + "/adv"
+        r = subprocess.run(["curl", "-fsS", "-o", "/dev/null", "--max-time", "15", url], capture_output=True, text=True)
+        print(f"    {'ok  ' if r.returncode == 0 else 'FAIL'} Tang  {url}")
         if r.returncode != 0:
-            bad.append(f"{name}: {r.stderr.strip()[:120]}")
-    if bad:
-        raise RuntimeError(
-            "Cannot reach the organization's servers:\n  " + "\n  ".join(bad)
-            + "\nCheck the network (for Tang: a cable on the office network). Nothing was erased."
-        )
+            raise RuntimeError(f"Cannot reach Tang ({r.stderr.strip()[:120]}): a cable on the office network? "
+                               "Nothing was erased.")
 
 
 def enroll_unlock(c, d, v, crypt, tempf):
@@ -1273,8 +1258,12 @@ def enroll_unlock(c, d, v, crypt, tempf):
     rec = m.group(0)
     res = os.path.join(d, "result")
     os.makedirs(res, exist_ok=True)
-    run_secret(["age", "-R", os.path.join(d, "admins.txt"), "-o", os.path.join(res, "recovery.age")], input=rec + "\n")
-    print(f"    Recovery key: encrypted for the {len(admin_keys(d))} admin key(s) in admins.txt (on the stick).")
+    run_secret(["age", "-a", "-R", os.path.join(d, "admins.txt"), "-o", os.path.join(res, "recovery.age")],
+               input=rec + "\n")
+    os.makedirs(TARGET + FLEET_STATE, mode=0o700, exist_ok=True)
+    write(FLEET_STATE + "/recovery.age", open(os.path.join(res, "recovery.age")).read(), mode=0o600)
+    print(f"    Recovery key: encrypted for the {len(admin_keys(d))} admin key(s) in admins.txt "
+          "(on the stick, and for the fleet server).")
 
     if method == "tang":
         key = secrets.token_hex(32)
@@ -1310,13 +1299,13 @@ def enroll_unlock(c, d, v, crypt, tempf):
     print("    The temporary disk key is removed: only the above and the recovery key open the disk.")
 
 
-def save_result(c, d, v):
-    """What the admin adds to the fleet repository (mos-fleet add): this
-    computer's own /etc/nixos files and its encrypted recovery key, in
-    result/ on the stick. Its secrets leave the stick."""
+def save_result(c, d, v, host_fp):
+    """A copy for the admins, in result/ on the stick: this computer's own
+    /etc/nixos files and its encrypted recovery key (the computer also sends
+    them to the server). The one-time key leaves the stick."""
     res = os.path.join(d, "result")
     os.makedirs(res, exist_ok=True)
-    for f in ("hardware-configuration.nix", "local.nix", "fleet.toml", "ca.crt"):
+    for f in ("hardware-configuration.nix", "local.nix", "fleet.toml"):
         src = f"{TARGET}/etc/nixos/{f}"
         if os.path.exists(src):
             shutil.copyfile(src, os.path.join(res, f))
@@ -1324,14 +1313,16 @@ def save_result(c, d, v):
         fh.write(f"computer = {toml_str(c['hostname'])}\n"
                  f"date = {toml_str(datetime.datetime.now().isoformat(timespec='seconds'))}\n"
                  f"disk = {toml_str(v['disk_label'])}\n"
-                 f"unlock = {toml_str(c['unlock']['method'])}\n")
-    for f in ("repo.token", "fleet.secret"):
-        try:
-            os.remove(os.path.join(d, f))
-        except OSError:
-            pass
+                 f"unlock = {toml_str(c['unlock']['method'])}\n"
+                 f"host_key = {toml_str(host_fp)}\n")
+    try:
+        os.remove(os.path.join(d, "enroll.key"))
+    except OSError:
+        pass
     run(["sync"], check=False, quiet=True)
-    print(f"    On the stick: {res}  (then on your computer: mos-fleet add {c['hostname']})")
+    print(f"    On the stick: {res}")
+    print(f"    This computer's SSH host key: {host_fp}")
+    print(f"    (the admin compares it in: mos-fleet host add {c['hostname']})")
 
 
 def install_org(v):
@@ -1348,9 +1339,7 @@ def install_org(v):
     step(1, total, "Network and the organization's servers")
     if v.get("wifi"):
         connect_wifi(v)
-    bundle = ca_bundle(d)
-    os.environ["NIX_SSL_CERT_FILE"] = bundle
-    preflight(c, d, bundle)
+    preflight(c, d)
 
     step(2, total, f"Partitioning {disk}")
     efi, crypt = partition_disk(disk)
@@ -1370,11 +1359,15 @@ def install_org(v):
     step(6, total, f"{c['organization']}'s settings to /etc/nixos")
     write_nixos_config(v, s, org=c)
     write("/etc/nixos/fleet.toml", fleet_toml(c))
-    write("/etc/nixos/ca.crt", open(os.path.join(d, "ca.crt")).read())
-    os.makedirs(TARGET + FLEET_SECRETS, mode=0o700, exist_ok=True)
-    for f in ("repo.token", "fleet.secret"):
-        write(f"{FLEET_SECRETS}/{f}", open(os.path.join(d, f)).read().strip() + "\n", mode=0o600)
-    print("    fleet.toml, ca.crt; secrets in " + FLEET_SECRETS)
+    os.makedirs(TARGET + FLEET_STATE, mode=0o700, exist_ok=True)
+    write(FLEET_STATE + "/enroll.key", open(os.path.join(d, "enroll.key")).read(), mode=0o600)
+    # Its SSH host key, made now: the admin compares it when adding the computer.
+    os.makedirs(TARGET + "/etc/ssh", exist_ok=True)
+    keyf = TARGET + "/etc/ssh/ssh_host_ed25519_key"
+    if not os.path.exists(keyf):
+        run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", f"root@{c['hostname']}", "-f", keyf])
+    host_fp = run(["ssh-keygen", "-l", "-f", keyf + ".pub"], capture=True).split()[1]
+    print(f"    fleet.toml; the one-time key in {FLEET_STATE}; SSH host key {host_fp}")
 
     step(7, total, f"Installing {NAME} with {c['organization']}'s settings (downloads what it needs)")
     if TEST:
@@ -1387,10 +1380,7 @@ def install_org(v):
             size = 0
         run_with_progress(
             ["nixos-install", "--root", TARGET, "--flake", f"{TARGET}/etc/nixos#installed",
-             "--no-root-passwd", "--no-channel-copy",
-             "--option", "extra-substituters", c["cache"]["url"],
-             "--option", "extra-trusted-public-keys", c["cache"]["public_key"],
-             "--option", "ssl-cert-file", bundle],
+             "--no-root-passwd", "--no-channel-copy"],
             size,
             TARGET,
         )
@@ -1399,7 +1389,7 @@ def install_org(v):
     write_runtime_config(v, s)
 
     step(9, total, "Finishing")
-    save_result(c, d, v)
+    save_result(c, d, v, host_fp)
     os.makedirs(f"{TARGET}/etc/meccanicos", exist_ok=True)
     with open(LOG) as src, open(f"{TARGET}/etc/meccanicos/install.log", "w") as dst:
         dst.write(src.read())

@@ -3,6 +3,7 @@
 #   nix build .#checks.x86_64-linux.live     -L   # boot the ISO, desktop, vault, persistent home
 #   nix build .#checks.x86_64-linux.install  -L   # install to a virtual disk, boot it with LUKS
 #   nix build .#checks.x86_64-linux.ventoy   -L   # boot the ISO file from a Ventoy stick
+#   nix build .#checks.x86_64-linux.fleet    -L   # the fleet: server, admin, a managed computer
 #   nix flake check -L                            # both
 #
 # Screenshots end up in ./result/ (desktop.png, command-bar.png, cheat-sheet.png).
@@ -106,6 +107,9 @@ let
   '';
 in
 {
+  # The fleet: server, admin, a managed computer (tests/fleet.nix).
+  fleet = (import ./fleet.nix { inherit self nixpkgs system; }).test;
+
   live = pkgs.testers.runNixOSTest {
     name = "mos-live";
     nodes = { };

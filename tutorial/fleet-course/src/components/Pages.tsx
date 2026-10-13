@@ -3,11 +3,11 @@ import { C, MONO, SANS } from "../theme";
 
 // The last page: every mos-fleet command on one sheet.
 const SHEET: [string, [string, string][]][] = [
-  ["The server", [["server init --domain D --organization O --lan NET", "set it up (again: safe)"], ["server status", "every service ok?"], ["person add / password / reset", "people"], ["member add PROFILE NAME", "who logs in where"]]],
-  ["Your computer", [["connect you@hq", "the kit, ~/fleet"], ["admin-key", "back it up, on paper"], ["profile add NAME", "a kind of computer"], ["doctor", "check everything"]]],
-  ["A new computer", [["prepare NAME --profile P --unlock U", "files on the stick"], ["(install from the stick)", "organization install"], ["add NAME", "into the repository"], ["status [NAME]", "build, Fleet, version"]]],
-  ["Changes", [["edit ~/fleet, git commit, git push", "every change"], ["upgrade [--testing]", "new MeccanicOS"], ["git revert C && git push", "undo"], ["retire NAME", "out of the fleet"]]],
-  ["Trouble", [["recover NAME", "the recovery key"], ["journalctl -u comin", "on the computer"], ["journalctl -b -u NAME", "on the server"], ["boot menu: previous entry", "a bad update"]]],
+  ["The server", [["server init --lan NET --admin-key KEY", "set it up (again: safe)"], ["server status", "every part running?"], ["server admin-key KEY", "a key in, for a day"], ["server backup DIR", "repository, databases, keys"]]],
+  ["The repository", [["init / clone", "on your computer"], ["profile add NAME", "a kind of computer"], ["person add NAME \"N\" --group G", "people"], ["validate · diff · push", "check, see, send"]]],
+  ["A new computer", [["host prepare NAME --profile P --unlock U", "the stick"], ["(install from the stick)", "organization install"], ["host pending · host add NAME", "compare its key"], ["status [NAME]", "online? up to date?"]]],
+  ["Every day", [["edit, git commit, mos-fleet push", "every change"], ["password set NAME · mos-passwd", "passwords"], ["run · logs · shell", "on the computers"], ["upgrade [--testing]", "new MeccanicOS"]]],
+  ["Trouble", [["recover NAME", "the recovery key"], ["builds NAME --log", "why it didn't build"], ["git revert C; mos-fleet push", "undo"], ["boot menu: previous entry", "a bad update"]]],
 ];
 
 export const Sheet: React.FC = () => (

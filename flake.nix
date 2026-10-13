@@ -10,12 +10,6 @@
       url = "github:unofficialtools/rigx";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # comin: pull-based GitOps for managed (fleet) machines, modules/managed.nix.
-    # Only its source: its package and NixOS module are imported from it.
-    comin = {
-      url = "github:nlewo/comin";
-      flake = false;
-    };
   };
 
   outputs =
@@ -23,7 +17,6 @@
       self,
       nixpkgs,
       rigx,
-      comin,
     }:
     let
       system = "x86_64-linux";
@@ -125,7 +118,6 @@
           specialArgs = {
             inherit distro;
             meccanicosRoot = root;
-            cominSrc = comin;
           };
           modules =
             common
@@ -136,18 +128,106 @@
               # and the fleet server (fleet-server.toml). Off without those files.
               ./modules/managed.nix
               ./modules/fleet-server.nix
+              # New fleets (mos-fleet init) follow this distribution's releases.
+              { meccanicos.fleet.config.admin.meccanicos = lib.mkDefault "github:${github}/latest"; }
               # Keep these sources on the disk: rebuilds then work offline.
               {
                 system.extraDependencies = [
                   self.outPath
                   rigx.outPath
-                  comin.outPath
                 ];
               }
             ]
             ++ mine "hardware-configuration.nix"
             ++ mine "local.nix"
             ++ modules;
+        };
+
+      # ---- A fleet's computers ------------------------------------------
+      # The fleet repository's flake.nix (mos-fleet init) is
+      #   outputs = { meccanicos, ... }: meccanicos.lib.mkFleet { repo = ./.; };
+      # One system per hosts/NAME: an installed MeccanicOS (mkInstalled, its
+      # root hosts/NAME: hardware-configuration.nix, local.nix, meccanicos.toml),
+      # managed (modules/managed.nix, final), with common.nix, its profile, and
+      # the people whose groups may log in on that profile (groups.toml).
+      # scripts/mos_fleet/repo.py checks the same files by the same rules.
+      # mkSystem { name, root, modules }: builds one in place of mkInstalled
+      # (the VM test's small systems, tests/fleet.nix).
+      mkFleet =
+        {
+          repo,
+          mkSystem ? null,
+          modules ? [ ],
+        }:
+        let
+          toml = f: builtins.fromTOML (builtins.readFile f);
+          fleet = toml (repo + "/fleet.toml");
+          groups = toml (repo + "/groups.toml");
+          dir = d: if builtins.pathExists (repo + "/${d}") then builtins.readDir (repo + "/${d}") else { };
+          people = lib.mapAttrs' (f: _: lib.nameValuePair (lib.removeSuffix ".toml" f) (toml (repo + "/people/${f}"))) (
+            lib.filterAttrs (f: t: t == "regular" && lib.hasSuffix ".toml" f) (dir "people")
+          );
+          hosts = lib.attrNames (lib.filterAttrs (n: t: t == "directory" && !(lib.hasPrefix "." n)) (dir "hosts"));
+          known = g: builtins.filter (x: groups ? ${x}) g;
+          host =
+            name:
+            let
+              root = repo + "/hosts/${name}";
+              h = toml (root + "/host.toml");
+              allows =
+                g:
+                let
+                  ps = groups.${g}.profiles or [ ];
+                in
+                groups ? ${g} && (builtins.elem "*" ps || builtins.elem h.profile ps);
+              allowed = lib.filterAttrs (_: p: !(p.disabled or false) && builtins.any allows (p.groups or [ ])) people;
+              fleetModule = {
+                networking.hostName = name;
+                meccanicos.managed = {
+                  enable = true;
+                  final = true;
+                  host = name;
+                  profile = h.profile;
+                  organization = fleet.organization;
+                  server = fleet.server;
+                  serverHostKey = fleet.server_host_key;
+                  unlock.method = h.unlock;
+                  interval = fleet.checkin.interval or 300;
+                  logs.minPriority = fleet.logs.min_priority or 4;
+                  logs.units = fleet.logs.units or [ "mos-fleet-agent" ];
+                  people = lib.mapAttrs (_: p: {
+                    fullName = p.name;
+                    inherit (p) uid;
+                    groups = known (p.groups or [ ]);
+                    sshKeys = p.ssh_keys or [ ];
+                    sudo = builtins.any (g: allows g && (groups.${g}.sudo or false)) (p.groups or [ ]);
+                  }) allowed;
+                  groups = lib.genAttrs (lib.unique (lib.concatMap (p: known (p.groups or [ ])) (lib.attrValues allowed))) (
+                    g: { inherit (groups.${g}) gid; }
+                  );
+                };
+              };
+              mine = f: lib.optional (builtins.pathExists (root + "/${f}")) (root + "/${f}");
+              extra = [
+                fleetModule
+                (repo + "/profiles/${h.profile}.nix")
+              ]
+              ++ lib.optional (builtins.pathExists (repo + "/common.nix")) (repo + "/common.nix")
+              ++ modules;
+            in
+            if mkSystem == null then
+              mkInstalled {
+                inherit root;
+                modules = extra;
+              }
+            else
+              mkSystem {
+                inherit name root;
+                modules = mine "hardware-configuration.nix" ++ mine "local.nix" ++ extra;
+              };
+        in
+        {
+          nixosConfigurations = lib.genAttrs hosts host;
         };
 
       # What the installer puts in /etc/nixos: the flake.nix, and a
@@ -176,15 +256,10 @@
                   url = "github:${repoLock.nodes.rigx.original.owner}/${repoLock.nodes.rigx.original.repo}";
                   inputs.nixpkgs.follows = "nixpkgs";
                 };
-                comin = {
-                  url = "github:${repoLock.nodes.comin.original.owner}/${repoLock.nodes.comin.original.repo}";
-                  flake = false;
-                };
                 meccanicos = {
                   url = "github:${github}/latest";
                   inputs.nixpkgs.follows = "nixpkgs";
                   inputs.rigx.follows = "rigx";
-                  inputs.comin.follows = "comin";
                 };
               };
               outputs =
@@ -199,17 +274,15 @@
             root = "root";
             nodes = {
               root.inputs = {
-                comin = "comin";
                 meccanicos = "meccanicos";
                 nixpkgs = "nixpkgs";
                 rigx = "rigx";
               };
-              inherit (repoLock.nodes) nixpkgs comin;
+              inherit (repoLock.nodes) nixpkgs;
               meccanicos = {
                 inputs = {
                   nixpkgs = [ "nixpkgs" ];
                   rigx = [ "rigx" ];
-                  comin = [ "comin" ];
                 };
                 locked = {
                   type = "github";
@@ -266,7 +339,7 @@
       };
 
       # For an installed computer's /etc/nixos/flake.nix (see mkInstalled).
-      lib = { inherit mkInstalled; };
+      lib = { inherit mkInstalled mkFleet; };
 
       packages.${system} = {
         iso = self.nixosConfigurations.live.config.system.build.isoImage; # nix build .#iso

@@ -1,0 +1,11 @@
+organization = "Example Corp"
+server = "hq"
+server_host_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWKMG3gSSWcfAUMHIMT3JTWWEHaTSVqaViszKVhpNSr"
+
+[checkin]
+interval = 300
+
+[logs]
+min_priority = 4
+units = ["mos-fleet-agent"]
+keep_days = 30

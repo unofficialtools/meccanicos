@@ -723,24 +723,26 @@ Text grows with the screen, at every login on a screen it was not done for: widt
 
 ### Fleets of computers (experimental)
 
-> **⚠ Experimental:** new, and not yet tested on real hardware or in a real organization.
+> **⚠ Experimental:** new; tested end to end in virtual machines, not yet in a real organization.
 
 An organization can run MeccanicOS on all its computers and manage them from one
-MeccanicOS server, with standard tools:
+MeccanicOS server, with nothing but git, SSH, Nix and SQLite:
 
-- **Kanidm** for people: who may log in where, also offline;
-- **comin** and a signed binary cache for configuration: one Git repository decides what
-  every computer runs;
+- **one Git repository** says which computers there are, what each kind runs, and who may
+  log in where (with sudo or not); the server builds every computer's system from it, and
+  each computer switches to its own within a minute of a push;
+- **one SSH account** on the server: computers keep a connection open with their own SSH
+  key (facts, logs, jobs, password hashes), admins push the repository and run
+  `mos-fleet status`, `logs`, `run`, `shell`… with theirs;
 - **Tang**, the TPM or a FIDO2 key for disk unlocking, with a recovery key only the admins
-  can read;
-- **Fleet** for inventory.
+  can read.
 
-`mos-fleet` sets up the server in one command and prepares new computers. The installer
-offers an **organization install** when it finds the `corporate.config` that
-`mos-fleet prepare` put on the stick.
+`mos-fleet` sets up the server in one command, edits and checks the repository, and
+prepares new computers. The installer offers an **organization install** when it finds
+the `corporate.config` that `mos-fleet host prepare` put on the stick.
 
 - [Admin guide: set up the server, add computers](docs/fleet/ADMIN-GUIDE.md)
-- [Design: how it works, and why these tools](docs/fleet/DESIGN.md)
+- [Design: how it works, and why](docs/fleet/DESIGN.md)
 
 ## 8. Customise and build
 

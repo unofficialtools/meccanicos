@@ -1,0 +1,4 @@
+profile = "office"
+branch = "main"
+unlock = "tpm-pin"
+host_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIODbNKtmpJNj34yat2JXM/iaFqTvVD+PUejolNq8rD5c"

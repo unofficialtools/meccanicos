@@ -1,0 +1,16 @@
+# The fleet VM test's repository (tests/fleet.nix): MeccanicOS's mkFleet, with
+# the test's small systems in place of full MeccanicOS installations.
+{
+  inputs.meccanicos.url = "@MECCANICOS@";
+  outputs =
+    { meccanicos, ... }:
+    meccanicos.lib.mkFleet {
+      repo = ./.;
+      mkSystem =
+        (import "${meccanicos}/tests/fleet.nix" {
+          self = meccanicos;
+          nixpkgs = meccanicos.inputs.nixpkgs;
+          system = "x86_64-linux";
+        }).mkSystem;
+    };
+}

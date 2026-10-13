@@ -1,31 +1,34 @@
 import React from "react";
-import { Img, staticFile } from "remotion";
-import { siForgejo, siGit, siMysql, siNginx, siNixos, siRedis } from "simple-icons";
+import { siGit, siNixos, siSqlite } from "simple-icons";
 import { C } from "../theme";
 
-// The server's tools: their own logos (simple-icons, or the project's
-// artwork in public/logos), and drawn ones for those without a logo.
+// The server's tools: their own logos (simple-icons), and drawn ones for
+// those without a logo (SSH, Tang).
 type SI = { path: string; hex: string };
-const simple = (i: SI, size: number) => (
-  <svg width={size} height={size} viewBox="0 0 24 24"><path d={i.path} fill={`#${i.hex}`} /></svg>
+const simple = (i: SI, size: number, color?: string) => (
+  <svg width={size} height={size} viewBox="0 0 24 24"><path d={i.path} fill={color ?? `#${i.hex}`} /></svg>
 );
 
-export type LogoName = "kanidm" | "forgejo" | "harmonia" | "fleet" | "tang" | "mysql" | "redis" | "nginx" | "git" | "comin" | "nixos";
+export type LogoName = "ssh" | "git" | "nixos" | "sqlite" | "tang";
 
 export const Logo: React.FC<{ name: LogoName; size?: number }> = ({ name, size = 56 }) => {
   switch (name) {
-    case "kanidm": return <Img src={staticFile("logos/kanidm.png")} style={{ width: size * 1.4, height: size, objectFit: "contain" }} />;
-    case "fleet": return <Img src={staticFile("logos/fleet.png")} style={{ width: size, height: size, objectFit: "contain" }} />;
-    case "forgejo": return simple(siForgejo, size);
-    case "mysql": return simple(siMysql, size);
-    case "redis": return simple(siRedis, size);
-    case "nginx": return simple(siNginx, size);
     case "git": return simple(siGit, size);
-    case "nixos": case "harmonia": return simple(siNixos, size); // Harmonia serves Nix's store
+    case "nixos": return simple(siNixos, size);
+    case "sqlite": return simple(siSqlite, size, "#4fa3d1"); // its own blue, lighter: on a dark tile
+    case "ssh": return <ShellIcon size={size} />;
     case "tang": return <KeyIcon size={size} color={C.tealHi} />;
-    case "comin": return <SyncIcon size={size} color={C.green} />;
   }
 };
+
+// A terminal: SSH, the one way in.
+export const ShellIcon: React.FC<{ size?: number; color?: string }> = ({ size = 48, color = C.amber }) => (
+  <svg width={size} height={size} viewBox="0 0 48 48">
+    <rect x={3} y={7} width={42} height={34} rx={5} fill="none" stroke={color} strokeWidth={3.5} />
+    <path d="M12 18l7 6-7 6" stroke={color} strokeWidth={3.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M23 31h12" stroke={color} strokeWidth={3.5} strokeLinecap="round" />
+  </svg>
+);
 
 export const KeyIcon: React.FC<{ size?: number; color?: string }> = ({ size = 48, color = C.amber }) => (
   <svg width={size} height={size} viewBox="0 0 48 48">
