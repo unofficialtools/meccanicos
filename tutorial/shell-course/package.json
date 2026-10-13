@@ -1,0 +1,22 @@
+{
+  "name": "meccanicos-shell-course",
+  "private": true,
+  "description": "The Linux shell for college freshmen, explained with mechanics (Remotion video)",
+  "scripts": {
+    "voice": "node scripts/voice.mjs",
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts ShellCourse out/shell-course.mp4",
+    "still": "remotion still src/index.ts ShellCourse out/still.png"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.535",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.535"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3",
+    "esbuild": "0.28.1"
+  }
+}

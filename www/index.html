@@ -69,6 +69,9 @@
 
   figure.desktop { margin: 56px auto 0; max-width: 1120px; }
   figure.desktop figcaption { color: var(--dim); font-size: 14px; margin-top: 12px; }
+  figure.desktop figcaption.tutorials { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 15px; margin-top: 18px; }
+  .pill { display: inline-block; padding: 6px 18px; border-radius: 8px; background: var(--orange); color: #1c1c1c; font-weight: 700; transition: transform .12s; }
+  .pill:hover, .pill:focus-visible { text-decoration: none; transform: translateY(-2px); }
 
   section { padding: 64px 0 24px; }
   h2 { font-size: 32px; margin: 0 0 8px; letter-spacing: -0.01em; }
@@ -147,7 +150,9 @@
     <figure class="desktop tutorial">
       <video src="tutorial.mp4" poster="screenshots/desktop.png" controls playsinline preload="metadata"
         aria-label="The MeccanicOS tutorial, with subtitles"></video>
-      <figcaption>The tutorial (7 minutes, with subtitles): the ideas behind MeccanicOS, then a tour of the desktop, the terminal and its tools, the persistent home and the installer.</figcaption>
+      <figcaption class="tutorials">Tutorials:
+        <a class="pill" href="tutorial.mp4">desktop</a>
+        <a class="pill" href="shell-course.mp4">shell</a></figcaption>
     </figure>
   </div>
 </header>
