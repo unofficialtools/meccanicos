@@ -1,0 +1,438 @@
+{
+ "intro-1": {
+  "hash": "cbac9bbcc996",
+  "parts": [
+   10.68,
+   5.31
+  ]
+ },
+ "intro-why": {
+  "hash": "99758d367ada",
+  "parts": [
+   5.34,
+   14.76,
+   6.34
+  ]
+ },
+ "intro-nixos": {
+  "hash": "79193ff88052",
+  "parts": [
+   5.65,
+   10.26,
+   9.45,
+   6.88
+  ]
+ },
+ "c1-title": {
+  "hash": "3c0e68d89cab",
+  "parts": [
+   5.47
+  ]
+ },
+ "c1-company": {
+  "hash": "e0a0fcb60169",
+  "parts": [
+   5.63,
+   1.95,
+   6.52
+  ]
+ },
+ "c1-services": {
+  "hash": "d494b4aba878",
+  "parts": [
+   6.26,
+   9.07,
+   6.01,
+   5.07,
+   6.25,
+   7.3
+  ]
+ },
+ "c1-computers": {
+  "hash": "b0e4170dffc9",
+  "parts": [
+   3.62,
+   5.95
+  ]
+ },
+ "c1-managed": {
+  "hash": "39216b3cce31",
+  "parts": [
+   5.93,
+   3.77,
+   5.97,
+   2.51
+  ]
+ },
+ "c1-unlock": {
+  "hash": "fc8d7889655f",
+  "parts": [
+   12.73,
+   2.82,
+   7.43
+  ]
+ },
+ "c1-who": {
+  "hash": "b11bec42a5b7",
+  "parts": [
+   4.31,
+   3.37,
+   5.39
+  ]
+ },
+ "c2-title": {
+  "hash": "0da145c9300c",
+  "parts": [
+   3.55
+  ]
+ },
+ "c2-needs": {
+  "hash": "1f08bed0ea61",
+  "parts": [
+   9.44,
+   2.48,
+   4.21,
+   4.75
+  ]
+ },
+ "c2-dns": {
+  "hash": "2b588f2a16a8",
+  "parts": [
+   3.3,
+   6.53
+  ]
+ },
+ "c3-title": {
+  "hash": "dafcbfe9eae1",
+  "parts": [
+   4.39
+  ]
+ },
+ "c3-install": {
+  "hash": "3d6d734da831",
+  "parts": [
+   5.4,
+   8.31
+  ]
+ },
+ "c3-check": {
+  "hash": "aedf89c309d2",
+  "parts": [
+   5.35,
+   2.3
+  ]
+ },
+ "c3-init": {
+  "hash": "4270028f4a68",
+  "parts": [
+   8.89,
+   8.11,
+   4.64,
+   9.49
+  ]
+ },
+ "c3-net": {
+  "hash": "ae0626d17a06",
+  "parts": [
+   5.27,
+   2.38
+  ]
+ },
+ "c3-me": {
+  "hash": "c660a69f7f02",
+  "parts": [
+   9.49,
+   4.05,
+   3.48
+  ]
+ },
+ "c4-title": {
+  "hash": "458459b26b2a",
+  "parts": [
+   4.44
+  ]
+ },
+ "c4-connect": {
+  "hash": "82567f775534",
+  "parts": [
+   3.77,
+   3.84,
+   8.37
+  ]
+ },
+ "c4-connect-net": {
+  "hash": "ba791cc402b9",
+  "parts": [
+   7.89,
+   5.4
+  ]
+ },
+ "c4-adminkey": {
+  "hash": "565a380eb9e8",
+  "parts": [
+   12.01,
+   12.03
+  ]
+ },
+ "c4-profile": {
+  "hash": "ad8bd3c10d7a",
+  "parts": [
+   9.43,
+   3.19
+  ]
+ },
+ "c4-push": {
+  "hash": "1a3e84f3fb8d",
+  "parts": [
+   1.49,
+   5.32
+  ]
+ },
+ "c5-title": {
+  "hash": "05499f7829c1",
+  "parts": [
+   5.12
+  ]
+ },
+ "c5-decide": {
+  "hash": "eaa18aecbecf",
+  "parts": [
+   3.27,
+   3.4,
+   1.68,
+   1.99
+  ]
+ },
+ "c5-luks": {
+  "hash": "a1a8cb668e0e",
+  "parts": [
+   8.73,
+   4.54,
+   2.54
+  ]
+ },
+ "c5-ways": {
+  "hash": "aa95d6084f31",
+  "parts": [
+   8.96,
+   7.21,
+   4.41,
+   5.79
+  ]
+ },
+ "c5-away": {
+  "hash": "2d24823a1743",
+  "parts": [
+   5.31,
+   5.27,
+   6.29
+  ]
+ },
+ "c5-serial": {
+  "hash": "fed5d80662db",
+  "parts": [
+   6.16,
+   5.93
+  ]
+ },
+ "c5-prepare": {
+  "hash": "c22b2b612b87",
+  "parts": [
+   8.34,
+   6.08,
+   6.32
+  ]
+ },
+ "c5-install": {
+  "hash": "9f3ba441095f",
+  "parts": [
+   11.82,
+   8.36,
+   8.51,
+   4.69,
+   4.47,
+   4.23
+  ]
+ },
+ "c5-install-net": {
+  "hash": "f703ca7e5c45",
+  "parts": [
+   3.13,
+   1.93,
+   2.88
+  ]
+ },
+ "c5-add": {
+  "hash": "645f7591661d",
+  "parts": [
+   7.14,
+   9.96,
+   7.17
+  ]
+ },
+ "c5-add-net": {
+  "hash": "8f2dc68ee92f",
+  "parts": [
+   4.29,
+   4.32,
+   3.94,
+   1.63
+  ]
+ },
+ "c5-more": {
+  "hash": "e256dc66e678",
+  "parts": [
+   8.74,
+   4.92,
+   2.3
+  ]
+ },
+ "c5-pin": {
+  "hash": "8a211d5253df",
+  "parts": [
+   4.59,
+   1.82
+  ]
+ },
+ "c5-three": {
+  "hash": "c357fb1440e2",
+  "parts": [
+   2.3,
+   5.68
+  ]
+ },
+ "c6-title": {
+  "hash": "1d37e142005f",
+  "parts": [
+   4.16
+  ]
+ },
+ "c6-software": {
+  "hash": "5f942110c771",
+  "parts": [
+   4.35,
+   4.32
+  ]
+ },
+ "c6-flow": {
+  "hash": "1d3fc8cac0a4",
+  "parts": [
+   1.49,
+   3.47,
+   2.47,
+   3.69,
+   3.25
+  ]
+ },
+ "c6-scope": {
+  "hash": "ddd663268020",
+  "parts": [
+   3.04,
+   2.38,
+   2.68,
+   3.22
+  ]
+ },
+ "c6-people": {
+  "hash": "f7690e17b7c2",
+  "parts": [
+   9.78,
+   5.84,
+   5.69
+  ]
+ },
+ "c6-login": {
+  "hash": "0c3fc7a34992",
+  "parts": [
+   3.97,
+   2.98
+  ]
+ },
+ "c6-upgrade": {
+  "hash": "f74fad8d712b",
+  "parts": [
+   3.45,
+   8.49,
+   2.37
+  ]
+ },
+ "c6-upgrade-net": {
+  "hash": "5aff71b0d163",
+  "parts": [
+   4.32,
+   2.32,
+   4.77
+  ]
+ },
+ "c6-retire": {
+  "hash": "a651ef8f0902",
+  "parts": [
+   10.68
+  ]
+ },
+ "c7-title": {
+  "hash": "7702d3ffe3fd",
+  "parts": [
+   3.16
+  ]
+ },
+ "c7-recover": {
+  "hash": "b90c0d4980a8",
+  "parts": [
+   7.29,
+   5.75,
+   3.08
+  ]
+ },
+ "c7-config": {
+  "hash": "da23952e8047",
+  "parts": [
+   7.05,
+   4.7
+  ]
+ },
+ "c7-revert": {
+  "hash": "1b5072cc1c0c",
+  "parts": [
+   3.6,
+   5.57
+  ]
+ },
+ "c7-server": {
+  "hash": "09483d120e6f",
+  "parts": [
+   4.54,
+   2.04,
+   2.28
+  ]
+ },
+ "c7-leak": {
+  "hash": "bde35e9d5327",
+  "parts": [
+   12.25
+  ]
+ },
+ "c8-title": {
+  "hash": "cb4d9254b6bc",
+  "parts": [
+   4.13
+  ]
+ },
+ "c8-what": {
+  "hash": "d8345e08634a",
+  "parts": [
+   3.39,
+   2.35,
+   4.91,
+   5.14,
+   5.53
+  ]
+ },
+ "end-sheet": {
+  "hash": "c519ec37d78d",
+  "parts": [
+   7.06,
+   5.04
+  ]
+ }
+}
