@@ -8,7 +8,8 @@
 
 This guide is for whoever runs an organization's MeccanicOS computers. It
 assumes you're at ease in a bash shell. One command, `mos-fleet`, does the
-work; the guide says when to run it and what to check.
+work; the guide says when to run it and what to check. Run alone,
+`mos-fleet` opens a full-screen view of the whole fleet (**4.1**).
 
 ## The big picture
 
@@ -228,9 +229,42 @@ it waits (or an admin sets a new one).
 All in `~/fleet`. Changes reach the computers within a minute or so of the
 push (a new kernel: at the next restart).
 
-Most of these are also on one screen: `mos-fleet` alone (or `mos-fleet tui`)
-shows the computers, people, groups, profiles, unpushed changes and the
-audit, with buttons that run the same commands ([TUI.md](TUI.md)).
+## 4.1 On one screen: `mos-fleet tui`
+
+`mos-fleet` alone in a terminal (or `mos-fleet tui`) shows the whole fleet,
+in the look of the other MeccanicOS tools: tabs **1 Computers, 2 People,
+3 Groups, 4 Profiles, 5 Changes, 6 Audit**, and buttons at the bottom that
+run the same `mos-fleet` commands as the table below. ←→ choose a button,
+Enter presses it, `/` searches, Esc goes back. `mos-fleet tui --demo` shows
+made-up data (these screenshots), to look around without touching anything.
+More in [TUI.md](TUI.md).
+
+![Computers: online, profile, revision, state](tui/computers.png)
+
+**Open** a computer for its details, logs, builds, deployments and jobs, and
+to run a command, open a shell, restart it, or retire it:
+
+![A computer](tui/computer.png)
+
+**People**: add, edit, set a password (only the hash leaves your computer),
+disable:
+
+![People](tui/people.png)
+
+**Waiting** (on Computers): computers just installed that introduced
+themselves; compare the fingerprint with the one the computer shows, then
+**Add to fleet**:
+
+![Waiting](tui/waiting.png)
+
+The TUI doesn't commit: every change only edits (and checks) the files.
+**5 Changes** lists them and what they change on which computer; **Commit**
+commits them all with one message, **Discard** puts them back, **Push** sends
+the commits to the server:
+
+![Changes: not committed, not pushed](tui/changes.png)
+
+## 4.2 From the command line
 
 Every edit command commits at once; with `--no-commit` it only changes (and
 checks) the files, and `mos-fleet commit -m MESSAGE` commits everything
