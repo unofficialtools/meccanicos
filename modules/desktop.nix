@@ -62,6 +62,19 @@ in
     Exec=${mos-autorotate}/bin/mos-autorotate
   '';
 
+  # Clipman's own autostart entry ships with Hidden=true, so nothing kept the
+  # clipboard and copied text vanished when the source window closed. This
+  # file has the same name and /etc/xdg comes first, so it wins for every user.
+  environment.etc."xdg/autostart/xfce4-clipman-plugin-autostart.desktop".text = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Clipman
+    Comment=Clipboard manager
+    Icon=xfce4-clipman-plugin
+    Exec=xfce4-clipman
+    OnlyShowIn=XFCE;
+  '';
+
   # Desktop plumbing: removable media, trash, thumbnails, keyring, printing-free
   services.gvfs.enable = true; # Thunar: mount USB disks, unlock LUKS by click
   services.udisks2.enable = true;
