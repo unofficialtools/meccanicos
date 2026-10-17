@@ -78,8 +78,10 @@ def os_release(root=""):
 
 # ---- the system --------------------------------------------------------------------
 def build(root=ROOT):
-    """When this MeccanicOS was built ("2026-10-06 17:23 UTC"), or unknown."""
-    return read(f"{root}/etc/{ID}/version") or UNKNOWN
+    """Which release and when it was built ("v2026-10-16 (5b31f5e), built
+    2026-10-16 17:23 UTC"; before releases were named: "built 2026-10-06 17:23 UTC")."""
+    version = read(f"{root}/etc/{ID}/version")
+    return ("built " + version if version[:1].isdigit() else version) or UNKNOWN
 
 
 def nixos(root=ROOT):
@@ -140,6 +142,16 @@ def meccanicos_commit():
             return json.load(f)["nodes"]["meccanicos"]["locked"]["rev"][:7]
     except (OSError, ValueError, KeyError, TypeError):
         return read(os.path.join(NIXOS_DIR, ".mos-commit"))
+
+
+def following():
+    """What /etc/nixos/flake.nix follows (mos-upgrade --to): the latest release, main,
+    a release or a commit."""
+    github = re.escape(REPO.removeprefix("https://github.com/"))
+    m = re.search(rf'"github:{github}(?:/([^"?]+))?"', read(os.path.join(NIXOS_DIR, "flake.nix")), re.I)
+    ref = (m and m.group(1)) or "main"
+    return {"latest": "the latest release", "main": "main (development)"}.get(
+        ref, f"release {ref}" if ref.startswith("v") else f"commit {ref[:7]}")
 
 
 def nixpkgs_date():
@@ -208,7 +220,7 @@ def report():
     live = not installed()
     if live:
         sections.append((f"System ({NAME} + NixOS) — live USB", [
-            f"{NAME:<11} built {build()}",
+            f"{NAME:<11} {build()}",
             f"{'NixOS':<11} {nixos()}",
             "",
             "The live system is updated by writing a newer ISO to the stick:",
@@ -224,7 +236,7 @@ def report():
         on, last = auto_updates()
         commit = meccanicos_commit()
         lines = [
-            f"{NAME:<11} built {build()}" + (f", commit {commit}" if commit else ""),
+            f"{NAME:<11} " + (f"commit {commit}, " if commit else "") + f"following {following()} (mos-upgrade --to)",
             f"{'NixOS':<11} {nixos()}, packages from {nixpkgs_date()}",
             f"{'Automatic':<11} " + (f"on: weekly, applied at the next start; last run {last}" if on
                                      else "off (turn on: mos-config set updates.auto on)"),
@@ -235,6 +247,7 @@ def report():
         lines.append("")
         lines += [
             Action("Check for updates", ["mos-upgrade", "--check"], f"yours and the newest {NAME} (changes nothing)"),
+            Action("List the releases", ["mos-upgrade", "--list"], f"{NAME}'s releases, to pick one (changes nothing)"),
             Action("Update now", ["mos-upgrade"], f"the newest {NAME} and NixOS packages, switched to now",
                    ask=f"Update to the newest {NAME} and NixOS packages now?\nIt downloads them, rebuilds the "
                        "system and switches to it.\nThe system before stays in the boot menu.", yes="Update"),

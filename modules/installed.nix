@@ -36,8 +36,8 @@ let
   # Written by `mos-unlock remote` into /etc/nixos (flake.nix: mkInstalled's root).
   remoteUnlockKeys = meccanicosRoot + "/remote-unlock-keys";
 
-  # mos-upgrade (also mos-update): the newest MeccanicOS release and NixOS
-  # packages, as one rebuild. Also run weekly by mos-auto-upgrade (--auto).
+  # mos-upgrade (also mos-update): the newest MeccanicOS release (or main, an
+  # earlier release, a commit: --to) and NixOS packages, as one rebuild. Also run weekly by mos-auto-upgrade (--auto).
   mos-upgrade = pkgs.writeShellApplication {
     name = "mos-upgrade";
     runtimeInputs = [
@@ -47,6 +47,8 @@ let
       pkgs.coreutils
       pkgs.gnused
       pkgs.gnugrep
+      pkgs.gawk
+      pkgs.git # git ls-remote: the release names
     ];
     text = ''
       export MECCANICOS_NAME=${lib.escapeShellArg distro.name}

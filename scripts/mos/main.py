@@ -115,7 +115,7 @@ def show_help(topic):
         # The browser, not xdg-open: a file:// address with ?version and #topic.
         url = f"file://{HELP}/manual.html"
         if os.path.exists("/etc/meccanicos/version"):
-            url += "?v=" + open("/etc/meccanicos/version").read().split()[0]
+            url += "?v=" + re.sub(r"[^\w.-]+", "-", open("/etc/meccanicos/version").read().strip())
         if heading:
             url += "#" + slug(heading)
         browser = shutil.which("brave") or shutil.which("xdg-open")

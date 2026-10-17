@@ -7,6 +7,8 @@
   distro,
   buildDate,
   buildTime,
+  release,
+  commit,
   ...
 }:
 {
@@ -17,27 +19,30 @@
 
   # ---- Identity -----------------------------------------------------------
   networking.hostName = distro.hostName;
-  # meccanicos-26.05-<build date>-x86_64-linux; `./start iso` and the
-  # release workflow append the ISO's own hash when copying it out.
+  # meccanicos-v2026-10-16-26.05-x86_64-linux-git5b31f5e: the release and its
+  # commit; `./start iso` and the release workflow append the ISO's own hash
+  # (-sha1a2b3c4d) when copying it out, which cannot be inside the ISO itself.
   image.baseName = lib.mkForce (lib.concatStringsSep "-" (
     [
       distro.id
+      release
       config.system.nixos.release
-      buildDate
       pkgs.stdenv.hostPlatform.system
+      "git${commit}"
     ]
   ));
-  # /etc/os-release: IMAGE_ID=meccanicos, IMAGE_VERSION=<build date>
+  # /etc/os-release: IMAGE_ID=meccanicos, IMAGE_VERSION=<release>
   system.image.id = distro.id;
-  system.image.version = buildDate;
-  # When this ISO was built, e.g. "2026-10-06 17:23 UTC" (System Info).
-  # The installer copies it to the installed system.
+  system.image.version = release;
+  # Which release, its commit and when this ISO was built, e.g.
+  # "v2026-10-16 (5b31f5e), built 2026-10-16 17:23 UTC" (System Info,
+  # mos-updates). The installer copies it to the installed system.
   environment.etc."${distro.id}/version".text =
     let
       d = buildDate;
       t = buildTime;
     in
-    "${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d} ${builtins.substring 0 2 t}:${builtins.substring 2 2 t} UTC\n";
+    "${release} (${commit}), built ${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d} ${builtins.substring 0 2 t}:${builtins.substring 2 2 t} UTC\n";
   isoImage.volumeID = lib.mkForce (lib.toUpper distro.id + "_LIVE"); # max 32 chars
 
   # ---- Boot ---------------------------------------------------------------

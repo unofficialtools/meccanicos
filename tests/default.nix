@@ -204,6 +204,9 @@ in
           machine.succeed(as_live("mos-config network --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert \"vpns\" in d and \"internet\" in d'"))
           machine.succeed(as_live("mos-config network nope; test $? = 2"))
           machine.succeed(as_live("mos-updates status | grep >/dev/null 'writing a newer ISO'"))
+          # Which release and commit the ISO is (flake.nix: release, commit).
+          machine.succeed("grep -E >/dev/null '^[a-z0-9._-]+ \\([0-9a-z-]+\\), built [0-9-]+ [0-9:]+ UTC$' /etc/meccanicos/version")
+          machine.succeed("grep -E >/dev/null '^IMAGE_VERSION=\"?[a-z0-9._-]+' /etc/os-release")
           machine.succeed("test -e /run/current-system/sw/share/applications/mos-updates.desktop")
           machine.succeed(as_live("mos-about </dev/null | grep >/dev/null 'Graphics.*mos-gpu-driver'"))
           # Help, offline: the page and the manual; `mos help TOPIC` without a desktop shows the manual.
@@ -337,6 +340,8 @@ in
           machine.succeed("systemctl list-timers | grep >/dev/null mos-auto-upgrade")
           # Updates: what can change and how to go back; what survives a restart.
           machine.succeed("mos-updates status | grep >/dev/null 'mos-upgrade --check'")
+          machine.succeed("mos-updates status | grep >/dev/null 'following the latest release'")
+          machine.succeed("mos-upgrade --help | grep >/dev/null -- '--to RELEASE'")
           machine.succeed("mos-updates status | grep >/dev/null 'running'")
           machine.succeed("usb-vault summary | grep >/dev/null 'installed system'")
           machine.screenshot("installed-login")

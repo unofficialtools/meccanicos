@@ -356,7 +356,7 @@ let
       where=installed
       # shellcheck disable=SC1091
       [ -n "$(. /etc/os-release; echo "''${IMAGE_VERSION:-}")" ] && where="live USB"
-      row ${distro.name} "built $(cat /etc/${distro.id}/version 2>/dev/null || echo "(unknown)"), $where"
+      row ${distro.name} "$(cat /etc/${distro.id}/version 2>/dev/null || echo "(unknown)"), $where"
       row Session "$(mos-status | sed -n 's/^status *//p')"
       row NixOS "$(nixos-version 2>/dev/null || echo "(unknown)")"
       row Kernel "$(uname -r)"

@@ -102,14 +102,16 @@ sha256sum -c SHA256SUMS --ignore-missing    # macOS: shasum -a 256 -c SHA256SUMS
 
 **Windows** (Command Prompt, in the download folder)
 ```bat
-copy /b "mos-*.iso.part*" meccanicos.iso
+copy /b "meccanicos-*.iso.part*" meccanicos.iso
 certutil -hashfile meccanicos.iso SHA256
 ```
 Compare the printed hash with the `.iso` line in `SHA256SUMS`.
 
-ISO names carry the build date and the start of the ISO's own SHA-256, e.g.
-`meccanicos-26.05-20261004-x86_64-linux-1a2b3c4d.iso`; a running system shows
-its build date as `IMAGE_VERSION` in `/etc/os-release`.
+ISO names carry the release, its NixOS version, the commit it was built from and the
+start of the ISO's own SHA-256, e.g.
+`meccanicos-v2026-10-16-26.05-x86_64-linux-git5b31f5e-sha1a2b3c4d.iso`. A running
+system shows the release as `IMAGE_VERSION` in `/etc/os-release`, and the release,
+commit and build time in `/etc/meccanicos/version` (System Info shows it too).
 
 MeccanicOS contains only freely redistributable software (see [Licensing](#10-licensing)),
 so you may share any ISO you build.
@@ -126,7 +128,7 @@ sudo systemctl restart nix-daemon
 
 git clone https://github.com/<you>/meccanicos && cd meccanicos
 ./start iso                   # first build: 30–90 min, mostly downloads
-ls -lh dist/                  # → meccanicos-26.05-<build date>-x86_64-linux-<hash>.iso
+ls -lh dist/                  # → meccanicos-main-26.05-x86_64-linux-git<commit>-sha<hash>.iso
 ```
 
 ## 2. Write it to a USB stick
@@ -681,12 +683,14 @@ in the configuration turns all of the above off.
 `hardware-configuration.nix`, `meccanicos.toml` (mos-config's system settings) and
 `remote-unlock-keys` — and a small `flake.nix` that takes everything else from this repository
 at its **latest release** (the `latest` tag, moved by each release), pinned in `flake.lock`.
+Commits to `main` reach no one until they are released.
 
 | Task | Command |
 |---|---|
 | Apply your edits (`local.nix`, …) | `mos-rebuild` |
 | Everything about updates, in one place | `mos-updates` (or **Updates** in the command bar) |
 | Update now | `mos-upgrade`: the newest MeccanicOS release and NixOS packages (`--check` shows yours and the newest, `--boot` applies at the next restart; `mos-update` is the same) |
+| Another version | `mos-upgrade --list` shows the releases; `mos-upgrade --to v2026-10-12` goes to one and stays on it, `--to 5b31f5e` a commit, `--to main` follows development (untested), `--to latest` follows the releases again |
 | Automatic updates | weekly in the background, applied at the next restart (notification); off with `mos-config set updates.auto off` |
 | SSH, firewall ports, lid, hibernation, graphics driver | `mos-config set security.ssh off`, `mos-config set security.tcp_ports 8080` … (`mos-config` lists them) |
 | Computer name (hostname) | `mos-config set network.hostname laptop` (rebuilds; open windows keep working) |
@@ -703,7 +707,10 @@ release (tools, settings, fixes), the newest **packages** of its NixOS release a
 rigx, as one
 rebuild: `nix flake update` in `/etc/nixos`, then `nixos-rebuild`. If the rebuild fails, the
 previous `flake.lock` is put back; the previous system stays in the boot menu. When a release
-moves to a newer NixOS (26.05 → 26.11), `mos-upgrade` follows it. Rebuilds without updating
+moves to a newer NixOS (26.05 → 26.11), `mos-upgrade` follows it. What `/etc/nixos/flake.nix`
+follows is the end of its `meccanicos` url (`…/meccanicos/latest`); `mos-upgrade --to` changes it,
+and the weekly updates keep to it: on a release or a commit, only the NixOS packages move.
+Rebuilds without updating
 (`mos-rebuild`, a mos-config system setting) work offline: the source of the version you run
 stays on the disk.
 
@@ -843,8 +850,14 @@ with GitHub Pages: on every push to `main` that changes `www/` (the page, its sc
 "GitHub Actions", custom domain `meccanicos.com`, "Enforce HTTPS"; in the domain's DNS, `A`
 records for `meccanicos.com` to 185.199.108.153, 185.199.109.153, 185.199.110.153 and
 185.199.111.153 (optionally `AAAA` to 2606:50c0:8000::153 … 2606:50c0:8003::153), and
-`www.meccanicos.com` as a `CNAME` to `unofficialtools.github.io`. [`Release`](.github/workflows/release.yml) builds the public ISO when you push a
-tag like `v2026-10-08` and publishes it (and again as `latest`), split into parts with `SHA256SUMS`. Builds use the
+`www.meccanicos.com` as a `CNAME` to `unofficialtools.github.io`.
+
+**Releases.** Committing to `main` does not release anything: installed computers follow the
+`latest` tag. `./start release` tags the head of `main` (`v2026-10-16`, a second one that day
+`v2026-10-16.2`; or `./start release NAME`) and pushes the tag; [`Release`](.github/workflows/release.yml)
+then builds the public ISO, publishes it under the tag, and only once that worked moves `latest` (tag and
+release) to it, split into parts with `SHA256SUMS`. So every release names its commit, and
+`git tag --points-at COMMIT` says which release a commit is. Builds use the
 runner's large scratch disk; add a free [Cachix](https://cachix.org) cache (repository
 variable `CACHIX_CACHE` + secret `CACHIX_AUTH_TOKEN`) to make them much faster.
 Commit `flake.lock` (`nix flake lock`) so every build is pinned.

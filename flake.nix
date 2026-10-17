@@ -35,7 +35,7 @@
       };
       # --------------------------------------------------------------------
 
-      # Build date (YYYYMMDD) shown in the ISO's name and /etc/os-release.
+      # Build date (YYYYMMDD) and time, for /etc/meccanicos/version.
       # `./start iso` passes today's date (MECCANICOS_BUILD_DATE, needs --impure);
       # a plain `nix build .#iso` uses the date of the last commit.
       buildDate =
@@ -60,6 +60,21 @@
           env
         else
           throw "MECCANICOS_BUILD_TIME must be HHMM, got '${env}'";
+      # Which release this is (ISO name, /etc/os-release, /etc/meccanicos/version):
+      # the release workflow passes its tag (v2026-10-16) as MECCANICOS_RELEASE,
+      # `./start iso` the tag or the branch; else "dev".
+      release =
+        let
+          env = builtins.getEnv "MECCANICOS_RELEASE";
+        in
+        if env == "" then
+          "dev"
+        else if builtins.match "[a-z0-9._-]+" env != null then
+          env
+        else
+          throw "MECCANICOS_RELEASE must be lowercase letters, digits, '.', '_' or '-', got '${env}'";
+      # ...and its commit (with -dirty when built from uncommitted changes).
+      commit = self.shortRev or self.dirtyShortRev or "unknown";
 
       # Shared by the live USB and the installed system.
       common = [
@@ -319,10 +334,16 @@
       # The live USB system, carrying the prebuilt installed system.
       live = lib.nixosSystem {
         specialArgs = {
-          inherit distro buildDate buildTime;
+          inherit
+            distro
+            buildDate
+            buildTime
+            release
+            commit
+            ;
           installedSystem = installed.config.system.build.toplevel;
           inherit etcNixos;
-          flakeCommit = self.shortRev or self.dirtyShortRev or "unknown";
+          flakeCommit = commit;
         };
         modules = common ++ [
           ./modules/iso.nix
