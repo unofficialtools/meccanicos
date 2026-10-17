@@ -34,8 +34,58 @@ let
   # Started from the menu, the command bar or a shell without a link: a new
   # tab (in the open window, if there is one). Brave's "New Window" and
   # "New Private Window" menu actions stay as they were.
+  # An update (mos-upgrade) while Brave is open leaves the old version
+  # running, and a new start would only hand it the link (with "Failed
+  # sending zygote boot message: Broken pipe"): so an older Brave on the same
+  # profile is closed first (SIGTERM: it saves its tabs, as when quitting)
+  # and this one brings its tabs back.
+  # A lock left in the profile by a Brave that did not quit (SingletonLock:
+  # "<computer name>-<process>") stops every later start once the computer's
+  # name has changed ("in use ... on another computer", and no dialog to say
+  # so): with no Brave running on the profile, it is removed.
   newTab = pkgs.writeShellScript "brave" ''
-    [ $# -eq 0 ] && set -- brave://newtab
+    PATH=${
+      lib.makeBinPath [
+        pkgs.coreutils
+        pkgs.procps
+        pkgs.gnused
+        pkgs.gnugrep
+      ]
+    }:$PATH
+    # Chromium rewrites its helpers' command lines into one string with spaces.
+    args() { printf ' %s ' "$(tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null)"; }
+    profile() { args "$1" | grep -o -- ' --user-data-dir=[^ ]*' | tail -n1 | sed 's/^ --user-data-dir=//'; }
+    want=""
+    for a in "$@"; do case $a in --user-data-dir=*) want=''${a#--user-data-dir=} ;; esac; done
+    old="" running=""
+    for pid in $(pgrep -u "$(id -u)" -x brave); do
+      exe=$(readlink "/proc/$pid/exe" 2>/dev/null) || continue
+      case $exe in */opt/brave.com/brave/brave) ;; *) continue ;; esac
+      case $(args "$pid") in *" --type="*) continue ;; esac # a helper, not the browser
+      [ "$(profile "$pid")" = "$want" ] || continue
+      case $exe in
+        ${braveWithArgs}/*) running=1 ;; # this version
+        *) old="$old $pid" ;; # an older (or other) Brave
+      esac
+    done
+    if [ -n "$old" ]; then
+      # shellcheck disable=SC2086
+      kill -TERM $old 2>/dev/null || true
+      for _ in $(seq 50); do # up to 10 s for it to save and quit
+        alive=""
+        for p in $old; do [ -e "/proc/$p" ] && alive=1; done
+        [ -z "$alive" ] && break
+        sleep 0.2
+      done
+      [ -n "$alive" ] && running=1 # still saving: leave its lock alone
+      set -- --restore-last-session "$@"
+    elif [ $# -eq 0 ]; then
+      set -- brave://newtab
+    fi
+    dir=''${want:-''${XDG_CONFIG_HOME:-$HOME/.config}/BraveSoftware/Brave-Browser}
+    if [ -z "$running" ] && [ -L "$dir/SingletonLock" ]; then
+      rm -f "$dir/SingletonLock" "$dir/SingletonCookie" "$dir/SingletonSocket"
+    fi
     exec ${braveWithArgs}/bin/brave "$@"
   '';
   brave = pkgs.symlinkJoin {
