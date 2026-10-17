@@ -19,6 +19,7 @@ import (
 type ISO struct {
 	Path, Name, Sum string
 	Size            int64
+	Readme          string // the release's MeccanicOS-README.pdf in the cache, or "" (older releases have none)
 }
 
 var client = &http.Client{Transport: &http.Transport{
@@ -66,6 +67,7 @@ func fetchISO(cache string) (ISO, error) {
 	sort.Strings(parts)
 	iso.Path = filepath.Join(cache, iso.Name)
 	note("Latest: %s", iso.Name)
+	iso.Readme = fetchReadme(base, cache, sums["MeccanicOS-README.pdf"])
 
 	if st, err := os.Stat(iso.Path); err == nil {
 		step("Checking the copy downloaded earlier.")
@@ -121,6 +123,39 @@ func fetchISO(cache string) (ISO, error) {
 	iso.Size = st.Size()
 	note("The ISO is correct (%s).", human(iso.Size))
 	return iso, nil
+}
+
+// fetchReadme downloads the release's MeccanicOS-README.pdf (the instructions
+// put next to the ISO on a Ventoy stick), checked against SHA256SUMS. It is
+// optional: when the release has none, or it cannot be downloaded, it is
+// skipped without a word and "" returned; the stick works without it.
+func fetchReadme(base, cache, sum string) string {
+	if sum == "" {
+		return ""
+	}
+	dest := filepath.Join(cache, "MeccanicOS-README.pdf")
+	if got, err := hashFileQuiet(dest); err == nil && got == sum {
+		return dest // downloaded before
+	}
+	os.Remove(dest)
+	resp, err := get(base+"/MeccanicOS-README.pdf", 0)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	f, err := os.Create(dest)
+	if err != nil {
+		return ""
+	}
+	_, err = io.Copy(f, resp.Body)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if got, herr := hashFileQuiet(dest); err != nil || herr != nil || got != sum {
+		os.Remove(dest)
+		return ""
+	}
+	return dest
 }
 
 func plural(n int) string {

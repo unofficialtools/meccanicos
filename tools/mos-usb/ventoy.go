@@ -93,9 +93,10 @@ func installVentoy(dir string, d Disk) error {
 	return nil
 }
 
-// copyToVentoy adds the ISO to the drive's Ventoy partition. Nothing already
-// on the drive is deleted, older MeccanicOS ISOs included; only a file with
-// this ISO's own name is replaced. If it does not fit, nothing is written.
+// copyToVentoy adds the ISO to the drive's Ventoy partition, and MeccanicOS-README.pdf
+// next to it. Nothing already on the drive is deleted, older MeccanicOS ISOs
+// included; only a file with this ISO's own name, and MeccanicOS-README.pdf, is replaced.
+// If it does not fit, nothing is written.
 func copyToVentoy(iso ISO, d Disk) error {
 	mnt, release, err := dataMount(d)
 	if err != nil {
@@ -149,7 +150,25 @@ func copyToVentoy(iso ISO, d Disk) error {
 		return fmt.Errorf("the copy on the USB drive is damaged; the drive may be failing")
 	}
 	note("The copy is correct.")
+	if iso.Readme != "" {
+		// Optional: if it cannot be copied, the drive works without it.
+		copyFile(iso.Readme, filepath.Join(mnt, "MeccanicOS-README.pdf"))
+	}
 	return nil
+}
+
+// copyFile copies a small file (MeccanicOS-README.pdf), replacing dest.
+func copyFile(src, dest string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(dest+".part", data, 0o644); err != nil {
+		os.Remove(dest + ".part")
+		return err
+	}
+	os.Remove(dest)
+	return os.Rename(dest+".part", dest)
 }
 
 // writeRaw writes the ISO over the whole drive, then reads it back to check.

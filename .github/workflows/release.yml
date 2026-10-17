@@ -53,6 +53,14 @@ jobs:
           split --bytes=1900M --numeric-suffixes=1 --suffix-length=2 "$src" "dist/$name.part"
           ( cd dist && sha256sum "$name".part* >> SHA256SUMS )
           echo "ISO_NAME=$name" >> "$GITHUB_ENV"
+          # MeccanicOS-README.pdf: the instructions mos-usb puts next to the ISO on a
+          # Ventoy stick. Optional: if it does not build, the release goes on without it.
+          if nix build --impure .#readme-pdf --out-link readme; then
+            cp readme dist/MeccanicOS-README.pdf
+            ( cd dist && sha256sum MeccanicOS-README.pdf >> SHA256SUMS )
+          else
+            echo "::warning::MeccanicOS-README.pdf did not build; released without it"
+          fi
           ls -lh dist
       - uses: actions/setup-go@v6
         if: steps.published.outputs.skip != 'true'
@@ -99,7 +107,10 @@ jobs:
           ends with the start of its own SHA-256 (\`sha…\`). Installed computers get it with \`mos-upgrade\`,
           or this very release with \`mos-upgrade --to $GITHUB_REF_NAME\`.
 
-          More: [meccanicos.com](https://meccanicos.com).
+          **MeccanicOS-README.pdf**: how to start a computer from the USB drive, and the firmware (BIOS) settings
+          if it does not; it is on every MeccanicOS USB drive too.
+
+          More: [meccanicos.com](https://meccanicos.com). Support: [the MeccanicOS group](https://groups.google.com/g/meccanicos).
           NOTES
           gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md --latest=false
           # The same files again as "latest" (moved to this commit), which the

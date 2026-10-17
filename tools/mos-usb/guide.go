@@ -62,8 +62,10 @@ func bootGuide(ventoy bool) string {
 	p("    be in \"RAID\" or \"Intel RST\" mode; it needs \"AHCI\" (ask before changing")
 	p("    it on a computer that also runs Windows).")
 	p("")
+	p("The same, to print or read later: MeccanicOS-README.pdf on the USB drive.")
 	p("More help: https://meccanicos.com and the manual,")
 	p("https://github.com/unofficialtools/meccanicos#readme")
+	p("Support (questions, problems): https://groups.google.com/g/meccanicos")
 	return b.String()
 }
 

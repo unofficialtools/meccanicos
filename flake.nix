@@ -331,6 +331,24 @@
       # (none of an installed computer's own files yet).
       installed = mkInstalled { root = ./.; };
 
+      # MeccanicOS-README.pdf, next to MeccanicOS on the USB drive (the ISO's root; Ventoy
+      # sticks: mos-usb, ./start ventoy; each release publishes it): thanks,
+      # starting from the drive, the firmware settings, where to get help.
+      readmePdf =
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        pkgs.runCommand "MeccanicOS-README.pdf"
+          {
+            nativeBuildInputs = [ pkgs.typst ];
+            fonts = "${pkgs.inter}/share/fonts:${pkgs.jetbrains-mono}/share/fonts";
+          }
+          ''
+            cp ${./docs/usb-readme/README.typ} README.typ
+            cp ${./branding/logo/meccanicos-logo-black.svg} logo.svg
+            typst compile --ignore-system-fonts --font-path "$fonts" README.typ $out
+          '';
+
       # The live USB system, carrying the prebuilt installed system.
       live = lib.nixosSystem {
         specialArgs = {
@@ -340,6 +358,7 @@
             buildTime
             release
             commit
+            readmePdf
             ;
           installedSystem = installed.config.system.build.toplevel;
           inherit etcNixos;
@@ -365,6 +384,7 @@
       packages.${system} = {
         iso = self.nixosConfigurations.live.config.system.build.isoImage; # nix build .#iso
         default = self.packages.${system}.iso;
+        readme-pdf = readmePdf; # nix build .#readme-pdf (on the USB drive as MeccanicOS-README.pdf)
         # Screenshots of the mos-* tools for www/, taken in a VM (./start www).
         www-screenshots = (import ./tests { inherit self nixpkgs system; }).screenshots;
       };

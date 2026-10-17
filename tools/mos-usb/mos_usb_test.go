@@ -14,8 +14,9 @@ import (
 	"time"
 )
 
-// A release like the real one: an ISO in parts, and SHA256SUMS.
-func fakeRelease(t *testing.T, iso []byte, partSize int) *httptest.Server {
+// A release like the real one: an ISO in parts, MeccanicOS-README.pdf, and
+// SHA256SUMS. Files named in missing are listed in SHA256SUMS but not served.
+func fakeRelease(t *testing.T, iso []byte, partSize int, missing ...string) *httptest.Server {
 	t.Helper()
 	files := map[string][]byte{}
 	name := "meccanicos-26.05-20261008-x86_64-linux-abcdef12.iso"
@@ -27,8 +28,13 @@ func fakeRelease(t *testing.T, iso []byte, partSize int) *httptest.Server {
 		files[part] = iso[i*partSize : end]
 		sums += sum(files[part]) + "  " + part + "\n"
 	}
+	files["MeccanicOS-README.pdf"] = []byte("%PDF readme")
+	sums += sum(files["MeccanicOS-README.pdf"]) + "  MeccanicOS-README.pdf\n"
 	sums += sum([]byte("exe")) + "  mos-usb-windows.exe\n" // other release files are ignored
 	files["SHA256SUMS"] = []byte(sums)
+	for _, m := range missing {
+		delete(files, m)
+	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, ok := files[strings.TrimPrefix(r.URL.Path, "/")]
 		if !ok {
@@ -62,15 +68,34 @@ func TestFetchISO(t *testing.T) {
 	if got.Name != name || got.Size != int64(len(iso)) || string(b) != string(iso) {
 		t.Fatalf("wrong ISO: %+v", got)
 	}
+	if r, _ := os.ReadFile(got.Readme); string(r) != "%PDF readme" {
+		t.Fatalf("MeccanicOS-README.pdf not downloaded: %q", got.Readme)
+	}
 	left, _ := filepath.Glob(filepath.Join(cache, "*"))
-	if len(left) != 1 {
-		t.Fatalf("cache should hold only the ISO, has %v", left)
+	if len(left) != 2 {
+		t.Fatalf("cache should hold only the ISO and MeccanicOS-README.pdf, has %v", left)
 	}
 
 	// Run again: the ISO in the cache is checked and reused.
 	again, err := fetchISO(cache)
 	if err != nil || again.Path != got.Path {
 		t.Fatal("not reused:", err)
+	}
+}
+
+// A release whose MeccanicOS-README.pdf cannot be downloaded: the ISO is
+// fetched all the same, without it.
+func TestFetchISOWithoutReadme(t *testing.T) {
+	iso := []byte(strings.Repeat("y", 3000))
+	srv := fakeRelease(t, iso, 1000, "MeccanicOS-README.pdf")
+	defer srv.Close()
+	t.Setenv("MOS_USB_RELEASE", srv.URL)
+	got, err := fetchISO(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Readme != "" {
+		t.Fatalf("no MeccanicOS-README.pdf to download, yet got %q", got.Readme)
 	}
 }
 
@@ -103,7 +128,7 @@ func TestInside(t *testing.T) {
 
 func TestBootGuide(t *testing.T) {
 	g := bootGuide(true)
-	for _, want := range []string{"Secure Boot", "BitLocker", "Boot in normal mode", "F12"} {
+	for _, want := range []string{"Secure Boot", "BitLocker", "Boot in normal mode", "F12", "MeccanicOS-README.pdf", "groups.google.com/g/meccanicos"} {
 		if !strings.Contains(g, want) {
 			t.Errorf("guide lacks %q", want)
 		}

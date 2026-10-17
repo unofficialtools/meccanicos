@@ -291,6 +291,16 @@ ventoy() {
     echo "[ventoy] copying $name"
     $as cp "$iso" "$mnt/$name.part"
     $as mv "$mnt/$name.part" "$mnt/$name"
+    # MeccanicOS-README.pdf next to it (on a stick written directly it is inside
+    # the ISO). Optional: if it cannot be built or copied, it is skipped.
+    local readme
+    if readme=$(nix build .#readme-pdf --impure --no-link --print-out-paths 2>/dev/null) &&
+        $as cp "$readme" "$mnt/MeccanicOS-README.pdf.part" 2>/dev/null &&
+        $as mv "$mnt/MeccanicOS-README.pdf.part" "$mnt/MeccanicOS-README.pdf" 2>/dev/null; then
+        :
+    else
+        $as rm -f "$mnt/MeccanicOS-README.pdf.part" 2>/dev/null || true
+    fi
     sync
     echo "[ventoy] done: boot the stick and pick $name in Ventoy's menu."
     echo "         Vaults and the persistent home go in meccanicos/ on this partition (usb-vault)."

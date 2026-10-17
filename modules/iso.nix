@@ -9,6 +9,7 @@
   buildTime,
   release,
   commit,
+  readmePdf,
   ...
 }:
 {
@@ -43,6 +44,14 @@
       t = buildTime;
     in
     "${release} (${commit}), built ${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d} ${builtins.substring 0 2 t}:${builtins.substring 2 2 t} UTC\n";
+  # MeccanicOS-README.pdf at the top of the stick: what Windows or macOS show when it is
+  # plugged in (flake.nix: readmePdf).
+  isoImage.contents = [
+    {
+      source = readmePdf;
+      target = "/MeccanicOS-README.pdf";
+    }
+  ];
   isoImage.volumeID = lib.mkForce (lib.toUpper distro.id + "_LIVE"); # max 32 chars
 
   # ---- Boot ---------------------------------------------------------------

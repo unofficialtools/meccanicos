@@ -226,6 +226,15 @@ To set a password, press `e` (UEFI) or `Tab` (BIOS) in the boot menu and add `li
 
 **Secure Boot:** NixOS isn't signed for Secure Boot; disable it in the firmware settings if the stick doesn't show up.
 
+**MeccanicOS-README.pdf** on the stick (at the top of a stick written directly; next to the ISO on a
+Ventoy stick, from `mos-usb` or `./start ventoy`) says the same for newcomers: the boot menu
+keys by maker, and the firmware settings to change if the computer will not start from it
+(Secure Boot, Fast Boot, USB boot, UEFI, BitLocker). Its source is
+[`docs/usb-readme/README.typ`](docs/usb-readme/README.typ) (`nix build .#readme-pdf`);
+each release publishes it too.
+
+**Support:** questions, problems and ideas in the [MeccanicOS group](https://groups.google.com/g/meccanicos).
+
 ## 4. Using MeccanicOS
 
 **Help** in the command bar opens this manual and an overview, offline and
