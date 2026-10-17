@@ -311,7 +311,9 @@ drivers_check() {
 release() {
     (($# <= 1)) || { echo "usage: $0 release [NAME]" >&2; exit 2; }
     local name=${1:-} head n
-    git fetch --quiet --tags origin main
+    # main and the releases only: "latest" moves, and fetching it would be refused.
+    git fetch --quiet origin main 'refs/tags/v*:refs/tags/v*' ||
+        { echo "[release] could not fetch from origin" >&2; exit 1; }
     head=$(git rev-parse origin/main)
     if [[ $(git rev-parse HEAD) != "$head" ]]; then
         echo "[release] HEAD is not origin/main ($(git rev-parse --short HEAD) vs $(git rev-parse --short "$head")): push or pull first" >&2
