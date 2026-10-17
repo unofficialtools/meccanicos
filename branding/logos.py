@@ -26,7 +26,7 @@ from fontTools.ttLib import TTFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "logo")
 NAME = "MECCANICOS"
-TRACKING = 0.26  # em between letters: the bar's letter_spacing="2400" at 9 pt
+TRACKING = 0.12  # em between letters (the top bar has 0.26: letter_spacing="2400" at 9 pt)
 URL = "https://meccanicos.com"
 
 # modules/style.nix
