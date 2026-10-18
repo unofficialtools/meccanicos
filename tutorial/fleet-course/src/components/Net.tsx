@@ -8,9 +8,9 @@ const LockGlyph = () => (
   <svg width={16} height={18} viewBox="0 0 16 18" style={{ marginRight: 4 }}><path d="M4 8V5a4 4 0 0 1 8 0v3" stroke={C.sand} strokeWidth={2.4} fill="none" /><rect x={1} y={8} width={14} height={10} rx={2} fill={C.sand} /></svg>
 );
 
-// The organization's network, on the stage (1920 x 770): the company, the
-// server hq with what it holds (one SSH account, the repository, the builds,
-// two SQLite databases, Tang), the admin's computer, up to three computers on
+// The organization's network, on the stage (1920 x 770), in plain words: the
+// company, the server hq with what it holds (one SSH account, the repository,
+// the builds, two SQLite databases, Tang), the admin's computer, up to three computers on
 // the office network, the Internet. Things appear, light up and
 // send packets (labelled pills) along the wires, in step with the narration.
 type When = { beat?: number; delay?: number; at?: number };
@@ -26,21 +26,21 @@ export type NetProps = {
 };
 
 export const WS = {
-  ws1: { name: "ws-001", kind: "desktop", unlock: "tang" },
-  ws2: { name: "ws-002", kind: "laptop", unlock: "tpm-pin" },
-  ws3: { name: "ws-003", kind: "desktop", unlock: "fido2" },
+  ws1: { name: "ws-001", kind: "desktop", unlock: "office only" },
+  ws2: { name: "ws-002", kind: "laptop", unlock: "PIN" },
+  ws3: { name: "ws-003", kind: "desktop", unlock: "security key" },
 } as const;
 
 const BUS = 470;
 const HQ = { x: 470, y: 64, w: 680, h: 340 };
 const TILE_W = 206, TILE_H = 128;
 const SERVICES: { id: NodeId; logo: LogoName; name: string; dns: string; col: number; row: number }[] = [
-  { id: "ssh", logo: "ssh", name: "SSH", dns: "fleet@hq", col: 0, row: 0 },
-  { id: "git", logo: "git", name: "fleet.git", dns: "the repository", col: 1, row: 0 },
-  { id: "build", logo: "nixos", name: "builds", dns: "nix build", col: 2, row: 0 },
-  { id: "state", logo: "sqlite", name: "state.db", dns: "reports, logs", col: 0, row: 1 },
-  { id: "secrets", logo: "sqlite", name: "secrets.db", dns: "hashes, keys", col: 1, row: 1 },
-  { id: "tang", logo: "tang", name: "Tang", dns: "port 7654", col: 2, row: 1 },
+  { id: "ssh", logo: "ssh", name: "the door", dns: "one locked entrance", col: 0, row: 0 },
+  { id: "git", logo: "git", name: "the plan", dns: "the recipes", col: 1, row: 0 },
+  { id: "build", logo: "nixos", name: "the workshop", dns: "builds the systems", col: 2, row: 0 },
+  { id: "state", logo: "sqlite", name: "the logbook", dns: "what they report", col: 0, row: 1 },
+  { id: "secrets", logo: "sqlite", name: "the safe", dns: "passwords, keys", col: 1, row: 1 },
+  { id: "tang", logo: "tang", name: "office unlock", dns: "office only", col: 2, row: 1 },
 ];
 const tile = (col: number, row: number) => ({ x: HQ.x + 22 + col * (TILE_W + 10), y: HQ.y + 64 + row * (TILE_H + 10) });
 const WS_X = { ws1: 250, ws2: 650, ws3: 1050 };
@@ -121,13 +121,13 @@ export const Net: React.FC<NetProps> = ({ show = [], add = [], hi = [], flows = 
       <div style={{ position: "absolute", left: 50, top: 22, fontFamily: SANS, fontSize: 30, fontWeight: 800, color: C.text }}>
         Example Corp <span style={{ fontFamily: MONO, fontSize: 24, fontWeight: 400, color: C.sand, marginLeft: 12 }}>corp.example.com</span>
       </div>
-      <div style={{ position: "absolute", left: 116, top: BUS + 12, fontFamily: MONO, fontSize: 21, color: C.dim }}>office network 10.0.0.0/24</div>
+      <div style={{ position: "absolute", left: 116, top: BUS + 12, fontFamily: MONO, fontSize: 21, color: C.dim }}>office network</div>
 
       {/* the server */}
       <div style={box("hq", HQ.x, HQ.y, HQ.w, HQ.h, { borderTop: `5px solid ${C.tealHi}` })}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 20px", fontFamily: MONO, fontSize: 26 }}>
           <Machine kind="server" size={40} color={C.tealHi} />
-          <b style={{ color: C.tealHi }}>hq</b><span style={{ color: C.dim, fontSize: 21 }}>the server · hq.corp.example.com</span>
+          <b style={{ color: C.tealHi }}>hq</b><span style={{ color: C.dim, fontSize: 21 }}>the server, in the office</span>
         </div>
       </div>
       {SERVICES.map((s) => {
@@ -144,7 +144,7 @@ export const Net: React.FC<NetProps> = ({ show = [], add = [], hi = [], flows = 
       <div style={box("admin", ADMIN.x, ADMIN.y, ADMIN.w, ADMIN.h, { borderTop: `5px solid ${C.amber}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 })}>
         <Machine kind="laptop" size={84} color={C.amber} />
         <div style={{ fontFamily: MONO, fontSize: 26, fontWeight: 700, color: C.amber }}>laptop</div>
-        <div style={{ fontFamily: SANS, fontSize: 21, color: C.text }}>your computer · mrossi, fleet admin</div>
+        <div style={{ fontFamily: SANS, fontSize: 21, color: C.text }}>your computer, the admin's</div>
       </div>
 
       {/* the computers */}
@@ -153,8 +153,8 @@ export const Net: React.FC<NetProps> = ({ show = [], add = [], hi = [], flows = 
           <Machine kind={WS[w].kind} size={92} color={C.blue} />
           <div>
             <div style={{ fontFamily: MONO, fontSize: 30, fontWeight: 700, color: C.blue }}>{WS[w].name}</div>
-            <div style={{ fontFamily: SANS, fontSize: 21, color: C.text }}>profile office</div>
-            <div style={{ fontFamily: MONO, fontSize: 19, color: C.sand, marginTop: 4 }}><LockGlyph /> {WS[w].unlock}</div>
+            <div style={{ fontFamily: SANS, fontSize: 21, color: C.text }}>office computer</div>
+            <div style={{ fontFamily: SANS, fontSize: 20, color: C.sand, marginTop: 4 }}><LockGlyph /> {WS[w].unlock}</div>
           </div>
         </div>
       ))}
@@ -163,7 +163,7 @@ export const Net: React.FC<NetProps> = ({ show = [], add = [], hi = [], flows = 
       <div style={box("net", NET.x, NET.y, NET.w, NET.h, { borderTop: `5px solid ${C.dim}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, textAlign: "center" })}>
         <div style={{ fontFamily: SANS, fontSize: 26, fontWeight: 700, color: C.text }}>The Internet</div>
         <Logo name="nixos" size={46} />
-        <div style={{ fontFamily: MONO, fontSize: 18, color: C.dim, lineHeight: 1.35 }}>MeccanicOS on GitHub<br />NixOS packages</div>
+        <div style={{ fontFamily: MONO, fontSize: 18, color: C.dim, lineHeight: 1.35 }}>MeccanicOS<br />updates</div>
       </div>
 
       {/* tags, then the packets on top */}

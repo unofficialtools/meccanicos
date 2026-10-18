@@ -14,12 +14,12 @@ export type Method = "password" | "tang" | "tpm-pin" | "fido2" | "recovery";
 
 const SOURCE: Record<Method, { label: string; note: string; icon: (glow: number) => React.ReactNode }> = {
   password: { label: "a password", note: "typed at power-on", icon: () => <KeyboardIcon size={86} /> },
-  tang: { label: "Tang + TPM", note: "only on the office network", icon: () => (
+  tang: { label: "office unlock", note: "only on the office network", icon: () => (
     <div style={{ display: "flex", gap: 6, alignItems: "center" }}><Machine kind="server" size={70} color={C.tealHi} /><KeyIcon size={52} color={C.tealHi} /></div>) },
-  "tpm-pin": { label: "TPM + PIN", note: "the chip, and a PIN typed", icon: () => (
+  "tpm-pin": { label: "chip + PIN", note: "the computer's chip, and a PIN", icon: () => (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}><ChipIcon size={78} /><span style={{ fontFamily: MONO, fontSize: 30, color: C.green }}>••••••</span></div>) },
-  fido2: { label: "FIDO2 key", note: "plugged in and touched", icon: (g) => <FidoIcon size={86} glow={g} /> },
-  recovery: { label: "recovery key", note: "from an admin, typed", icon: () => <PaperIcon size={86} /> },
+  fido2: { label: "security key", note: "plugged in and touched", icon: (g) => <FidoIcon size={86} glow={g} /> },
+  recovery: { label: "spare key", note: "from an admin, kept on the server", icon: () => <PaperIcon size={86} /> },
 };
 
 const Lock: React.FC<{ open: number; fail: number; x: number; y: number; s?: number }> = ({ open, fail, x, y, s = 1 }) => {
