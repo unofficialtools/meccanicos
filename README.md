@@ -477,9 +477,12 @@ page, on *VPN* turns one on or off or adds one (WireGuard, and OpenVPN files).
 Settings stay where the system keeps them, so the Xfce settings windows agree;
 every change is also recorded in `~/.config/meccanicos/settings.toml`. System settings
 on an installed system go into `/etc/nixos/meccanicos.toml` and need a rebuild, which
-`mos-config` offers. `--dotfiles` also saves your shell, git, editor and terminal
-files, never keys or passwords (unless `--with-secrets`: then it asks for a password
-and encrypts them).
+`mos-config` offers (without a terminal only with `--yes`). Import checks every value
+as `set` does and leaves out what doesn't fit, saying so. `--dotfiles` also saves your
+shell, git, editor and terminal files, leaving out those whose names look like keys or
+passwords (look inside before sharing: a file can hold a password anyway), unless
+`--with-secrets`: then it asks for a password and encrypts them, never writing them
+unencrypted.
 
 **Configuration Doctor** (`mos-doctor`) checks Wi-Fi and the internet, Bluetooth,
 sound, the screen (including which graphics driver is used; details:

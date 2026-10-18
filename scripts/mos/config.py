@@ -4,10 +4,10 @@
                                      Enter to change it (in a terminal)
   mos-config list [--json]         the settings and their current values
   mos-config get KEY               one value
-  mos-config set KEY VALUE         change it (system settings: asks, then rebuilds)
+  mos-config set KEY VALUE [--yes] change it (system settings: asks, then rebuilds)
   mos-config set KEY               show the choices for KEY
   mos-config export [FILE] [--dotfiles] [--with-secrets]
-  mos-config import FILE [--dotfiles]
+  mos-config import FILE [--dotfiles] [--yes]
   mos-config apply                 re-apply what only lives in your settings
                                      (at login; e.g. the keyboard on the live USB)
 
@@ -29,19 +29,29 @@ your settings in one place, to keep, edit, or bring to another computer
 User settings apply at once. System settings change the whole computer: on
 an installed system they go into /etc/nixos/meccanicos.toml and need a rebuild
 (mos-config offers it; --no-rebuild to do it later with mos-rebuild).
+Without a terminal nothing is asked, so nothing is rebuilt or imported
+unless --yes.
+
+Import checks every value as `set` does first: one that doesn't fit this
+computer (or a setting it doesn't have) is left out, and the exit code is 1.
 
 Dotfiles: export --dotfiles also saves the files listed under [dotfiles] in
 settings.toml (shell, git, editor, ... by default) to dotfiles.tar.gz next
-to it. Keys, tokens and passwords are never included, unless --with-secrets:
-then the archive is encrypted with a password (dotfiles.tar.gz.age).
+to it. Files whose names look like keys, tokens or passwords are left out
+(by name only: look inside what you share), unless --with-secrets: then the
+archive is encrypted with a password (dotfiles.tar.gz.age), never written
+unencrypted.
 """
 
 import fnmatch
 import glob
+import io
+import json
 import os
 import re
 import shutil
 import socket
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -69,7 +79,7 @@ def toml_value(v):
         return repr(v)
     if isinstance(v, list):
         return "[" + ", ".join(toml_value(x) for x in v) + "]"
-    return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return json.dumps(str(v), ensure_ascii=False)  # a JSON string is a TOML one (newlines too)
 
 
 def write_toml(path, data, header=""):
@@ -83,11 +93,17 @@ def write_toml(path, data, header=""):
             lines.append(f"\n[{sec}]")
             lines += [f"{k} = {toml_value(v)}" for k, v in kv.items()]
     text = "\n".join(lines).lstrip("\n") + "\n"
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = path + ".part"
-    with open(tmp, "w") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".", suffix=".part")  # a name of its own
+    try:
+        os.fchmod(fd, 0o644)
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 # ---- the places settings live ------------------------------------------------------
@@ -167,9 +183,12 @@ def ports(text):
     if text in ("", "none"):
         return []
     try:
-        return sorted({int(p) for p in text.replace(",", " ").split()})
+        found = sorted({int(p) for p in text.replace(",", " ").split()})
     except ValueError:
-        raise c.UsageError("port numbers, e.g. 8080,8443 (or none)")
+        found = [0]
+    if not all(1 <= p <= 65535 for p in found):
+        raise c.UsageError("port numbers from 1 to 65535, e.g. 8080,8443 (or none)")
+    return found
 
 
 def percent_or_off(text):
@@ -486,6 +505,13 @@ def set_screen_off(m):
         xfconf_set(PM, f"/{PM}/blank-on-{src}", "int", m)
 
 
+def suspend_minutes(text):
+    m = minutes(text)
+    if 0 < m < 15:
+        raise c.UsageError("15 minutes or more, or never")
+    return m
+
+
 def get_suspend():
     v = xfconf_get(PM, f"/{PM}/inactivity-on-ac")
     v = int(v) if v is not None else 0
@@ -493,8 +519,6 @@ def get_suspend():
 
 
 def set_suspend(m):
-    if 0 < m < 15:
-        raise c.UsageError("15 minutes or more, or never")
     for src in ("ac", "battery"):
         xfconf_set(PM, f"/{PM}/inactivity-sleep-mode-on-{src}", "uint", 1)  # 1 = suspend
         xfconf_set(PM, f"/{PM}/inactivity-on-{src}", "uint", m or 14)
@@ -547,10 +571,12 @@ def get_audio(which):
 
 def set_audio(kind, text):
     found = nodes(kind)
-    match = [i for i, n in found.items() if text.lower() in n.lower()]
-    if not match:
-        there = "; ".join(found.values()) if found else "none found"
-        raise c.UsageError(f"no such {'output' if kind == 'Sinks' else 'input'}; there are: {there}")
+    match = [i for i, n in found.items() if text.lower() == n.lower()] or \
+            [i for i, n in found.items() if text.lower() in n.lower()]
+    what = "output" if kind == "Sinks" else "input"
+    if len(match) != 1:
+        there = "; ".join(found[i] for i in match) if match else "; ".join(found.values()) or "none found"
+        raise c.UsageError(f"{'more than one' if match else 'no such'} {what}; there are: {there}")
     c.run("wpctl", "set-default", match[0], check=True)
 
 
@@ -568,7 +594,8 @@ def set_clock(v):
 
 
 def zone_choice(text):
-    if not os.path.exists(os.path.join("/etc/zoneinfo", text)) and \
+    if text.startswith("/") or ".." in text.split("/") or \
+            not os.path.exists(os.path.join("/etc/zoneinfo", text)) and \
             not os.path.exists(os.path.join("/usr/share/zoneinfo", text)) and \
             text not in c.output("timedatectl", "list-timezones").split():
         raise c.UsageError("a time zone like Europe/Rome (timedatectl list-timezones)")
@@ -677,7 +704,7 @@ SETTINGS = [
     Setting("power.screen_off", "turn the screen off after this many minutes (never)", get_screen_off,
             set_screen_off, choices=minutes, example="10"),
     Setting("power.suspend", "suspend after this many idle minutes (never, or 15+)", get_suspend,
-            set_suspend, choices=minutes, example="30"),
+            set_suspend, choices=suspend_minutes, example="30"),
     Setting("power.profile", "performance, balanced or power-saver (changes with the charger)",
             lambda: c.output("powerprofilesctl", "get") or None,
             lambda v: c.run("powerprofilesctl", "set", v, check=True),
@@ -1026,21 +1053,28 @@ def vpn_import(path):
     return m.group(1) if m else os.path.basename(path)
 
 
+def vpn_uuid(name):
+    """The VPN called name, by UUID: two connections can have the same name."""
+    found = [r[1] for r in nm_rows("NAME,UUID,TYPE", "connection", "show")
+             if len(r) == 3 and r[0] == name and r[2] in ("vpn", "wireguard")]
+    if not found:
+        raise c.UsageError(f"no VPN {name} (mos-config network vpn lists them)")
+    if len(found) > 1:
+        raise c.UsageError(f"{len(found)} VPNs are called {name}: rename one in Network Connections")
+    return found[0]
+
+
 def vpn_up(name):
     """Turn a VPN on; nmcli asks here for a password or code it needs (a terminal)."""
-    import subprocess
-    if name not in [n for n, _ in vpns()]:
-        raise c.UsageError(f"no VPN {name} (mos-config network vpn lists them)")
+    uuid = vpn_uuid(name)
     ask = ["--ask"] if sys.stdin.isatty() else []
-    if subprocess.call(["nmcli", *ask, "connection", "up", "id", name]) != 0:
+    if subprocess.call(["nmcli", *ask, "connection", "up", "uuid", uuid]) != 0:
         raise c.Failed(f"VPN {name} did not connect")
     c.log("config", f"network: VPN {name} on")
 
 
 def vpn_down(name):
-    if name not in [n for n, _ in vpns()]:
-        raise c.UsageError(f"no VPN {name} (mos-config network vpn lists them)")
-    c.run("nmcli", "connection", "down", "id", name, check=True)
+    c.run("nmcli", "connection", "down", "uuid", vpn_uuid(name), check=True)
     c.log("config", f"network: VPN {name} off")
 
 
@@ -1169,11 +1203,16 @@ def cmd_set(args):
     pending = change(s, value)
     c.ok(f"{s.key} = {show(value, s)}")
     if pending:
-        rebuild("--no-rebuild" not in flags)
+        rebuild("--no-rebuild" not in flags, "--yes" in flags)
 
 
-def rebuild(now):
-    if now and c.ask("Apply it now (rebuilds the system, a few minutes)?"):
+def agreed(question, yes):
+    """--yes, or asked in a terminal: without one nobody answers, so no."""
+    return yes or (sys.stdin.isatty() and c.ask(question))
+
+
+def rebuild(now, yes=False):
+    if now and agreed("Apply it now (rebuilds the system, a few minutes)?", yes):
         code = os.system("mos-rebuild")
         if code:
             raise c.Failed("the rebuild failed; your previous system is still in the boot menu")
@@ -1182,22 +1221,34 @@ def rebuild(now):
     c.info("saved in /etc/nixos/meccanicos.toml: run mos-rebuild to apply it")
 
 
+def checked(data, key):
+    """A value from settings.toml (or an import) checked as `set` checks it; None if absent or wrong."""
+    v = stored(data, key)
+    if v is None:
+        return None
+    try:
+        return BY_KEY[key].parse(show(v))
+    except c.UsageError as e:
+        c.warn(f"{key} = {show(v)}: {e}")
+        return None
+
+
 def cmd_apply(args):
     """At login: what lives only in settings.toml."""
     data = mine()
     res = stored(data, "display.resolution")
     if res and res != "auto":
         try:
-            set_resolution(resolution_choice(res))
+            set_resolution(resolution_choice(str(res)))
         except (c.Failed, c.UsageError) as e:  # another screen now: its own best
             c.warn(f"display.resolution: {e}")
-    rot = stored(data, "display.rotation")
+    rot = checked(data, "display.rotation")
     if rot and rot != get_rotation():
         try:
             set_rotation(rot)
         except c.Failed as e:
             c.warn(f"display.rotation: {e}")
-    kb = {k: stored(data, k) for k in ("keyboard.layout", "keyboard.switch")}
+    kb = {k: checked(data, k) for k in ("keyboard.layout", "keyboard.switch")}
     if any(kb.values()):
         try:
             apply_keyboard(layout=kb["keyboard.layout"], switch=kb["keyboard.switch"])
@@ -1205,7 +1256,7 @@ def cmd_apply(args):
             c.warn(f"keyboard: {e}")
     if not c.installed():  # installed systems keep these themselves
         for key in ("time.zone", "power.charge_limit"):
-            v = stored(data, key)
+            v = checked(data, key)
             if v is not None and show(BY_KEY[key].get()) != show(v):
                 try:
                     BY_KEY[key]._set(v)
@@ -1248,22 +1299,31 @@ def export_dotfiles(folder, include, secrets):
         picked += [os.path.relpath(f, c.HOME) for p in SECRETS
                    for f in glob.glob(os.path.join(c.HOME, p)) if os.path.isfile(f)]
     out = os.path.join(folder, "dotfiles.tar.gz")
-    with tarfile.open(out, "w:gz") as tar:
-        for rel in sorted(set(picked)):
-            tar.add(os.path.join(c.HOME, rel), arcname=rel)
-    if secrets:
+    if not secrets:
+        with tarfile.open(out, "w:gz") as tar:
+            for rel in sorted(set(picked)):
+                tar.add(os.path.join(c.HOME, rel), arcname=rel)
+    else:
+        # Straight into age: the archive with the secrets is never on disk unencrypted.
         if not c.have("age"):
-            os.unlink(out)
             raise c.Failed("age is not installed, so secrets cannot be encrypted")
-        c.info("A password for the archive (it holds keys and passwords):")
-        if os.system(f"age -p -o '{out}.age' '{out}'") != 0:
-            os.unlink(out)
-            raise c.Failed("not encrypted")
-        os.unlink(out)
         out += ".age"
+        c.info("A password for the archive (it holds keys and passwords):")
+        p = subprocess.Popen(["age", "-p", "-o", out], stdin=subprocess.PIPE)
+        try:
+            with tarfile.open(fileobj=p.stdin, mode="w|gz") as tar:
+                for rel in sorted(set(picked)):
+                    tar.add(os.path.join(c.HOME, rel), arcname=rel)
+            p.stdin.close()
+        except BrokenPipeError:  # age stopped (no password)
+            pass
+        if p.wait() != 0:
+            if os.path.exists(out):
+                os.unlink(out)
+            raise c.Failed("not encrypted, nothing saved")
     c.ok(f"dotfiles: {out} ({len(set(picked))} files)")
     for rel in skipped:
-        c.info(f"left out (a key or password): ~/{rel}")
+        c.info(f"left out (its name looks like a key or password): ~/{rel}")
 
 
 def cmd_import(args):
@@ -1271,59 +1331,81 @@ def cmd_import(args):
     files = [a for a in args if not a.startswith("--")]
     if len(files) != 1:
         raise c.UsageError("mos-config import FILE")
-    data = read_toml(files[0])
-    changes, needs_rebuild = [], False
-    for s in SETTINGS:
-        v = stored(data, s.key)
-        if v is None or not s.available() or s.machine:
+    yes = "--yes" in flags
+    try:
+        data = read_toml(files[0])
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        raise c.Failed(f"cannot read {files[0]}: {e}")
+    # Every value checked first, as `set` checks it; what can't be used here is left out.
+    changes, left_out, failed, needs_rebuild = [], [], [], False
+    for group, kv in data.items():
+        if group == "dotfiles" or not isinstance(kv, dict):
             continue
-        if show(s.get()) != show(v):
-            changes.append((s, v))
+        for name, v in kv.items():
+            s = BY_KEY.get(f"{group}.{name}")
+            if not s:
+                left_out.append(f"{group}.{name}: no such setting")
+            elif s.available() and not s.machine:
+                try:
+                    v = s.parse(show(v))
+                except c.UsageError as e:
+                    left_out.append(f"{s.key} = {show(v)}: {e}")
+                    continue
+                if show(s.get()) != show(v):
+                    changes.append((s, v))
+    for why in left_out:
+        c.warn(f"left out: {why}")
     if not changes:
         c.ok("nothing to change")
     else:
         c.title("These settings will change:")
         for s, v in changes:
-            c.info(f"{s.key}: {show(s.get())} -> {show(v)}")
-        if not c.ask("Go ahead?"):
+            c.info(f"{s.key}: {show(s.get(), s)} -> {show(v, s)}")
+        if not agreed("Go ahead?", yes):
+            if not sys.stdin.isatty():
+                raise c.Failed("nothing changed (no terminal to ask: add --yes)")
             return
         for s, v in changes:
             try:
                 s._set(v)
                 remember(s.key, v)
-                c.ok(f"{s.key} = {show(v)}")
+                c.ok(f"{s.key} = {show(v, s)}")
                 needs_rebuild |= s.rebuild
             except (c.Failed, c.UsageError) as e:
                 c.bad(f"{s.key}: {e}")
+                failed.append(s.key)
         if needs_rebuild and c.installed():
-            rebuild(True)
+            rebuild(True, yes)
     if "--dotfiles" in flags:
-        import_dotfiles(os.path.dirname(os.path.abspath(files[0])))
+        import_dotfiles(os.path.dirname(os.path.abspath(files[0])), yes)
+    if failed or left_out:
+        raise c.Failed(f"{len(changes) - len(failed)} setting(s) changed; "
+                       f"not changed: {', '.join(failed + [w.split(' ')[0].rstrip(':') for w in left_out])}")
 
 
-def import_dotfiles(folder):
+def import_dotfiles(folder, yes=False):
     plain, enc = os.path.join(folder, "dotfiles.tar.gz"), os.path.join(folder, "dotfiles.tar.gz.age")
-    tmp = None
     if os.path.exists(enc):
-        tmp = tempfile.mktemp(suffix=".tar.gz")
-        if os.system(f"age -d -o '{tmp}' '{enc}'") != 0:
+        # Decrypted in memory (dotfiles are small): the secrets never land on disk unencrypted.
+        p = subprocess.run(["age", "-d", enc], stdout=subprocess.PIPE)
+        if p.returncode != 0:
             raise c.Failed("could not decrypt the dotfiles")
-        plain = tmp
-    if not os.path.exists(plain):
+        archive = tarfile.open(fileobj=io.BytesIO(p.stdout))
+    elif os.path.exists(plain):
+        archive = tarfile.open(plain)
+    else:
         raise c.Failed(f"no dotfiles.tar.gz next to the settings in {folder}")
-    with tarfile.open(plain) as tar:
+    with archive as tar:
         members = [m for m in tar.getmembers() if m.isfile() and not m.name.startswith(("/", ".."))]
         clash = [m.name for m in members if os.path.exists(os.path.join(c.HOME, m.name))]
         c.info(f"{len(members)} files; {len(clash)} replace yours (kept as NAME.bak)")
-        if c.ask("Restore them?"):
+        if agreed("Restore them?", yes):
             for m in members:
                 dst = os.path.join(c.HOME, m.name)
                 if os.path.exists(dst):
                     shutil.copy2(dst, dst + ".bak")
                 tar.extract(m, c.HOME, filter="data") if hasattr(tarfile, "data_filter") else tar.extract(m, c.HOME)
             c.ok("dotfiles restored")
-    if tmp:
-        os.unlink(tmp)
 
 
 COMMANDS = {"list": cmd_list, "get": cmd_get, "set": cmd_set, "export": cmd_export,

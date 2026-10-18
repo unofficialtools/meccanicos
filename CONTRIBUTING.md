@@ -6,7 +6,7 @@ Thanks for helping! A few notes to keep MeccanicOS easy to build and trust.
   ```bash
   nix flake check --no-build          # evaluates everything (fast)
   shellcheck -S warning scripts/*.sh
-  python3 -m unittest discover -s tests -p 'test_*.py'   # mos-doctor, no VM
+  python3 -m unittest discover -s tests -p 'test_*.py'   # mos-doctor, mos-config: no VM
   nix build -L .#checks.x86_64-linux.live      # VM test (needs KVM, slow)
   nix build -L .#checks.x86_64-linux.install   # VM test (needs KVM, slow)
   ```
