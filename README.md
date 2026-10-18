@@ -16,7 +16,7 @@ and a one-page installer.
 - **Keyboard first** — `Super+Space` opens a command bar: type an app, a website, a command, or a search.
 - **AI chat, after a one-time download** — `mos-ai-setup` downloads Qwen3 (~2.5 GB) for [Ollama](https://ollama.com); after that it works offline and nothing leaves the computer. Or Claude, ChatGPT or Grok with your API key (your questions go to that company). Chat with [aichat](https://github.com/sigoden/aichat) from the command bar.
 - **Encrypted storage on the stick** — vaults, and an optional *persistent home* for your files and settings (see [what survives a restart](#what-survives-a-restart)).
-- **Installs offline from one page** — one TUI page; full-disk encryption (LUKS2), unlock by password, TPM or security key.
+- **Installs offline from one page** — one TUI page; full-disk encryption (LUKS2), unlock by password, TPM or security key. (An organization's computer, from an admin's stick, downloads its system instead.)
 - **One look, boot to desktop** — brushed graphite, off-white and the logo's amber: the same brushed metal on the wallpaper, boot menu and login screen, icons drawn to match, a top bar of instrument readouts, notifications and terminal tools that all read as MeccanicOS.
 - **Broad hardware support** — a large collection of drivers and firmware, all of it freely redistributable (see [Licensing](#10-licensing)): Mesa/Vulkan, Intel/AMD video acceleration, PipeWire, Bluetooth, printers and scanners, and NVIDIA's driver picked automatically.
 - **Convenient defaults, stated plainly** — passwordless `sudo` (live and installed), and on an installed system an SSH server that accepts keys only. Both can be changed; see [Security](#security-what-is-protected-and-what-is-not).
@@ -528,8 +528,13 @@ mos-backup mount                    # every backup as a folder per date in ~/Bac
 mos-backup files [ID] [PATH] | find 'report*.pdf' | restore ID --only Documents/report.pdf
 ```
 
-- **Nothing is overwritten:** restores go into a new `~/Restored-<date>` folder,
-  or next to the file with the backup's date in its name.
+- **Nothing is overwritten:** restores go into a new `~/Restored-<date>` folder
+  (a folder you name must be new or empty), or next to the file with the
+  backup's date in its name.
+- **What's not in it:** open vaults (`~/Vault*`: back them up with `usb-vault
+  backup`), other disks mounted inside your home, caches and the Trash
+  (`mos-backup status` says so). If some files can't be read, the backup is
+  saved without them and says INCOMPLETE (exit code 5), naming them.
 - **Versions of a file:** right-click a file in Files → *Versions from Backups…*,
   or `B` in yazi.
 - **Plug in the disk, and it backs up** (if the last backup is more than 12 hours
@@ -554,7 +559,7 @@ usb-vault create-home --size 16G    # persistent home: files & settings survive 
 usb-vault create-partition --size 8G
 usb-vault create-file --size 4G --name docs   # docs.luks on an exFAT partition (readable from Windows/macOS)
 usb-vault open | close [--all] | status
-usb-vault backup /media/other-disk  # full copy, still encrypted
+usb-vault backup /media/other-disk  # vaults stay encrypted; the stick's other files are plain copies
 usb-vault restore /media/other-disk/mos-usb-backup-…   # e.g. onto a new stick
 usb-vault recover                   # after re-flashing the stick
 usb-vault stick                     # mount the stick's own files (also on Ventoy)
@@ -563,6 +568,10 @@ usb-vault stick                     # mount the stick's own files (also on Vento
 - **Persistent home:** at start-up you're asked for its password on the boot
   screen; press Enter on an empty password for a fresh, throw-away session.
 - **Vaults** mount at `~/Vault` (and `~/Vault-<name>`); at login MeccanicOS offers to unlock them.
+- **Backups** lock the vaults first (and stop if one is still in use), copy each
+  vault partition as an encrypted image and the stick's files area as it is.
+  The persistent home can't be copied while it is your home: the backup says
+  INCOMPLETE; start without unlocking it (Enter at its prompt) and back up again.
 - A stick has 4 partition slots and the system uses 2. When they run out, the
   persistent home is created as a `mos-home.luks` file automatically.
 - **Ventoy sticks:** everything is a file in `meccanicos/` on the Ventoy partition
@@ -608,7 +617,8 @@ One page, no wizard:
 
 `↑↓` move, `Enter` edits (long lists filter as you type), **Install now**; a big red warning
 names the disk (for example "HARD DRIVE (/dev/nvme0n1)"), and you type `YES` to erase it.
-It downloads nothing — the installed system is prebuilt inside the ISO.
+It downloads nothing — the installed system is prebuilt inside the ISO. (An organization's
+computer, installed from an admin's stick, is different: it downloads its system.)
 
 You get: GPT disk (1 GB EFI + LUKS2/ext4), systemd-boot,
 zram swap plus a RAM-sized swap file for hibernation, your user with **passwordless sudo**, root login disabled, and **SSH

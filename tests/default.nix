@@ -114,7 +114,9 @@ in
     name = "mos-live";
     nodes = { };
     testScript = prelude + ''
-      machine = create_machine(start_command(usb), name="live")
+      # (and a disk to back the vaults up to: /tmp is in memory)
+      vault_backup = qcow("vault-backup.qcow2", "8G")
+      machine = create_machine(start_command(usb, f"-drive file={vault_backup},format=qcow2,if=virtio"), name="live")
       machine.start()
 
       with subtest("boots to the XFCE desktop as the live user"):
@@ -241,6 +243,19 @@ in
           machine.succeed("USB_VAULT_USER=live usb-vault status | grep >/dev/null 'What survives a restart (live USB'")
           machine.succeed("usb-vault summary | grep >/dev/null 'persistent home not in use'")
           machine.succeed("usb-vault summary | grep >/dev/null 'Apps you installed : lost at shutdown'")
+
+      with subtest("usb-vault backup: a vault in use stops it; copies are numbered"):
+          machine.succeed("mkfs.ext4 -q /dev/vda && mkdir -p /mnt/bk && mount /dev/vda /mnt/bk")
+          machine.succeed("printf 'vault-pass-sixteen\\n' | USB_VAULT_USER=live usb-vault open /dev/sda3")
+          machine.succeed("systemd-run --unit=busy --working-directory=/home/live/Vault sleep 600")
+          out = machine.fail("USB_VAULT_USER=live usb-vault backup /mnt/bk 2>&1")
+          assert "Cannot unmount" in out, out
+          machine.succeed("! ls -d /mnt/bk/mos-usb-backup-* 2>/dev/null")  # nothing copied
+          machine.succeed("systemctl stop busy")
+          out = machine.succeed("USB_VAULT_USER=live usb-vault backup /mnt/bk 2>&1")
+          assert "INCOMPLETE" not in out, out
+          machine.succeed("ls /mnt/bk/mos-usb-backup-*/ | tee /dev/stderr | grep >/dev/null '^1-MOS-VAULT.img$'")
+          machine.succeed("umount /mnt/bk")
 
       machine.shutdown()
 
@@ -407,6 +422,13 @@ in
           machine.succeed("USB_VAULT_USER=live usb-vault status | tee /dev/stderr | grep >/dev/null 'booted through Ventoy'")
           machine.succeed("USB_VAULT_USER=live usb-vault stick && test -f /run/usb-vault/data/meccanicos.iso")
 
+      with subtest("the installer never offers the Ventoy stick"):
+          answers = {"fullname": "T", "username": "tester", "password": "user-pass-1", "hostname": "testbox",
+                     "luks_password": "luks-test-pass-sixteen", "disk": "/dev/sda"}
+          machine.succeed(f"echo {shlex.quote(json.dumps(answers))} > /tmp/answers.json")
+          out = machine.fail("mos-install --config /tmp/answers.json < /dev/null 2>&1")
+          assert "can't be erased" in out, out
+
       with subtest("vault and persistent home as files on the Ventoy partition"):
           machine.succeed("printf 'vault-pass-sixteen\\nvault-pass-sixteen\\n' | USB_VAULT_USER=live usb-vault create-file --size 64M --name test.luks")
           machine.succeed("echo hello-ventoy > /home/live/Vault-test/proof.txt && USB_VAULT_USER=live usb-vault close")
@@ -427,6 +449,11 @@ in
           machine.wait_for_unit("multi-user.target")
           machine.succeed("findmnt /home/live | grep >/dev/null mos-home")
           machine.succeed("printf 'vault-pass-sixteen\\n' | USB_VAULT_USER=live usb-vault open test.luks && grep -q hello-ventoy /home/live/Vault-test/proof.txt")
+          # The home in use isn't copied, and the backup says so.
+          out = machine.succeed("mkdir -p /tmp/vb && USB_VAULT_USER=live usb-vault backup /tmp/vb 2>&1")
+          assert "INCOMPLETE" in out, out
+          machine.succeed("test -f /tmp/vb/mos-usb-backup-*/meccanicos.files/test.luks")
+          machine.succeed("! test -e /tmp/vb/mos-usb-backup-*/meccanicos.files/mos-home.luks")
           machine.shutdown()
     '';
   };

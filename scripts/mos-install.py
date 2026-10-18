@@ -344,8 +344,17 @@ def boot_disk():
         src = subprocess.run(["blkid", "-t", f"LABEL={ISO_LABEL}", "-o", "device"], capture_output=True, text=True).stdout.split("\n")[0].strip()
     if not src:
         return ""
-    pk = subprocess.run(["lsblk", "-dno", "PKNAME", src], capture_output=True, text=True).stdout.strip()
-    return "/dev/" + pk if pk else src
+    # Every device under it, to the disk: one step up isn't enough under Ventoy
+    # (/dev/mapper/ventoy is over a partition, sda1, of the stick, sda).
+    out = subprocess.run(["lsblk", "-nspo", "PATH,TYPE", src], capture_output=True, text=True).stdout
+    disks = [l.split()[0] for l in out.splitlines() if l.split()[1:] == ["disk"]]
+    return disks[-1] if disks else src
+
+
+def eligible(disk):
+    """May this disk be erased: in list_disks (not the stick we started from,
+    not read-only, not too small), now?"""
+    return any(d[1] == disk for d in list_disks())
 
 
 def list_disks():
@@ -1097,6 +1106,10 @@ def check_uefi():
 
 def partition_disk(disk):
     """GPT: 1 GiB EFI + the rest for LUKS. Returns (efi, crypt) partitions."""
+    # Checked again just before: it may have been unplugged, or its name reused.
+    if not eligible(disk):
+        raise RuntimeError(f"{disk} can't be erased now (the USB stick we started from, read-only, smaller than "
+                           "8 GB, or unplugged?). Nothing was erased.")
     release_disk(disk)
     run(["wipefs", "-af", disk], quiet=True)
     layout = (
@@ -1221,8 +1234,36 @@ def connect_wifi(v):
 
 
 def preflight(c, d):
-    """Before erasing: Tang must answer (it seals the disk key now); the fleet
-    server need not (the computer introduces itself at its first start)."""
+    """Before erasing, what can be checked: the tools, the hardware the unlock
+    method needs, a stick the recovery key can be written to, and Tang, which
+    must answer (it seals the disk key now). The fleet server need not (the
+    computer introduces itself at its first start). Enrolling itself, and the
+    installation's downloads, can still fail after the disk is erased."""
+    method = c["unlock"]["method"]
+    tools = ["systemd-cryptenroll", "age", "nixos-install"] + (["clevis"] if method == "tang" else [])
+    missing = [t for t in tools if not shutil.which(t)]
+    if missing and not TEST:
+        raise RuntimeError(f"Missing on this stick: {', '.join(missing)}. Nothing was erased.")
+    if method == "tpm-pin" and not TEST and not os.path.exists("/dev/tpmrm0"):
+        raise RuntimeError("This computer has no TPM 2.0 chip (or it is turned off in its firmware settings), "
+                           "which the PIN unlock needs: turn it on, or ask the admins for another unlock "
+                           "method. Nothing was erased.")
+    if method == "fido2" and not TEST:
+        r = subprocess.run(["systemd-cryptenroll", "--fido2-device=list"], capture_output=True, text=True)
+        if not any(l.startswith("/dev/") for l in r.stdout.splitlines()):
+            raise RuntimeError("No FIDO2 security key found: plug it in, then start again. Nothing was erased.")
+    try:  # the recovery key is saved here: the stick must take it
+        res = os.path.join(d, "result")
+        os.makedirs(res, exist_ok=True)
+        probe = os.path.join(res, ".write-test")
+        with open(probe, "w") as fh:
+            fh.write("ok\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.remove(probe)
+    except OSError as e:
+        raise RuntimeError(f"Can't write to the stick ({e}): its recovery key goes there. Nothing was erased.")
+    print(f"    ok   tools, {method} hardware, the stick takes the recovery key")
     host, _, port = c["server"].partition(":")
     r = subprocess.run(["ssh-keyscan", "-T", "10", "-t", "ed25519", "-p", port or "22", host],
                        capture_output=True, text=True)
@@ -1472,16 +1513,18 @@ def enter(cmd, input=None):
 def create_user(v):
     u = v["username"]
     name = v["fullname"].replace(":", " ")
-    enter(f"useradd -m -g users -G {USER_GROUPS} -s /run/current-system/sw/bin/bash -c {shlex.quote(name)} {u}")
+    enter(f"useradd -m -g users -G {USER_GROUPS} -s /run/current-system/sw/bin/bash -c {shlex.quote(name)} "
+          f"{shlex.quote(u)}")
     enter("chpasswd", input=f"{u}:{v['password']}\n")
     # The user's own SSH key, to log in to other machines: Ed25519 (OpenSSH's
     # default; no key-size or nonce pitfalls). No passphrase: it is on the
     # encrypted disk. -a 100 hardens one added later with ssh-keygen -p.
     ssh = f"/home/{u}/.ssh"
     enter(
-        f"install -d -m 700 -o {u} -g users {ssh} && "
-        f"ssh-keygen -q -t ed25519 -a 100 -N '' -C {shlex.quote(u + '@' + v['hostname'])} -f {ssh}/id_ed25519 && "
-        f"chown {u}:users {ssh}/id_ed25519 {ssh}/id_ed25519.pub"
+        f"install -d -m 700 -o {shlex.quote(u)} -g users {shlex.quote(ssh)} && "
+        f"ssh-keygen -q -t ed25519 -a 100 -N '' -C {shlex.quote(u + '@' + v['hostname'])} "
+        f"-f {shlex.quote(ssh + '/id_ed25519')} && "
+        f"chown {shlex.quote(u + ':users')} {shlex.quote(ssh + '/id_ed25519')} {shlex.quote(ssh + '/id_ed25519.pub')}"
     )
     print(f"    {u}: member of wheel (passwordless sudo). Root login is disabled.")
     print("    SSH key: ~/.ssh/id_ed25519.pub")
@@ -1554,8 +1597,22 @@ def main():
         print("Run as root (the mos-install wrapper does this for you).")
         return 1
     if len(sys.argv) > 2 and sys.argv[1] == "--config":
-        v = json.load(open(sys.argv[2]))
+        try:
+            with open(sys.argv[2]) as fh:
+                v = json.load(fh)
+            if not isinstance(v, dict):
+                raise ValueError("not a JSON object")
+        except (OSError, ValueError) as e:
+            print(f"{sys.argv[2]}: {e}")
+            return 1
         v.setdefault("hostname", HOSTNAME)
+        for k in ("username", "fullname", "password", "luks_password", "disk", "wifi", "wifi_security",
+                  "wifi_password"):
+            v.setdefault(k, "")
+        if not all(isinstance(v[k], str) for k in ("username", "fullname", "password", "luks_password", "disk",
+                                                    "hostname", "wifi", "wifi_security", "wifi_password")):
+            print("Every answer is text (a JSON string).")
+            return 1
         if v.get("fleet_dir"):
             try:
                 c = load_bundle(v["fleet_dir"])
@@ -1565,8 +1622,6 @@ def main():
             v["org"], v["hostname"] = v["fleet_dir"], c["hostname"]
             v.setdefault("pin", "")
             v.setdefault("disk_label", v["disk"])
-            for k in ("wifi", "wifi_security", "wifi_password"):
-                v.setdefault(k, "")
             serial = c.get("install", {}).get("disk_serial", "")
             if serial and not any(d[1] == v["disk"] and d[3].casefold() == serial.casefold() for d in list_disks()):
                 print(f"Organization install: {v['disk']} is not the disk with serial {serial}.")
@@ -1575,8 +1630,17 @@ def main():
             if errs:
                 print("\n".join(errs))
                 return 1
+        else:  # the same checks as the form's
+            errs = validate(v)
+            if errs:
+                print("\n".join(errs))
+                return 1
         if not HOSTNAME_RE.fullmatch(v["hostname"]):
             print(f"Bad hostname: {v['hostname']!r}")
+            return 1
+        if not eligible(v["disk"]):
+            print(f"{v['disk'] or 'No disk'} can't be erased (the USB stick we started from, read-only, smaller "
+                  f"than 8 GB, or not there). Disks that can: {', '.join(d[1] for d in list_disks()) or 'none'}.")
             return 1
         # No form here: the same big red warning, and YES typed (or piped) in.
         lines = erase_warning(v["disk"]) + ["", "Type YES and press Enter to erase it. Anything else cancels."]

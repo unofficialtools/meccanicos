@@ -103,7 +103,7 @@ class Menu:
                           "locked until you unlock it with its password", self.create_file))
             items.append(("Open the USB stick's files", "The stick's own files area, in the file manager", self.stick))
             if self.vaults or has_home:
-                items.append(("Back up vaults to another disk", "Copy them (still encrypted) to a folder on another disk", self.backup))
+                items.append(("Back up vaults to another disk", "Copy them to a folder on another disk (vaults stay encrypted)", self.backup))
             if self.recover:
                 items.append(("Recover vaults after re-flashing", "Put the vault partitions back in the table: nothing is erased", self.do_recover))
         items.append(("Quit", "", None))
@@ -361,7 +361,8 @@ class Menu:
         disks = sorted(glob.glob(f"/run/media/{user}/*"))
         v = self.form("Back up vaults", [("To folder", disks[0] if disks else "", "text")],
                       ok="Back up", note="A folder on another disk (plugged-in disks are in /run/media).\n"
-                      "Vaults are locked first, and copied still encrypted.")
+                      "Vaults are locked first and copied still encrypted; other files on the\n"
+                      "stick's files area are copied as they are (not encrypted).")
         if not v:
             return
         folder = os.path.expanduser(v["To folder"].strip())

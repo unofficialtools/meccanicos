@@ -97,7 +97,12 @@ def literal(path):
 
 
 def target():
-    return os.path.join(HOME, "Restored-" + datetime.datetime.now().strftime("%Y%m%d-%H%M"))
+    """A new ~/Restored-<date>: never a folder an earlier restore made."""
+    base = os.path.join(HOME, "Restored-" + datetime.datetime.now().strftime("%Y%m%d-%H%M"))
+    to, n = base, 2
+    while os.path.lexists(to):
+        to, n = f"{base}-{n}", n + 1
+    return to
 
 
 def restore(sid, paths, to):

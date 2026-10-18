@@ -471,22 +471,49 @@ mapper_name() {
     fi
 }
 
+# Where a vault is mounted (open), or will be: ~/Vault for a partition (a second
+# one open at the same time: ~/Vault-sdb4), ~/Vault-NAME for NAME.luks.
 mount_point() {
-    local src=$1 home
+    local src=$1 home mp
+    mp=$(findmnt -nro TARGET -S "/dev/mapper/$(mapper_name "$src")" 2>/dev/null | head -n1 || true)
+    [[ -n $mp ]] && { echo "$mp"; return; }
     home=$(target_home)
     if [[ -b $src ]]; then
-        echo "$home/Vault"
+        mp="$home/Vault"
+        findmnt -n "$mp" >/dev/null 2>&1 && mp="$home/Vault-$(basename "$src")"
+        echo "$mp"
     else
         echo "$home/Vault-$(basename "$src" .luks)"
     fi
 }
 
-is_open() { [[ -e /dev/mapper/$(mapper_name "$1") ]]; }
+# The partition or file behind an open mapping.
+mapping_source() {
+    cryptsetup status "$1" 2>/dev/null | awk '$1=="loop:"{l=$2} $1=="device:"{d=$2} END{print (l!="" ? l : d)}'
+}
+
+# Open: its mapping exists and is this vault's (two files can share a name:
+# docs.luks and vaults/docs.luks).
+is_open() {
+    local name back
+    name=$(mapper_name "$1")
+    [[ -e /dev/mapper/$name ]] || return 1
+    back=$(mapping_source "$name")
+    [[ -z $back || $(readlink -f "$back") == "$(readlink -f "$1")" ]]
+}
 
 do_open() {
     local src=$1 name mp pass
     name=$(mapper_name "$src")
+    if [[ -e /dev/mapper/$name ]] && ! is_open "$src"; then
+        die "Another vault called $(basename "$src") is open ($(mapping_source "$name")): lock it first (usb-vault close)."
+    fi
     mp=$(mount_point "$src")
+    local used
+    used=$(findmnt -nro SOURCE "$mp" 2>/dev/null | head -n1 || true)
+    if [[ -n $used && $used != "/dev/mapper/$name" ]]; then
+        die "$mp is in use by $used: lock or unmount that first."
+    fi
     if ! is_open "$src"; then
         pass=$(ask_passphrase "$(basename "$src")")
         printf '%s' "$pass" | cryptsetup open --key-file=- "$src" "$name" ||
@@ -525,6 +552,9 @@ do_close() {
 # Create LUKS2 + ext4 on $1 (device or file), mount it.
 format_vault() {
     local src=$1 label=${2:-$VAULT_LABEL} pass=${3:-} name
+    name=$(mapper_name "$src")
+    [[ ! -e /dev/mapper/$name ]] ||
+        die "Another vault called $(basename "$src") is open ($(mapping_source "$name")): lock it first (usb-vault close)."
     [[ -n $pass ]] || pass=$(new_passphrase)
     local label_args=()
     [[ -b $src ]] && label_args=(--label "$label")
@@ -945,53 +975,74 @@ cmd_backup() {
             die "Nothing to back up: no vaults on this Ventoy stick yet ($(data_dir) does not exist)."
         fi
     fi
+    echo "Locking vaults so the copy is consistent..."
+    GUI=0 cmd_close --all
+    local m still=()
+    for m in /dev/mapper/usbvault-*; do [[ -e $m ]] && still+=("$(mapping_source "$(basename "$m")")"); done
+    ((${#still[@]} == 0)) || die "Still open (in use?), so it can't be copied consistently: ${still[*]}.
+Close the files and programs using it, then back up again. Nothing was copied."
     out="$dest/mos-usb-backup-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$out"
-    echo "Locking vaults so the copy is consistent..."
-    cmd_close --all >/dev/null 2>&1 || true
+    local skipped=""
     if is_ventoy; then
         mount_data_partition >/dev/null || die "Cannot mount the Ventoy partition."
         local excl=()
         if findmnt -n /dev/mapper/mos-home >/dev/null 2>&1; then
             excl=(--exclude "/$HOME_FILE")
+            skipped=$HOME_FILE
             echo "  (skipping $HOME_FILE: it is your home folder right now)"
         fi
         echo "ventoy" >"$out/map.txt"
         rsync -a --info=progress2 "${excl[@]}" "$(data_dir)/" "$out/meccanicos.files/"
         sync
-        info "Backed up the vault files to $out"
+        info "Backed up the vault files to $out (vault files stay encrypted; other files are plain copies)"
+        backup_incomplete "$skipped"
         return
     fi
     current_map "$disk" >"$out/map.txt"
-    local i=0
+    # Copies are named by their line in map.txt (1-MOS-VAULT.img, 2-…): labels
+    # repeat (every vault partition is MOS-VAULT).
+    local i=0 j=0
     while IFS= read -r line; do
         i=$((i + 1))
         s=$(sed -n 's/.*start= *\([0-9]*\).*/\1/p' <<<"$line")
         ((s >= $(iso_end "$disk"))) || continue
+        j=$((j + 1))
         dev=$(part_dev "$disk" "$i")
         l=$(blkid -p -o value -s LABEL "$dev" 2>/dev/null || echo part$i)
         t=$(blkid -p -o value -s TYPE "$dev" 2>/dev/null || true)
         if [[ $t == exfat ]]; then
-            echo "Copying files of $l..."
+            echo "Copying the files of $l (as they are: plain files stay plain, vault files encrypted)..."
             mount_data_partition >/dev/null
             local excl=()
             if findmnt -n /dev/mapper/mos-home >/dev/null 2>&1; then
                 excl=(--exclude "/$HOME_FILE")
+                skipped=$HOME_FILE
                 echo "  (skipping $HOME_FILE: it is your home folder right now)"
             fi
-            rsync -a --info=progress2 "${excl[@]}" "$DATA_MNT/" "$out/$l.files/"
+            rsync -a --info=progress2 "${excl[@]}" "$DATA_MNT/" "$out/$j-$l.files/"
             umount "$DATA_MNT" 2>/dev/null || true
         elif [[ $l == "$HOME_LABEL" ]] && findmnt -n /dev/mapper/mos-home >/dev/null 2>&1; then
-            echo "Skipping $l: it is your home folder right now (back it up from a fresh session)."
+            echo "Skipping $l: it is your home folder right now."
+            skipped=$l
             continue
         else
             echo "Copying $l (still encrypted)..."
-            dd if="$dev" of="$out/$l.img" bs=4M status=progress conv=fsync
+            dd if="$dev" of="$out/$j-$l.img" bs=4M status=progress conv=fsync
         fi
         n=$((n + 1))
     done < <(sfdisk -d "$disk" 2>/dev/null | grep 'start=')
     sync
     info "Backed up $n item(s) to $out"
+    backup_incomplete "$skipped"
+}
+
+# The persistent home in use can't be copied: say the backup lacks it.
+backup_incomplete() {
+    [[ -n $1 ]] || return 0
+    info "INCOMPLETE: your persistent home ($1) was not copied, because it is in use.
+To back it up too: start the stick without unlocking the home (press Enter at
+its password prompt), then run the backup again."
 }
 
 cmd_restore() {
@@ -1010,20 +1061,36 @@ cmd_restore() {
     fi
     confirm "Restore the vaults from $src onto $disk?
 New partitions are created after the live system; nothing existing is erased." || exit 1
+    # Every copy there first: a missing or cut-short one is found before the stick changes.
+    local j=0 img files bad=()
     while read -r s z t l; do
         [[ -n $s ]] || continue
-        if [[ -f $src/$l.img ]]; then
-            local sectors=$(($(stat -c %s "$src/$l.img") / 512))
+        j=$((j + 1))
+        img=$src/$j-$l.img
+        [[ -f $img ]] || img=$src/$l.img # a backup from before the numbers
+        if [[ -f $img ]] && (($(stat -c %s "$img") % 512 != 0 || $(stat -c %s "$img") == 0)); then
+            bad+=("$(basename "$img")")
+        fi
+    done <"$src/map.txt"
+    ((${#bad[@]} == 0)) || die "Damaged or cut-short copies in $src: ${bad[*]}. Nothing was changed."
+    j=0
+    while read -r s z t l; do
+        [[ -n $s ]] || continue
+        j=$((j + 1))
+        img=$src/$j-$l.img files=$src/$j-$l.files
+        [[ -e $img || -e $files ]] || { img=$src/$l.img; files=$src/$l.files; }
+        if [[ -f $img ]]; then
+            local sectors=$(($(stat -c %s "$img") / 512))
             dev=$(append_partition "$disk" "$sectors" "$t")
             echo "Writing $l to $dev..."
-            dd if="$src/$l.img" of="$dev" bs=4M status=progress conv=fsync
-        elif [[ -d $src/$l.files ]]; then
+            dd if="$img" of="$dev" bs=4M status=progress conv=fsync
+        elif [[ -d $files ]]; then
             dev=$(append_partition "$disk" "$z" 7)
             mkfs.exfat -q -L "$l" "$dev" >/dev/null 2>&1 || mkfs.exfat -n "$l" "$dev" >/dev/null
             udevadm settle 2>/dev/null || true
             mkdir -p "$DATA_MNT"
             mount "$dev" "$DATA_MNT"
-            rsync -a --info=progress2 "$src/$l.files/" "$DATA_MNT/"
+            rsync -a --info=progress2 "$files/" "$DATA_MNT/"
             umount "$DATA_MNT"
         else
             echo "  (no copy of $l in the backup, skipped)"

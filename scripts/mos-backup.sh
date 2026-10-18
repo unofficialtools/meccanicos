@@ -26,7 +26,8 @@
 #                                  pick a version full screen (Files: right-click,
 #                                  Versions from Backups…; yazi: B)
 #   mos-backup restore [ID] [TO] restore snapshot ID (default: latest) into folder TO
-#                                  (default: ~/Restored-<date>); never overwrites ~.
+#                                  (default: a new ~/Restored-<date>; TO must be new
+#                                  or empty); never overwrites anything
 #                                  In a terminal, with no ID: same as browse
 #   mos-backup restore ID [TO] --only PATH...
 #                                  restore only these files or folders (as files shows
@@ -38,7 +39,13 @@
 #                                  automatic backups: nightly (on; a missed night
 #                                  runs at the next start), hourly, or none. They
 #                                  skip quietly when DEST is not reachable
-#   mos-backup status            where, when, how big, the next automatic backup
+#   mos-backup status            where, when, how big, the next automatic backup,
+#                                  what isn't included
+#
+# Exit codes: 0 done; 1 failed; 2 wrong usage; 3 the destination isn't
+# reachable (unplugged, offline); 5 saved, but some files could not be read
+# (restic lists them: the backup is incomplete). Not backed up: open vaults
+# (~/Vault*), other disks mounted inside your home, caches and the Trash.
 #
 # Backups are encrypted with your backup password and deduplicated, so daily
 # runs are fast and small. Lose the password and the backup cannot be read.
@@ -55,6 +62,7 @@ CONF="${XDG_CONFIG_HOME:-$HOME/.config}/meccanicos"
 ENV="$CONF/backup.env"
 PASSFILE="$CONF/backup.pass"
 LAST="$CONF/backup.last"     # when the last backup finished (seconds)
+INCOMPLETE="$CONF/backup.incomplete" # when it could not read some files (none: it read them all)
 PRUNED="$CONF/backup.pruned" # when old data was last pruned (slow: weekly)
 MNT="$HOME/Backups"          # mos-backup mount
 
@@ -152,20 +160,39 @@ cmd_init() {
         repo="$dest/mos-backup-$host-$USER"
     fi
     chmod 700 "$CONF"
+    exec 9>"$CONF/backup.lock"
+    flock -n 9 || { echo "A backup is running: try again when it has finished." >&2; exit 1; }
     local p1 p2
     read -r -s -p "Backup password: " p1; echo
     read -r -s -p "Repeat password: " p2; echo
     [[ $p1 == "$p2" && ${#p1} -ge 8 ]] || { echo "Passwords differ or are shorter than 8 characters." >&2; exit 1; }
-    (umask 077; printf 'RESTIC_REPOSITORY=%q\n' "$repo" >"$ENV")
+    # Tried with the new settings first: the old ones, and their saved password,
+    # stay until the backup opens (or is created) with the new ones.
+    local env_new pass_new
+    env_new=$(mktemp "$CONF/.backup.env.XXXXXX")
+    pass_new=$(mktemp "$CONF/.backup.pass.XXXXXX")
+    # shellcheck disable=SC2064
+    trap "rm -f '$env_new' '$pass_new'" EXIT
+    printf 'RESTIC_REPOSITORY=%q\n' "$repo" >"$env_new"
+    printf '%s' "$p1" >"$pass_new"
+    export RESTIC_REPOSITORY=$repo RESTIC_PASSWORD_FILE=$pass_new
+    unset RESTIC_PASSWORD
+    local kept="no backup was set up"
+    [[ -f $ENV ]] && kept="your backup settings and saved password are as they were"
+    if ! restic cat config >/dev/null 2>&1; then
+        if [[ $repo != rclone:* && -f $repo/config ]]; then
+            echo "There is already a backup in $repo, and this password doesn't open it. Nothing changed: $kept." >&2
+            exit 1
+        fi
+        restic init || { echo "Could not set up the backup. Nothing changed: $kept." >&2; exit 1; }
+    fi
+    mv -f "$env_new" "$ENV"
     if ((ask)); then
         rm -f "$PASSFILE"
-        export RESTIC_PASSWORD=$p1
         [[ -f $CONF/backup.nightly || -f $CONF/backup.hourly ]] && cmd_auto off
     else
-        (umask 077; printf '%s' "$p1" >"$PASSFILE")
+        mv -f "$pass_new" "$PASSFILE"
     fi
-    load
-    if ! restic cat config >/dev/null 2>&1; then restic init; fi
     if ((ask)); then
         echo "Backup ready at $repo. Its password is not saved: 'mos-backup now' (and every"
         echo "command that opens the backup) asks for it. No automatic backups."
@@ -202,7 +229,16 @@ cmd_now() {
         exit 1
     fi
     date +%s >"$LAST"
+    # Thinned as usual: every snapshot of the last 24 hours stays, so an
+    # incomplete one never replaces a recent complete one.
     thin
+    if ((rc == 3)); then
+        date +%s >"$INCOMPLETE"
+        echo "Backup INCOMPLETE: the files above could not be read (the rest is saved)." >&2
+        notify dialog-warning "BACKUP // INCOMPLETE" "Some files could not be read. Run mos-backup now in a terminal to see which."
+        exit 5
+    fi
+    rm -f "$INCOMPLETE"
     [[ $mode == --auto ]] || notify document-save "BACKUP // DONE" "Your home folder is backed up."
 }
 
@@ -256,9 +292,17 @@ cmd_restore() {
     # Typed in a terminal without saying what: let them pick.
     if ((${#args[@]} == 0 && ${#only[@]} == 0)) && [[ -t 0 && -t 1 ]]; then cmd_browse; fi
     load
-    local id=${args[0]:-latest} to=${args[1]:-$HOME/Restored-$(date +%Y%m%d-%H%M)}
+    local id=${args[0]:-latest} to=${args[1]:-}
     # Restored files land in TO/home/..., so TO=/ would overwrite them in place.
-    [[ $(readlink -m "$to") != / ]] || { echo "Restoring into / would overwrite your files: pick another folder." >&2; exit 2; }
+    [[ -z $to || $(readlink -m "$to") != / ]] || { echo "Restoring into / would overwrite your files: pick another folder." >&2; exit 2; }
+    if [[ -z $to ]]; then  # a new folder: never one an earlier restore made
+        local base k=2
+        base=$HOME/Restored-$(date +%Y%m%d-%H%M)
+        to=$base
+        while [[ -e $to ]]; do to="$base-$k"; k=$((k + 1)); done
+    elif [[ -d $to && -n $(ls -A "$to" 2>/dev/null) ]]; then
+        echo "$to already has files in it: restore into a new or empty folder (nothing is overwritten)." >&2; exit 2
+    fi
     if ((${#args[@]} > 2)); then
         echo "usage: mos-backup restore [ID] [TO] [--only PATH...]" >&2; exit 2
     fi
@@ -354,7 +398,10 @@ cmd_status() {
     fi
     local a
     a=$(age)
-    if [[ -s $LAST ]]; then echo "Last backup: $((a / 3600)) h $((a % 3600 / 60)) min ago"; fi
+    if [[ -s $LAST ]]; then
+        echo "Last backup: $((a / 3600)) h $((a % 3600 / 60)) min ago$([[ -f $INCOMPLETE ]] && echo ", INCOMPLETE (some files could not be read: mos-backup now shows which)")"
+    fi
+    echo "Not included: open vaults (~/Vault*), other disks mounted in your home, caches, the Trash"
     if [[ ! -f $PASSFILE ]]; then
         echo "Password:    not saved, asked each time (mos-backup list shows the backups)"
         return 0
