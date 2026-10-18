@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 
-VERSION = "2"
+VERSION = "3"  # 3: acknowledges jobs (job-got), adopts the server's log cursor
 
 # A system built for a computer: what the server may tell an agent to run.
 SYSTEM_RE = re.compile(r"/nix/store/[0-9a-df-np-sv-z]{32}-nixos-system-[A-Za-z0-9._+-]{1,200}")

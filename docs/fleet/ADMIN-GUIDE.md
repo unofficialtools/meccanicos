@@ -145,9 +145,18 @@ Every `mos-fleet` command that edits the repository checks the result and
 commits; `--push` sends it right away, `mos-fleet push` later. Plain git works
 too: edit, `git commit`, then `mos-fleet push` (it validates first).
 
-The server refuses a push that isn't valid (a typo in a file, two people
-with the same uid, a group that doesn't exist, no admin left), and never
-lets `main` be rewritten: undo with a new commit (`git revert`).
+Three checks, in three places:
+
+- **On your computer**, `mos-fleet validate` (and `push`, which runs it)
+  checks the files and evaluates every computer's system with Nix;
+  `--no-eval` skips the evaluation.
+- **The server** refuses a push whose newest commit on a branch has files
+  that aren't valid (a typo, two people with the same uid, a group that
+  doesn't exist, no admin left): the same rules as `validate --no-eval`, not
+  a Nix evaluation, and not every commit in between. It never lets `main` be
+  rewritten: undo with a new commit (`git revert`).
+- **The build** is the full check: a computer whose system fails to build
+  keeps running its previous one (`mos-fleet status`, `mos-fleet builds`).
 
 `mos-fleet diff` shows what your unpushed commits change on each computer:
 who may log in, whose system changes.
@@ -217,10 +226,14 @@ $ mos-fleet password set lbianchi
 ```
 
 The hash is made on your computer; only the hash goes to the server, and from
-there to the computers where `lbianchi` may log in. People change their own
-with **`mos-passwd`** (`passwd` on managed computers): on any computer, once,
-for all of them. It needs the current password; after 5 wrong ones in an hour
-it waits (or an admin sets a new one).
+there to the computers where `lbianchi` may log in: those online within
+seconds, the others when they next connect. People change their own with
+**`mos-passwd`** (`passwd` on managed computers): on any computer, once, for
+all of them. The computer sends the current password to the server, over the
+pinned, encrypted SSH connection, to be checked against the stored hash; the
+new one is hashed on the computer first. After 5 wrong ones in an hour it
+waits (or an admin sets a new one). A computer that can't apply a password
+says so in its logs (`mos-fleet logs NAME`) and tries again.
 
 ---
 
@@ -275,7 +288,7 @@ the server, and what was checked is what is sent.
 | Task | How |
 |---|---|
 | New person | `mos-fleet person add NAME "Full Name" --group office`, then `mos-fleet password set NAME` |
-| Person leaves | `mos-fleet person disable NAME` (or `remove`); push |
+| Person leaves | `mos-fleet person disable NAME` (or `remove`); push; see [When someone leaves](#when-someone-leaves) |
 | Let someone use a profile's computers | `mos-fleet member add office NAME` (`member remove` to undo) |
 | Someone may use more profiles | `mos-fleet group edit office --add-profile lab` |
 | sudo for a group | `mos-fleet group edit lab --sudo` |
@@ -309,8 +322,17 @@ asks for the disk password.
 
 **A computer doesn't update.** `mos-fleet status ws-001`: `build failed` shows
 the build's error (the computer keeps running its previous system); `update
-pending (offline)` means it hasn't connected. `mos-fleet builds ws-001 --log`,
-`mos-fleet deployments ws-001`.
+pending (offline)` means it hasn't connected; `switch failed` means the new
+system arrived but switching to it failed (some services may not have
+started: `mos-fleet deployments ws-001` has the output; `mos-fleet switch
+ws-001` tries again). `mos-fleet builds ws-001 --log`. A build that failed for
+a passing reason (the network, a full disk) is built again with `mos-fleet
+retry ws-001`; otherwise only a new commit builds again.
+
+**A job shows `sent`.** It went out, but the computer hasn't confirmed it
+(the connection dropped): it is sent again when the computer reconnects, and
+a computer never runs the same job twice. `running` means it has it; a job
+that stays `running` may never finish (the computer was turned off).
 
 **A change broke something.** `git revert COMMIT && mos-fleet push`. On the
 computer itself, the boot menu still lists the previous systems.
@@ -340,9 +362,27 @@ the server's SSH keys. It holds password hashes: keep it offline, encrypted
 | The server's disk password | the safe | it doesn't unlock itself |
 | The repository | every admin's `~/fleet` is a full copy | |
 
-Restoring: install MeccanicOS on a new server with the same name, `mos-fleet
-server init`, then put the backup back in `/var/lib/mos-fleet` (owned by
-`fleet`), `/var/lib/tang` and `/etc/ssh`, and restart it.
+**Restoring**, on the same server or a new one with the same name and
+address:
+
+```sh
+$ mos-fleet server init                                  # a fresh install, at its console
+$ mos-fleet server restore /run/usb-vault/data/fleet-backup
+```
+
+It stops the fleet's services and connections, moves what is there aside
+(`/var/lib/mos-fleet.before-restore-…`), rebuilds the repository from
+`fleet.bundle`, puts back both databases (owned by `fleet`, mode 600), the
+server's SSH keys (the computers pinned them: with others they won't connect),
+Tang's keys (or disks stop unlocking by themselves) and `fleet-server.toml`,
+then starts everything again and checks the keys against `fleet.toml`. The
+computers reconnect by themselves; systems missing from the new server's
+store are built again.
+
+Each database is copied consistently, but not at the same instant as the other
+or the repository: a push or a password change made during the backup may be
+missing. Push again from an admin's `~/fleet`, and set such a password again.
+Try a restore once on a spare computer or a VM, before you need it.
 
 ---
 
@@ -362,10 +402,29 @@ server init`, then put the backup back in `/var/lib/mos-fleet` (owned by
   computer), so nobody can pretend to be the server.
 - Pushes are checked before they're accepted; `main` can't be rewritten; every
   push, job, password change and recovery-key read is in `mos-fleet audit`.
-- Computers never send passwords: a person changing theirs proves the current
-  one to the server, which keeps only hashes. Repeated wrong guesses lock it.
+- Password changes send the current password over the pinned, encrypted SSH
+  connection, for the server to check; the new password is hashed on the
+  computer first. The server stores hashes, never passwords. Repeated wrong
+  guesses lock changes for that person.
 - Whoever controls the server controls the fleet: it decides what computers
   run. Keep it in a locked room, its disk encrypted, its backups offline.
+
+## When someone leaves
+
+`mos-fleet person disable NAME --push` (or `remove`). Their account goes away
+on a computer only when that computer runs a system without it:
+
+1. the push is accepted (the server checks the files);
+2. the server builds each computer's new system (`mos-fleet builds`);
+3. each computer switches to it: the account is gone there, with its password
+   and SSH keys (their home folder stays). Right after the push the server also
+   stops sending their password hash.
+4. `mos-fleet status` says `up to date` for a computer once it runs it.
+
+A computer that is off or away keeps the account until it connects; one whose
+build or switch fails keeps it too (`mos-fleet status`). Switching doesn't end
+what they are running now: end it with
+`mos-fleet run --profile P -- loginctl terminate-user NAME` (or `--host H`).
 
 ---
 

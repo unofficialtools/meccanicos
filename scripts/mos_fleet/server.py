@@ -61,41 +61,66 @@ def _dal(name, migrate):
     return db
 
 
+# How SQLite stores what isn't text, for a column added to an adopted table.
+SQL_TYPES = {"boolean": "CHAR(1)", "integer": "INTEGER", "datetime": "TIMESTAMP"}
+
+
+def define(db, migrate, name, *fields):
+    """db.define_table. A table that is in the file but has no pydal record next
+    to it (a database put back by `mos-fleet server restore`) is adopted, not
+    created again: its record is written, and the columns it lacks (added since
+    that backup) are added."""
+    have = {r[1] for r in db.executesql(f'PRAGMA table_info("{name}")')}
+    adopt = migrate and have and not os.path.exists(os.path.join(STATE, f"{db._uri_hash}_{name}.table"))
+    t = db.define_table(name, *fields, **({"fake_migrate": True} if adopt else {}))
+    if adopt:
+        for f in t:
+            if f.name not in have:
+                db.executesql(f'ALTER TABLE "{name}" ADD COLUMN "{f.name}" {SQL_TYPES.get(f.type, "TEXT")}')
+    return t
+
+
 def open_state(migrate=False):
     from pydal import Field
 
     db = _dal("state.db", migrate)
-    db.define_table("host", Field("name", unique=True), Field("profile"), Field("branch"),
-                    Field("host_key_fp"), Field("in_repo", "boolean", default=True),
-                    Field("first_seen", "datetime"), Field("last_seen", "datetime"), Field("address"),
-                    Field("agent_version"), Field("nixos_version"), Field("kernel"),
-                    Field("current_system", length=300), Field("current_rev"),
-                    Field("desired_system", length=300), Field("desired_rev"), Field("log_cursor", "text"))
-    db.define_table("revision", Field("rev"), Field("branch"), Field("pushed_by"), Field("pushed_on", "datetime"),
-                    Field("valid", "boolean"), Field("errors", "text"))
-    db.define_table("build", Field("host"), Field("rev"), Field("branch"), Field("system_path", length=300),
-                    Field("started", "datetime"), Field("finished", "datetime"), Field("ok", "boolean"),
-                    Field("log", "text"))
-    db.define_table("deployment", Field("host"), Field("rev"), Field("from_system", length=300),
-                    Field("to_system", length=300), Field("started", "datetime"), Field("finished", "datetime"),
-                    Field("result"), Field("output", "text"))
-    db.define_table("report", Field("host"), Field("time", "datetime"), Field("facts", "text"))
-    db.define_table("log", Field("host"), Field("time", "datetime"), Field("boot_id"), Field("unit"),
-                    Field("priority", "integer"), Field("message", "text"))
-    db.define_table("job", Field("host"), Field("kind"), Field("args", "text"), Field("token"),
-                    Field("created_by"), Field("created_on", "datetime"), Field("delivered_on", "datetime"),
-                    Field("finished_on", "datetime"), Field("canceled", "boolean", default=False),
-                    Field("exit_code", "integer"), Field("output", "text"))
-    db.define_table("session", Field("host"), Field("connected_on", "datetime"),
-                    Field("disconnected_on", "datetime"), Field("address"), Field("pid", "integer"))
-    db.define_table("audit", Field("time", "datetime"), Field("actor"), Field("action"), Field("target"),
-                    Field("details", "text"))
-    db.define_table("enrollment", Field("host"), Field("profile"), Field("unlock"), Field("branch"),
-                    Field("disk_serial"), Field("enroll_key", length=1024), Field("created_by"),
-                    Field("created_on", "datetime"), Field("expires", "datetime"), Field("used_on", "datetime"),
-                    Field("host_key", length=1024), Field("files", "text"), Field("facts", "text"),
-                    Field("address"), Field("added_on", "datetime"))
+    # Jobs delivered before agents acknowledged them (received_on) count as received:
+    # sent again, an old job could run twice.
+    old_jobs = migrate and "received_on" not in [r[1] for r in db.executesql('PRAGMA table_info("job")')] \
+        and bool(db.executesql('PRAGMA table_info("job")'))
+    define(db, migrate, "host", Field("name", unique=True), Field("profile"), Field("branch"),
+           Field("host_key_fp"), Field("in_repo", "boolean", default=True),
+           Field("first_seen", "datetime"), Field("last_seen", "datetime"), Field("address"),
+           Field("agent_version"), Field("nixos_version"), Field("kernel"),
+           Field("current_system", length=300), Field("current_rev"),
+           Field("desired_system", length=300), Field("desired_rev"), Field("log_cursor", "text"))
+    define(db, migrate, "revision", Field("rev"), Field("branch"), Field("pushed_by"), Field("pushed_on", "datetime"),
+           Field("valid", "boolean"), Field("errors", "text"))
+    define(db, migrate, "build", Field("host"), Field("rev"), Field("branch"), Field("system_path", length=300),
+           Field("started", "datetime"), Field("finished", "datetime"), Field("ok", "boolean"),
+           Field("log", "text"))
+    define(db, migrate, "deployment", Field("host"), Field("rev"), Field("from_system", length=300),
+           Field("to_system", length=300), Field("started", "datetime"), Field("finished", "datetime"),
+           Field("result"), Field("output", "text"))
+    define(db, migrate, "report", Field("host"), Field("time", "datetime"), Field("facts", "text"))
+    define(db, migrate, "log", Field("host"), Field("time", "datetime"), Field("boot_id"), Field("unit"),
+           Field("priority", "integer"), Field("message", "text"))
+    define(db, migrate, "job", Field("host"), Field("kind"), Field("args", "text"), Field("token"),
+           Field("created_by"), Field("created_on", "datetime"), Field("delivered_on", "datetime"),
+           Field("received_on", "datetime"), Field("finished_on", "datetime"),
+           Field("canceled", "boolean", default=False), Field("exit_code", "integer"), Field("output", "text"))
+    define(db, migrate, "session", Field("host"), Field("connected_on", "datetime"),
+           Field("disconnected_on", "datetime"), Field("address"), Field("pid", "integer"))
+    define(db, migrate, "audit", Field("time", "datetime"), Field("actor"), Field("action"), Field("target"),
+           Field("details", "text"))
+    define(db, migrate, "enrollment", Field("host"), Field("profile"), Field("unlock"), Field("branch"),
+           Field("disk_serial"), Field("enroll_key", length=1024), Field("created_by"),
+           Field("created_on", "datetime"), Field("expires", "datetime"), Field("used_on", "datetime"),
+           Field("host_key", length=1024), Field("files", "text"), Field("facts", "text"),
+           Field("address"), Field("added_on", "datetime"))
     if migrate:
+        if old_jobs:
+            db.executesql('UPDATE "job" SET "received_on" = "delivered_on" WHERE "delivered_on" IS NOT NULL')
         db.executesql("PRAGMA journal_mode=WAL")
         for t, cols in (("log", "host, time"), ("report", "host, time"), ("job", "host, delivered_on"),
                         ("build", "host, rev"), ("deployment", "host, started"), ("session", "host"),
@@ -109,12 +134,12 @@ def open_secrets(migrate=False):
     from pydal import Field
 
     db = _dal("secrets.db", migrate)
-    db.define_table("password", Field("person", unique=True), Field("hash"), Field("set_on", "datetime"),
-                    Field("set_by"), Field("from_host"))
-    db.define_table("recovery_key", Field("host"), Field("host_key", length=1024), Field("ciphertext", "text"),
-                    Field("created_on", "datetime"), Field("confirmed", "boolean", default=False))
-    db.define_table("passwd_attempt", Field("person"), Field("host"), Field("time", "datetime"),
-                    Field("ok", "boolean"))
+    define(db, migrate, "password", Field("person", unique=True), Field("hash"), Field("set_on", "datetime"),
+           Field("set_by"), Field("from_host"))
+    define(db, migrate, "recovery_key", Field("host"), Field("host_key", length=1024), Field("ciphertext", "text"),
+           Field("created_on", "datetime"), Field("confirmed", "boolean", default=False))
+    define(db, migrate, "passwd_attempt", Field("person"), Field("host"), Field("time", "datetime"),
+           Field("ok", "boolean"))
     if migrate:
         db.executesql("PRAGMA journal_mode=WAL")
         db.commit()
@@ -274,6 +299,9 @@ class HostSession:
         self.io = Lines(0, 1)
         self.sent_desired = self.sent_pw = self.repo_rev = self.repo = None
         self.next_pw = self.seen = 0
+        self.started = now()
+        self.hello = self.acks = False  # the agent said hello; it acknowledges jobs (agent 3)
+        self.sent_jobs = set()
 
     def run(self):
         db = self.db
@@ -315,12 +343,24 @@ class HostSession:
         if row and row.desired_system and row.desired_system != self.sent_desired:
             self.io.send({"t": "desired", "system": row.desired_system, "rev": row.desired_rev, "branch": row.branch})
             self.sent_desired = row.desired_system
-        for j in db((db.job.host == self.name) & (db.job.delivered_on == None)  # noqa: E711
-                    & (db.job.canceled == False)).select(orderby=db.job.id):  # noqa: E712
-            if db((db.job.id == j.id) & (db.job.delivered_on == None)).update(delivered_on=now()):  # noqa: E711
+        if not self.hello:
+            return True
+        # Jobs not delivered yet, and (to agents that acknowledge them) those delivered in an
+        # earlier session that never said they arrived: the connection may have dropped
+        # first. The agent keeps the ids it has seen, so a job sent again doesn't run again.
+        j = db.job
+        again = (j.delivered_on <= self.started) if self.acks else (j.id < 0)
+        claim = (j.received_on == None) & ((j.delivered_on == None) | again)  # noqa: E711
+        for r in db((j.host == self.name) & (j.canceled == False) & (j.finished_on == None)  # noqa: E711,E712
+                    & claim).select(orderby=j.id):
+            if r.id in self.sent_jobs:
+                continue
+            t = now()
+            if db((j.id == r.id) & claim).update(delivered_on=t, **({} if self.acks else {"received_on": t})):
                 db.commit()
-                self.io.send({"t": "job", "id": j.id, "kind": j.kind, "args": json.loads(j.args or "{}"),
-                              "token": j.token})
+                self.sent_jobs.add(r.id)
+                self.io.send({"t": "job", "id": r.id, "kind": r.kind, "args": json.loads(r.args or "{}"),
+                              "token": r.token})
         if time.time() >= self.next_pw:
             self.next_pw = time.time() + 5
             allowed = self.repo.allowed(self.name)
@@ -352,6 +392,14 @@ class HostSession:
                 **({"current_system": cur} if isinstance(cur, str) and SYSTEM_RE.fullmatch(cur) else {}))
             if t == "hello":
                 self.sent_desired = None  # say it again: the agent just started
+                self.hello = True
+                try:
+                    self.acks = int(m.get("agent")) >= 3
+                except (TypeError, ValueError):
+                    self.acks = False
+                row = db.host(name=self.name)
+                if row and row.log_cursor:  # where its logs here end: the agent goes on from there
+                    self.io.send({"t": "logs-ok", "cursor": row.log_cursor})
         elif t == "logs":
             entries = m.get("entries")
             if not isinstance(entries, list) or len(entries) > 5000:
@@ -391,11 +439,16 @@ class HostSession:
                 d.update_record(result=state, finished=now(), output=clip(m.get("output"), 64 << 10))
                 if state == "ok":
                     row.update_record(current_system=system, current_rev=rev or d.rev)
+        elif t == "job-got":
+            if isinstance(m.get("id"), int):
+                db((db.job.id == m["id"]) & (db.job.host == self.name) & (db.job.received_on == None)).update(  # noqa: E711
+                    received_on=now())
         elif t == "job-done":
             j = db.job(m.get("id")) if isinstance(m.get("id"), int) else None
             if j and j.host == self.name and not j.finished_on:
                 code = m.get("code")
-                j.update_record(finished_on=now(), exit_code=code if isinstance(code, int) else None,
+                j.update_record(finished_on=now(), received_on=j.received_on or now(),
+                                exit_code=code if isinstance(code, int) else None,
                                 output=clip(m.get("output"), 256 << 10))
         elif t == "passwd":
             ok, err = self.passwd(m)
@@ -571,7 +624,7 @@ def fmt(t):
     return t.strftime("%Y-%m-%d %H:%M:%S") if t else "-"
 
 
-def host_state(row, last_build, online):
+def host_state(row, last_build, online, last_deploy=None):
     if not row.in_repo:
         return "retired"
     if not row.desired_system:
@@ -582,6 +635,8 @@ def host_state(row, last_build, online):
         return "not built yet" if row.branch in heads() else f"waiting for branch {row.branch}"
     if last_build and last_build.ok is False and last_build.rev != row.desired_rev:
         return "build failed (runs the previous one)"
+    if last_deploy and last_deploy.to_system == row.desired_system and last_deploy.result == "failed":
+        return f"switch failed (mos-fleet deployments {row.name})"
     if row.current_system == row.desired_system:
         return "up to date"
     return "updating" if online else "update pending (offline)"
@@ -630,6 +685,7 @@ class Admin:
         x.add_argument("--limit", type=int, default=20)
         x.add_argument("--log", action="store_true")
         x.add_argument("--json", action="store_true")
+        sub.add_parser("build-retry").add_argument("hosts", nargs="+")
         x = sub.add_parser("deployments")
         x.add_argument("host")
         x.add_argument("--limit", type=int, default=20)
@@ -696,6 +752,10 @@ class Admin:
         b = self.db.build
         return self.db(b.host == h).select(orderby=~b.id, limitby=(0, 1)).first()
 
+    def deployment_of(self, h):
+        d = self.db.deployment
+        return self.db(d.host == h).select(orderby=~d.id, limitby=(0, 1)).first()
+
     def cmd_status(self, a):
         db = self.db
         q = (db.host.id > 0) if a.all else (db.host.in_repo == True)  # noqa: E712
@@ -705,7 +765,7 @@ class Admin:
         on = online_hosts(db)
         rows = []
         for r in db(q).select(orderby=db.host.name):
-            st = host_state(r, self.builds_of(r.name), r.name in on)
+            st = host_state(r, self.builds_of(r.name), r.name in on, self.deployment_of(r.name))
             rows.append(dict(name=r.name, online=r.name in on, last_seen=fmt(r.last_seen), profile=r.profile,
                              branch=r.branch, state=st, current_rev=(r.current_rev or "")[:10],
                              desired_rev=(r.desired_rev or "")[:10], address=r.address, agent=r.agent_version,
@@ -765,10 +825,29 @@ class Admin:
                             for r in rows]))
             return
         for r in rows:
-            st = "ok" if r.ok else "FAILED" if r.ok is False else "building"
+            st = "ok" if r.ok else "FAILED" if r.ok is False else "building" if r.started else "retry asked"
             say(f"{fmt(r.started)}  {r.host:16} {r.branch or '':10} {(r.rev or '')[:10]}  {st}")
             if a.log and r.log:
                 say("\n".join("    " + x for x in r.log.splitlines()[-40:]))
+
+    def cmd_build_retry(self, a):
+        """Build again a computer's failed build of the same commit (a network
+        problem, a full disk): once per request, and recorded."""
+        db, b, hs = self.db, self.db.build, heads()
+        asked = []
+        for h in a.hosts:
+            row = self.need_host(h)
+            rev = hs.get(row.branch or "main")
+            last = db((b.host == h) & (b.rev == rev)).select(orderby=~b.id).first() if rev else None
+            if not last or last.ok is not False:
+                raise Fail(f"{h}: its last build of {(rev or '?')[:10]} didn't fail; nothing to retry.")
+            b.insert(host=h, rev=rev, branch=row.branch or "main", log=f"retry asked by {self.actor}")
+            audit(db, self.actor, "build-retry", h, rev[:10])
+            asked.append(h)
+        db.commit()
+        with open(TRIGGER, "w") as fh:
+            fh.write(f"{time.time()}\n")
+        say(f"Building again: {', '.join(asked)} (mos-fleet builds).")
 
     def cmd_deployments(self, a):
         db, d = self.db, self.db.deployment
@@ -801,13 +880,14 @@ class Admin:
         if not r:
             raise Fail(f"No job {a.id}.")
         d = dict(id=r.id, host=r.host, kind=r.kind, args=json.loads(r.args or "{}"), created_by=r.created_by,
-                 created_on=fmt(r.created_on), delivered_on=fmt(r.delivered_on), finished_on=fmt(r.finished_on),
-                 canceled=r.canceled, exit_code=r.exit_code, output=r.output)
+                 created_on=fmt(r.created_on), delivered_on=fmt(r.delivered_on), received_on=fmt(r.received_on),
+                 finished_on=fmt(r.finished_on), canceled=r.canceled, exit_code=r.exit_code, output=r.output,
+                 state=job_state(r))
         if a.json:
             say(json.dumps(d))
         else:
             say(f"job {r.id} on {r.host}: {r.kind} {job_args(r)}\n  by {r.created_by} at {d['created_on']}; "
-                f"delivered {d['delivered_on']}; finished {d['finished_on']}; exit {r.exit_code}")
+                f"sent {d['delivered_on']}; received {d['received_on']}; finished {d['finished_on']}; {job_state(r)}")
             if r.output:
                 say(r.output.rstrip("\n"))
 
@@ -862,7 +942,8 @@ class Admin:
                     say(r.output.rstrip("\n"))
                 bad += r.exit_code != 0
             else:
-                say(f"== {r.host}: {'running' if r.delivered_on else 'queued (offline?)'}  (job {i}; mos-fleet job {i})")
+                st = job_state(r)
+                say(f"== {r.host}: {st + ' (offline?)' if st == 'queued' else st}  (job {i}; mos-fleet job {i})")
         if bad:
             sys.exit(1)
 
@@ -878,7 +959,7 @@ class Admin:
     def cmd_cancel(self, a):
         db = self.db
         if not db((db.job.id == a.id) & (db.job.delivered_on == None)).update(canceled=True):  # noqa: E711
-            raise Fail(f"Job {a.id}: already delivered (or no such job).")
+            raise Fail(f"Job {a.id}: already sent to the computer (or no such job).")
         audit(db, self.actor, "job-cancel", str(a.id))
 
     def cmd_relay(self, a):
@@ -925,7 +1006,8 @@ class Admin:
         sdb(sdb.passwd_attempt.person == a.person).delete()
         sdb.commit()
         audit(self.db, self.actor, "password-set", a.person)
-        say(f"{a.person}'s password is set: computers get it within seconds (those online).")
+        say(f"{a.person}'s password is set on the server: computers online get it within seconds, the others "
+            f"when they connect (a computer that can't apply it says so in its logs).")
 
     def cmd_recover(self, a):
         if not HOST_RE.fullmatch(a.host):
@@ -994,8 +1076,10 @@ class Admin:
 
 
 def job_state(r):
+    """queued; sent (not yet confirmed: sent again at the next connection); running
+    (the computer has it; no result yet, maybe never: e.g. it was turned off); exit N."""
     return ("canceled" if r.canceled else f"exit {r.exit_code}" if r.finished_on
-            else "running" if r.delivered_on else "queued")
+            else "running" if r.received_on else "sent" if r.delivered_on else "queued")
 
 
 def job_args(r):
@@ -1083,7 +1167,11 @@ def build_once():
                 continue
             b = db.build
             last = db((b.host == h) & (b.rev == rev)).select(orderby=~b.id).first()
-            if last and last.finished:
+            # A failed build stays failed until a new commit, or `mos-fleet build retry`
+            # (a row not started yet); a good one is built again if its system is gone
+            # (a server restored from a backup).
+            asked = last if last and not last.finished and not last.started else None
+            if last and last.finished and (not last.ok or os.path.exists(last.system_path or "")):
                 if last.ok:
                     db(db.host.name == h).update(desired_system=last.system_path, desired_rev=rev)
                     db.commit()
@@ -1094,11 +1182,16 @@ def build_once():
                     checked[rev] = check_rev(rev, where).errors
                     shutil.rmtree(where, ignore_errors=True)
                 if checked[rev]:
-                    db.build.insert(host=h, rev=rev, branch=branch, started=now(), finished=now(), ok=False,
-                                    log="\n".join(checked[rev]))
+                    fields = dict(host=h, rev=rev, branch=branch, started=now(), finished=now(), ok=False,
+                                  log="\n".join(checked[rev]))
+                    asked.update_record(**fields) if asked else db.build.insert(**fields)
                     db.commit()
                     continue
-            bid = db.build.insert(host=h, rev=rev, branch=branch, started=now())
+            if asked:
+                bid = asked.id
+                asked.update_record(started=now())
+            else:
+                bid = db.build.insert(host=h, rev=rev, branch=branch, started=now())
             db.commit()
             say(f"building {h} ({branch} {rev[:10]})")
             ref = f"git+file://{GIT}?ref=refs/heads/{branch}&rev={rev}"
@@ -1222,7 +1315,7 @@ def status():
         f" {pending} waiting for mos-fleet host add")
     for r in hosts:
         say(f"   {r.name:16} {'online ' if r.name in on else 'offline'}  last seen {fmt(r.last_seen)}  "
-            f"{host_state(r, db(db.build.host == r.name).select(orderby=~db.build.id).first(), r.name in on)}")
+            f"{host_state(r, db(db.build.host == r.name).select(orderby=~db.build.id).first(), r.name in on, db(db.deployment.host == r.name).select(orderby=~db.deployment.id).first())}")
     return 0
 
 

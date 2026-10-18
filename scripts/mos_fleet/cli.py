@@ -25,6 +25,7 @@ On your own computer (as yourself), in the fleet repository (~/fleet):
   password set NAME              someone's password (only its hash leaves)
   recover HOST                   a computer's disk recovery key (your admin key)
   status [HOST] | logs HOST [-f] | builds [HOST] | deployments HOST
+  retry HOST…                    build again a failed build (same commit)
   run --host H|--profile P -- CMD…   a command as root, at once where online
   reboot|switch|facts HOST…  |  jobs [HOST] | job ID | cancel ID
   shell HOST [--user U]          SSH to a computer, through the server
@@ -33,7 +34,7 @@ On your own computer (as yourself), in the fleet repository (~/fleet):
 At the fleet server's console (asks for sudo):
   server init [--lan CIDR]… [--admin-key FILE]   set it up (safe to re-run)
   server admin-key FILE          an admin key for a day (the first, or a fix)
-  server status | server backup DIR
+  server status | server backup DIR | server restore DIR
 
 Edits are checked and committed (--no-commit: only changed; then mos-fleet commit);
 `--push` (or mos-fleet push) sends them. Push refuses changes not committed.
@@ -60,6 +61,7 @@ def main(argv=None):
     x = sub.add_parser("tui")
     x.add_argument("--demo", action="store_true", help="made-up data; nothing is read or changed")
     x.add_argument("--check", action="store_true", help=argparse.SUPPRESS)
+    x.add_argument("--repo", default=argparse.SUPPRESS, help=argparse.SUPPRESS)  # also after tui
     a = p.parse_args(argv)
     if not a.cmd and not a.help and sys.stdin.isatty() and sys.stdout.isatty() and os.geteuid() != 0 \
             and os.path.isfile(os.path.join(admin.repo_dir(a), "fleet.toml")):

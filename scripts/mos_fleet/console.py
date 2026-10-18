@@ -7,17 +7,21 @@
                          admin, or one locked out): it may push the repository
     server status        the services, the repository, the computers
     server backup DIR    the repository, both databases, the keys
+    server restore DIR [--yes]
+                         put such a backup back (on a server after `server init`)
 
 The databases belong to the account fleet: root never opens them (SQLite
 would leave files root owns); it asks `mos-fleet-server` as fleet instead.
 """
 
+import glob
 import json
 import os
 import pwd
 import shutil
 import subprocess
 import time
+import tomllib
 
 from . import settings
 from .common import Fail, run, say, toml_dump, write_atomic
@@ -137,8 +141,108 @@ def cmd_backup(a):
     say(f"Backed up to {dest}: keep it offline. It holds password hashes and the server's keys.")
 
 
+SERVICES = ["mos-fleet-build.path", "mos-fleet-build.timer", "mos-fleet-build.service", "mos-fleet-prune.timer"]
+
+
+def cmd_restore(a):
+    """A backup back in place: the repository (from its bundle), both databases,
+    the server's SSH keys (so the computers, which pinned them, still trust it),
+    Tang's keys (so disks still unlock) and fleet-server.toml. What was there
+    is kept aside."""
+    src = os.path.abspath(a.dir)
+    for f in ("state.db", "secrets.db", "fleet.bundle"):
+        if not os.path.isfile(os.path.join(src, f)):
+            raise Fail(f"{src}: no {f} (a folder made by mos-fleet server backup)")
+    aside = f"{STATE}.before-restore-{time.strftime('%Y%m%d-%H%M%S')}"
+    say(f"This replaces the fleet server's repository, databases and keys with the backup in {src};\n"
+        f"what is there now is moved to {aside}.")
+    if not a.yes and input("Restore? [y/N] ").strip().lower() not in ("y", "yes"):
+        raise Fail("Nothing changed.")
+    conf = os.path.join(src, "fleet-server.toml")
+    if os.path.isfile(conf) and (not os.path.isfile(CONF) or open(conf).read() != open(CONF).read()):
+        say("== The server's settings (fleet-server.toml)")
+        shutil.copy(conf, CONF)
+        rebuild()
+    fleet = pwd.getpwnam("fleet")
+    say("== Stopping the fleet's services and connections")
+    run(["systemctl", "stop", "sshd.service", *SERVICES], check=False)
+    try:
+        run(["pkill", "-KILL", "-u", "fleet"], check=False)  # agents' and admins' sessions: they reconnect
+        time.sleep(1)
+        say(f"== The repository and the databases ({STATE})")
+        mode = os.stat(STATE).st_mode & 0o777 if os.path.isdir(STATE) else 0o700
+        if os.path.isdir(STATE):
+            os.rename(STATE, aside)
+        os.mkdir(STATE, mode)
+        os.chown(STATE, fleet.pw_uid, fleet.pw_gid)
+        for f in ("state.db", "secrets.db", "fleet.bundle"):
+            dst = os.path.join(STATE, f)
+            shutil.copyfile(os.path.join(src, f), dst)
+            os.chown(dst, fleet.pw_uid, fleet.pw_gid)
+            os.chmod(dst, 0o600)
+        git = ["runuser", "-u", "fleet", "--", "git", "--git-dir", os.path.join(STATE, "fleet.git")]
+        run(["runuser", "-u", "fleet", "--", "git", "init", "-q", "--bare", "-b", "main",
+             os.path.join(STATE, "fleet.git")])
+        run([*git, "fetch", "-q", os.path.join(STATE, "fleet.bundle"), "refs/*:refs/*"])
+        os.remove(os.path.join(STATE, "fleet.bundle"))
+        say("== The server's SSH keys")
+        for f in glob.glob(os.path.join(src, "ssh-host-keys", "ssh_host_*")):
+            dst = os.path.join("/etc/ssh", os.path.basename(f))
+            shutil.copyfile(f, dst)
+            os.chown(dst, 0, 0)
+            os.chmod(dst, 0o644 if f.endswith(".pub") else 0o600)
+        tang = os.path.realpath("/var/lib/tang")
+        keys = glob.glob(os.path.join(src, "tang", "*.jwk"))
+        if keys and os.path.isdir(tang):
+            say("== Tang's keys")
+            # Owned as the ones they replace: tangd runs as its own user.
+            old = glob.glob(os.path.join(tang, "*.jwk"))
+            st = os.stat(old[0] if old else tang)
+            for f in old:
+                os.remove(f)
+            for f in keys:
+                dst = os.path.join(tang, os.path.basename(f))
+                shutil.copyfile(f, dst)
+                os.chown(dst, st.st_uid, st.st_gid)
+                os.chmod(dst, st.st_mode & 0o777 if old else 0o400)
+        elif keys:
+            say(f"   ! Tang's keys not restored ({tang} doesn't exist yet): copy {src}/tang/*.jwk there")
+    finally:
+        say("== Starting the services again")
+        run(["systemctl", "start", "sshd.service"], check=False)
+        run(["systemctl", "restart", "mos-fleet-setup.service"], check=False)
+        run(["systemctl", "start", *SERVICES[:2], SERVICES[3]], check=False)
+    # Does the restored repository still name this server's keys? Computers trust only those.
+    fp = fingerprint(ssh_key(open(HOST_KEY).read()))
+    try:
+        with open(os.path.join(STATE, "main", "fleet.toml"), "rb") as fh:
+            f = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError):
+        f = {}
+    problems = []
+    if f.get("server_host_key") and fingerprint(ssh_key(f["server_host_key"])) != fp:
+        problems.append(f"this server's SSH key ({fp}) is not the one fleet.toml names: computers won't connect")
+    want = (f.get("tang") or {}).get("thumbprint")
+    if want and want != tang_thumbprint():
+        problems.append("Tang's key is not the one fleet.toml names: disks won't unlock by themselves")
+    say(as_fleet("status", check=False).rstrip())
+    for p in problems:
+        say(f"\033[1;31m!\033[0m {p}")
+    say(f"""
+Restored from {src}. Next:
+  - computers reconnect by themselves within a few minutes (mos-fleet status, from an admin's computer);
+  - systems not in this server's store are built again (mos-fleet builds);
+  - each database was copied consistently, but not at the same instant as the other and the
+    repository: a push or password change made during the backup may be missing; push again
+    from an admin's ~/fleet (every admin has a full copy) and set such a password again.
+What was here before: {aside}.""")
+    if problems:
+        raise Fail("restored, but see the problems above")
+
+
 def dispatch(a):
-    {"init": cmd_init, "admin-key": cmd_admin_key, "status": cmd_status, "backup": cmd_backup}[a.action](a)
+    {"init": cmd_init, "admin-key": cmd_admin_key, "status": cmd_status, "backup": cmd_backup,
+     "restore": cmd_restore}[a.action](a)
 
 
 def add_parsers(sub):
@@ -149,3 +253,6 @@ def add_parsers(sub):
     s.add_parser("admin-key").add_argument("key")
     s.add_parser("status")
     s.add_parser("backup").add_argument("dir")
+    x = s.add_parser("restore")
+    x.add_argument("dir")
+    x.add_argument("--yes", action="store_true", help="don't ask")

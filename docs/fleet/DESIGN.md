@@ -25,7 +25,7 @@ upgrade and back up for what the fleet needs. This version replaces them.)
 | What each computer runs | `meccanicos.lib.mkFleet`: one NixOS system per `hosts/NAME`, built by the server from the branch it follows | `flake.nix`, `mos-fleet-build` |
 | Getting it there | the agent fetches exactly that system's missing store paths over SSH, then switches | `agent.py`, `server.py` (`fetch`) |
 | People and their rights | declarative users (`users.mutableUsers = false`): on each computer, the people whose groups allow its profile; sudo by group | `managed.nix` |
-| Passwords | hashes only, in `secrets.db`; delivered to the computers where the person may log in (`hashedPasswordFile`); `mos-passwd` changes one's own everywhere, proving the current one | `server.py`, `agent.py` |
+| Passwords | hashes only, in `secrets.db`; delivered to the computers where the person may log in (`hashedPasswordFile`); `mos-passwd` changes one's own everywhere, proving the current one to the server | `server.py`, `agent.py` |
 | Inventory, health, logs | facts, journald (warnings and up, plus chosen units), deployments, in `state.db` | `agent.py`, `server.py` |
 | Remote actions | jobs (run, reboot, switch, facts), delivered at once on the open session; `shell` relays SSH end to end | `server.py`, `agent.py` |
 | Disk unlock and recovery | LUKS2 with Tang (+TPM), TPM+PIN or FIDO2; a systemd-cryptenroll recovery key encrypted with age for the admins, in `secrets.db` | `mos-install`, `managed.nix` |
@@ -60,8 +60,10 @@ shell, terminal or forwarding. A key at the console (`server admin-key`) is
 valid for a day and may only push the repository.
 
 **The repository is only written by admins.** The pre-receive hook checks
-every pushed commit with the same rules as `mos-fleet validate`
-(`repo.py`), refuses deleting or rewriting `main`, and records the push. The
+the newest commit of each pushed branch with the rules of `mos-fleet validate
+--no-eval` (`repo.py`: the files, not a Nix evaluation, which `validate` does
+on the admin's computer and the build does on the server), refuses deleting
+or rewriting `main`, and records the push. The
 post-receive hook refreshes `main/`, the computer table and `keys.json`, and
 touches a file a systemd path unit watches: `mos-fleet-build` starts. It
 also runs every 10 minutes, and loops while new pushes arrive.
@@ -71,7 +73,9 @@ git+file:///var/lib/mos-fleet/fleet.git?ref=BRANCH&rev=REV#nixosConfigurations.H
 for each computer from the branch its `host.toml` names (`main`, or `testing`
 for canaries). The result is kept as a GC root and becomes that computer's
 *desired system*. A failed build is recorded; the computer stays on the
-previous one.
+previous one. It isn't built again for the same commit unless an admin asks
+(`mos-fleet retry HOST`: once per request, audited); a good build whose
+system is no longer in the store (a restored server) is built again.
 
 **Deploying.** The agent's session receives the desired system's store path.
 It asks `fetch` for it: the server checks it's that computer's desired system,
@@ -80,14 +84,30 @@ streams them (`nix-store --export`). Nothing else on the server can be asked
 for. The agent imports them (as root: no signature needed; the SSH channel
 authenticates the server), sets the system profile and switches, in a
 separate systemd unit so restarts can't interrupt it, then reports and
-restarts itself (the new system may carry a new agent).
+restarts itself (the new system may carry a new agent). A deployment is `ok`
+only if `switch-to-configuration` exits 0 *and* the new system is the current
+one; one that became current but failed to switch is reported `failed`, with
+its output, and shown as `switch failed` in `status`.
 
 **The protocol.** One JSON object per line, both ways, on the session's
-stdin/stdout, with size caps: `hello`, `facts`, `logs` (acknowledged by
-cursor, so nothing is lost or sent twice), `deploy`, `job-done`, `passwd` from
-the agent; `desired`, `passwords`, `job`, `logs-ok`, `passwd-result`, `bye`
-from the server. The server's end polls SQLite every second for new jobs,
-builds and password changes.
+stdin/stdout, with size caps: `hello`, `facts`, `logs`, `deploy`, `job-got`,
+`job-done`, `passwd` from the agent; `desired`, `passwords`, `job`, `logs-ok`,
+`passwd-result`, `bye` from the server. The server's end polls SQLite every
+second for new jobs, builds and password changes.
+
+- **Logs** are acknowledged by journald cursor: the server stores a batch and
+  its cursor in one transaction, then answers `logs-ok`; at each `hello` it
+  says where its copy ends, and the agent goes on from there, so a lost answer
+  doesn't send a batch twice. A batch fits one message (counted as encoded).
+- **Jobs** are acknowledged on arrival (`job-got`); one sent but not
+  acknowledged is sent again at the next connection, with the same id, and the
+  agent keeps the ids it has seen, so it doesn't run one twice (agents before
+  version 3 don't acknowledge: theirs are sent once). States: queued, sent,
+  running (acknowledged), exit N. A job that was running when its computer
+  went away may never report: it stays running.
+- **Enrollment**: if the server's answer is lost, the one-time key is used up
+  but the server has what it needs; the agent goes on trying its session,
+  which gets in once an admin adds the computer.
 
 **The shell.** `mos-fleet shell ws-001` runs `ssh mrossi@ws-001` with a
 ProxyCommand that opens `relay` on the server. The server queues a relay job
@@ -116,7 +136,9 @@ from the repository and the next check-ins, except logs and history.
 
 Both belong to `fleet`, mode 600; root's commands use them through
 `runuser -u fleet` so no file becomes root's. `mos-fleet server backup` takes
-consistent copies (SQLite's backup API) and a bundle of the repository.
+consistent copies (SQLite's backup API) and a bundle of the repository;
+`mos-fleet server restore` puts them back (each copy is consistent, not all
+three at one instant).
 
 ## 4. Security
 
@@ -127,9 +149,12 @@ consistent copies (SQLite's backup API) and a bundle of the repository.
 - **Least privilege per key**: a computer gets its own session, its own
   system's paths, its own people's hashes, its own jobs. One-time keys enroll
   one computer once. Builds run as an untrusted Nix user.
-- **Passwords**: never sent by computers; a change needs the current
-  password, checked on the server against the stored hash; 5 wrong ones an
-  hour lock changes for that person (an admin's `password set` unlocks).
+- **Passwords**: the server stores hashes only. A change (`mos-passwd`) sends
+  the current password over the pinned, encrypted SSH connection, checked on
+  the server against the stored hash; the new one is hashed on the computer
+  first. 5 wrong ones an hour lock changes for that person (an admin's
+  `password set` unlocks). A computer that fails to apply a hash logs it as an
+  error (forwarded to the server) and tries again.
   A computer only receives the hashes of people allowed on it, and drops the
   rest.
 - **Recovery keys** are age-encrypted on the new computer for the admins'
@@ -147,8 +172,10 @@ consistent copies (SQLite's backup API) and a bundle of the repository.
 - No web pages: no self-service password reset, no dashboards (a read-only
   page over `state.db` would be easy to add). No passkeys yet: FIDO2 logins
   (pam_u2f) and a web login are planned for later versions.
-- Removing a person takes effect as each computer next connects; an offline
-  laptop keeps them until then.
+- Removing a person takes effect on each computer when it switches to a
+  system without them (push, build, switch); an offline laptop keeps them until
+  then, and sessions already running aren't ended (ADMIN-GUIDE.md, "When
+  someone leaves").
 - Hashes in `secrets.db` and logs in `state.db` make the server a valuable
   target: its backups too.
 - One server: no failover. Computers keep working without it (their last

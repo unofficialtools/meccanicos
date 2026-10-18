@@ -159,7 +159,18 @@ with subtest("recovery key, audit, backup"):
     hq.succeed("mos-fleet server backup /root/backup")
     hq.succeed("test -s /root/backup/state.db -a -s /root/backup/secrets.db -a -s /root/backup/fleet.bundle")
 
-with subtest("retire ws1"):
+with subtest("restore the server from its backup: ws1 comes back"):
+    jobs_before = a("mos-fleet jobs ws1")
+    print(hq.succeed("mos-fleet server restore /root/backup --yes 2>&1"))
+    hq.succeed("ls -d /var/lib/mos-fleet.before-restore-*/fleet.git")
+    hq.succeed("test $(stat -c %U:%a /var/lib/mos-fleet/state.db) = fleet:600")
+    a_until("mos-fleet status ws1 | grep -q 'online.*up to date'", timeout=300)
+    out = a("mos-fleet run --host ws1 -- uname -n")
+    assert "ws1" in out, out
+    out = a("mos-fleet jobs ws1")
+    assert out.count("exit 0") == jobs_before.count("exit 0") + 1, (jobs_before, out)
+
+with subtest("retire ws1"):  # (also: the restored repository takes pushes)
     # Retired while its agent isn't connected (as after a switch, or off):
     # it learns from the refused key, not from the server's goodbye.
     ws1.systemctl("stop mos-fleet-agent")

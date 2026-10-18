@@ -804,6 +804,8 @@ def cmd_remote(a):
         passthrough(r, "logs", a.host, *extra, *(["--follow"] if a.follow else []))
     elif c == "builds":
         passthrough(r, "builds", *([a.host] if a.host else []), *(["--log"] if a.log else []))
+    elif c == "retry":
+        passthrough(r, "build-retry", *a.hosts)
     elif c == "deployments":
         passthrough(r, "deployments", a.host)
     elif c == "run":
@@ -959,6 +961,7 @@ def add_parsers(sub):
     x = sub.add_parser("builds")
     x.add_argument("host", nargs="?")
     x.add_argument("--log", action="store_true")
+    sub.add_parser("retry", help="build again a failed build of the same commit").add_argument("hosts", nargs="+")
     sub.add_parser("deployments").add_argument("host")
     x = sub.add_parser("run")
     x.add_argument("--host", action="append")
@@ -980,7 +983,7 @@ HANDLERS = {
     "diff": cmd_diff, "commit": cmd_commit, "person": cmd_person, "group": cmd_group, "member": cmd_member, "profile": cmd_profile,
     "host": cmd_host, "upgrade": cmd_upgrade, "password": cmd_password, "recover": cmd_recover, "shell": cmd_shell,
 }
-REMOTE = {"status", "logs", "builds", "deployments", "run", "reboot", "switch", "facts", "jobs", "job", "cancel",
+REMOTE = {"status", "logs", "builds", "retry", "deployments", "run", "reboot", "switch", "facts", "jobs", "job", "cancel",
           "audit", "info"}
 
 

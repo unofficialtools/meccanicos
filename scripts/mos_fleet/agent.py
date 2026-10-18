@@ -32,8 +32,8 @@ import sys
 import threading
 import time
 
-from .common import (HASH_RE, STORE_PATH_RE, SYSTEM_RE, TOKEN_RE, VERSION, Fail, dumps, parse, split_server,
-                     write_atomic, SERVER_ALIAS)
+from .common import (HASH_RE, MAX_LINE, STORE_PATH_RE, SYSTEM_RE, TOKEN_RE, VERSION, Fail, dumps, parse,
+                     split_server, write_atomic, SERVER_ALIAS)
 from . import settings
 from .repo import PERSON_RE
 
@@ -50,11 +50,16 @@ RECOVERY = os.path.join(STATE, "recovery.age")
 ENROLLED = os.path.join(STATE, "enrolled")
 ACCEPTED = os.path.join(STATE, "accepted")  # the server has let it in once: it is in the fleet
 CURSOR = os.path.join(STATE, "log.cursor")
+JOBS_SEEN = os.path.join(STATE, "jobs.seen")  # jobs received: one sent again isn't run again
 SYSTEM_PROFILE = "/nix/var/nix/profiles/system"
 
 
 def log(text):
     print(text, flush=True)
+
+
+def log_error(text):
+    print(f"<3>{text}", flush=True)  # journald: priority err (sent with the logs)
 
 
 def ssh_cmd(cfg, *remote, identity=IDENTITY):
@@ -140,8 +145,13 @@ class Agent:
         threading.Thread(target=self.serve_socket, daemon=True).start()
         backoff = 10
         while True:
-            if os.path.exists(ENROLL_KEY) and not os.path.exists(ENROLLED):
-                if not self.enroll():
+            if os.path.exists(ENROLL_KEY) and not os.path.exists(ENROLLED) and not self.enroll():
+                # The server may have taken it and only its answer got lost (the key then
+                # works no more): once an admin adds this computer, its session gets in.
+                self.session()
+                if self.restart:
+                    return 0
+                if not os.path.exists(ENROLLED):
                     time.sleep(backoff)
                     backoff = min(backoff * 2, 2 * CFG["reconnect_max_seconds"])
                     continue
@@ -178,14 +188,17 @@ class Agent:
         if not res.get("ok"):
             log(f"enrollment: {res.get('error') or r.stderr.strip()[-300:] or 'no answer'}")
             return False
+        self.enrolled()
+        log(f"enrolled ({res.get('fingerprint')}): an admin adds this computer with mos-fleet host add")
+        return True
+
+    def enrolled(self):
         write_atomic(ENROLLED, time.strftime("%Y-%m-%d %H:%M:%S\n"))
         for f in (ENROLL_KEY, RECOVERY):
             try:
                 os.remove(f)
             except OSError:
                 pass
-        log(f"enrolled ({res.get('fingerprint')}): an admin adds this computer with mos-fleet host add")
-        return True
 
     def session(self):
         try:
@@ -235,6 +248,9 @@ class Agent:
                 if msg:
                     if not os.path.exists(ACCEPTED):
                         write_atomic(ACCEPTED, time.strftime("%Y-%m-%d %H:%M:%S\n"))
+                    if os.path.exists(ENROLL_KEY) and not os.path.exists(ENROLLED):
+                        log("enrolled (the server's answer to the enrollment was lost; it is in the fleet now)")
+                        self.enrolled()
                     if msg.get("t") == "bye":
                         log(f"the server says: {msg.get('reason')}")
                         why = "bye"
@@ -246,6 +262,7 @@ class Agent:
                 if t >= next_facts:
                     next_facts = t + interval
                     self.send({"t": "facts", "agent": VERSION, "system": current_system(), "facts": facts()})
+                    self.apply_passwords(self.current_hashes())  # again what failed before
                 if t >= next_logs:
                     next_logs = t + CFG["logs_every_seconds"]
                     self.send_logs()
@@ -287,15 +304,34 @@ class Agent:
             if isinstance(h, dict):
                 self.apply_passwords(h)
         elif t == "job":
-            threading.Thread(target=self.job, args=(m,), daemon=True).start()
+            jid = m.get("id")
+            if not isinstance(jid, int):
+                return
+            seen = self.jobs_seen()
+            new = jid not in seen
+            if new:  # written down before it runs: sent again (our answer lost), it isn't run twice
+                write_atomic(JOBS_SEEN, dumps((seen + [jid])[-1000:]) + "\n")
+            self.try_send({"t": "job-got", "id": jid})
+            if new:
+                threading.Thread(target=self.job, args=(m,), daemon=True).start()
         elif t == "logs-ok":
-            if m.get("cursor") and m.get("cursor") == self.cursor_sent:
-                write_atomic(CURSOR, self.cursor_sent)
+            # The answer to a batch, or (at the start) where the server's copy ends: what it
+            # has stored is where the next batch starts, so nothing is sent twice.
+            cur = m.get("cursor")
+            if isinstance(cur, str) and cur and len(cur) < 4096 and cur != (read(CURSOR, 4096) or "").strip():
+                write_atomic(CURSOR, cur)
         elif t == "passwd-result":
             ev = self.pending.get(m.get("req"))
             if ev:
                 ev[1] = m
                 ev[0].set()
+
+    def jobs_seen(self):
+        try:
+            seen = json.loads(read(JOBS_SEEN, 1 << 20) or "[]")
+            return [i for i in seen if isinstance(i, int)] if isinstance(seen, list) else []
+        except ValueError:
+            return []
 
     # ---- the system
     def deploy(self, force=False, done=None):
@@ -304,28 +340,36 @@ class Agent:
         system, rev = self.want
 
         def work():
+            ok = system == current_system()
             try:
-                if system == current_system() and not force:
+                if ok and not force:
                     return
                 self.try_send({"t": "deploy", "state": "started", "system": system, "rev": rev})
                 log(f"switching to {system}")
+                code = None
                 try:
                     self.fetch(system)
-                    out = self.switch(system)
-                    ok = current_system() == system
+                    code, out = self.switch(system)
                 except (Fail, OSError, subprocess.SubprocessError) as e:
-                    ok, out = False, str(e)
+                    out = str(e)
+                running = current_system() == system
+                # Both: switch-to-configuration can fail after the new system became the current one.
+                ok = code == 0 and running
                 if not ok:
                     self.failed.add(system)
+                    if running:
+                        out = (f"the new system is running, but switching failed (exit {code}): some services "
+                               "may not have started; mos-fleet switch tries again, the boot menu has the "
+                               f"previous system\n{out}")
                 log(f"switch {'done' if ok else 'FAILED'}: {out[-500:]}")
                 self.try_send({"t": "deploy", "state": "ok" if ok else "failed", "system": system, "rev": rev,
                                "output": out[-60000:]})
-                if ok:
+                if running:
                     self.restart = True  # the new system may carry a new agent
             finally:
                 self.deploying.release()
                 if done:
-                    done()
+                    done(ok)
 
         threading.Thread(target=work, daemon=True).start()
         return True
@@ -377,12 +421,13 @@ class Agent:
                             "--collect", "--pipe", "--quiet", "--service-type=exec",
                             f"{system}/bin/switch-to-configuration", "switch"],
                            stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace")
-        return f"exit {r.returncode}\n{r.stdout}{r.stderr}"
+        return r.returncode, f"exit {r.returncode}\n{r.stdout}{r.stderr}"
 
     # ---- people
     def apply_passwords(self, hashes):
+        """Returns the people whose password could not be set here (tried again later)."""
         with self.pw_lock:  # the session and mos-passwd's socket both apply them
-            self._apply_passwords(hashes)
+            return self._apply_passwords(hashes)
 
     def _apply_passwords(self, hashes):
         os.makedirs(PASSWORDS, mode=0o700, exist_ok=True)
@@ -391,7 +436,7 @@ class Agent:
         for f in os.listdir(PASSWORDS):
             if f not in good:
                 os.remove(os.path.join(PASSWORDS, f))
-        shadow = {}
+        failed, shadow = [], {}
         for line in (read("/etc/shadow", 16 << 20) or "").splitlines():
             parts = line.split(":")
             if len(parts) > 1:
@@ -402,9 +447,14 @@ class Agent:
                 write_atomic(path, h + "\n")  # hashedPasswordFile: read at activation
             try:
                 if pwd.getpwnam(n).pw_uid >= 1000 and shadow.get(n) != h:
-                    subprocess.run(["chpasswd", "-e"], input=f"{n}:{h}\n", text=True, capture_output=True)
+                    r = subprocess.run(["chpasswd", "-e"], input=f"{n}:{h}\n", text=True, capture_output=True)
+                    if r.returncode != 0:
+                        failed.append(n)
+                        log_error(f"password of {n}: not set on this computer (chpasswd: "
+                                  f"{(r.stderr or '').strip()[-200:] or r.returncode}); trying again later")
             except KeyError:
                 pass  # not on this computer (yet): its system brings the account
+        return failed
 
     # ---- jobs
     def job(self, m):
@@ -433,11 +483,12 @@ class Agent:
             if not self.want:
                 return done(1, "no system from the server yet")
             self.failed.discard(self.want[0])
-            ev = threading.Event()
-            if not self.deploy(force=True, done=ev.set):
+            ev, result = threading.Event(), []
+            if not self.deploy(force=True, done=lambda ok: (result.append(ok), ev.set())):
                 return done(1, "a switch is already running")
             ev.wait()
-            done(0 if current_system() == self.want[0] else 1, f"now running {current_system()}")
+            done(0 if result and result[0] else 1, f"now running {current_system()}"
+                 + ("" if result and result[0] else "; the switch failed: mos-fleet deployments " + socket.gethostname()))
         elif kind == "facts":
             ok = self.try_send({"t": "facts", "agent": VERSION, "system": current_system(), "facts": facts()})
             done(0 if ok else 1, "")
@@ -498,32 +549,47 @@ class Agent:
         cursor = (read(CURSOR, 4096) or "").strip()
         cmd = ["journalctl", "-o", "json", "--no-pager"] + (
             [f"--after-cursor={cursor}"] if cursor else ["--since=-1h"])
-        entries, last = [], None
+        entries, last, size, lines = [], None, 0, 0
+        budget = MAX_LINE - (64 << 10)  # what one message may hold, less room for the rest of it
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
-            for n, line in enumerate(p.stdout):
-                if n >= CFG["log_batch"]:
+            for line in p.stdout:
+                lines += 1
+                if lines > CFG["log_batch"]:
                     break
                 try:
                     e = json.loads(line)
                 except ValueError:
                     continue
-                last = e.get("__CURSOR") or last
+                cur = e.get("__CURSOR")
                 unit = e.get("_SYSTEMD_UNIT") or e.get("SYSLOG_IDENTIFIER") or ""
                 try:
                     pr = int(e.get("PRIORITY", 6))
                 except ValueError:
                     pr = 6
                 if pr > prio and unit not in units and unit.removesuffix(".service") not in units:
+                    last = cur or last
                     continue
                 msg = e.get("MESSAGE", "")
                 if isinstance(msg, list):
                     msg = bytes(x & 0xFF for x in msg if isinstance(x, int)).decode(errors="replace")
-                entries.append({"time": int(e.get("__REALTIME_TIMESTAMP", 0)) / 1e6, "unit": unit, "prio": pr,
-                                "msg": str(msg)[:4096], "boot": e.get("_BOOT_ID")})
+                entry = {"time": int(e.get("__REALTIME_TIMESTAMP", 0)) / 1e6, "unit": unit, "prio": pr,
+                         "msg": str(msg)[:4096], "boot": e.get("_BOOT_ID")}
+                # Counted as sent (escapes, multibyte); full: the rest next time, from here.
+                n = len(dumps(entry).encode()) + 1
+                if size + n > budget:
+                    break
+                size += n
+                entries.append(entry)
+                last = cur or last
         finally:
             p.kill()
             p.wait()
+        if cursor and not lines and p.returncode not in (0, -9):
+            # A cursor this journal doesn't know (a reinstalled computer): start again from the last hour.
+            log("the log cursor is not in this journal: sending from the last hour")
+            os.remove(CURSOR)
+            return
         if last and last != cursor:
             self.cursor_sent = last
             self.send({"t": "logs", "entries": entries, "cursor": last})
@@ -577,8 +643,11 @@ class Agent:
             if not res:
                 return reply(False, "the server didn't answer: try again")
             if res.get("ok"):
-                self.apply_passwords({**self.current_hashes(), person: h})
-                return reply(True, "Password changed, on every computer of the organization.")
+                if self.apply_passwords({**self.current_hashes(), person: h}):
+                    return reply(False, "Password changed on the server, but not yet on this computer (it tries "
+                                        "again by itself); other computers get it when they next connect.")
+                return reply(True, "Password changed here and on the server; the organization's other "
+                                   "computers get it when they next connect.")
             return reply(False, res.get("error") or "refused")
         except (OSError, Fail, KeyError, struct.error) as e:
             try:
