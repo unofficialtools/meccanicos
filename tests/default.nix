@@ -154,6 +154,27 @@ in
           machine.sleep(3)
           machine.screenshot("cheat-sheet")
           machine.send_key("esc")
+          # The top bar: no workspace buttons; Super+W opens the window/workspace list.
+          xs = "export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus DISPLAY=:0; "
+          machine.succeed(as_live(xs + "xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids | grep >/dev/null -x 2"))
+          machine.fail(as_live(xs + "xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids | grep -x 12"))
+          machine.succeed(as_live(xs + "xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/default/<Super>w' | grep >/dev/null -x xfce4-popup-windowmenu"))
+          machine.send_key("meta_l-w")
+          machine.sleep(3)
+          machine.screenshot("workspace-list")
+          machine.send_key("esc")
+          # An account saved with the old bar: mos-look takes the buttons away.
+          machine.succeed(as_live(xs + "xfconf-query -c xfce4-panel -p /plugins/plugin-13 -n -t string -s separator"
+                                  " && xfconf-query -c xfce4-panel -p /plugins/plugin-12 -n -t string -s pager"
+                                  " && xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -n -a"
+                                  " -t int -s 11 -t int -s 3 -t int -s 13 -t int -s 12 -t int -s 5 -t int -s 2"))
+          machine.sleep(3)
+          machine.succeed(as_live(xs + "mos-look apply"))
+          machine.fail(as_live(xs + "xfconf-query -c xfce4-panel -p /plugins/plugin-12"))
+          machine.succeed(as_live(xs + "test \"$(xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids | grep -x '[0-9][0-9]*' | tr '\\n' ' ')\" = '11 3 5 2 '"))
+          machine.sleep(5)
+          machine.screenshot("top-bar-after-mos-look")
+          machine.succeed(as_live(xs + "xfconf-query -c xfce4-panel -p /panels/panel-1/plugin-ids -r; xfce4-panel -r >/dev/null 2>&1 &"))
 
       with subtest("tools are present and offline-ready"):
           machine.fail("systemctl is-active ollama.service")  # installed, not started

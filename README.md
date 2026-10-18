@@ -245,12 +245,12 @@ There is no applications menu; everything starts from the keyboard. The only
 desktop icons are USB drives, shown while they are plugged in. The top bar shows
 the MeccanicOS mark and MECCANICOS // COMPUTER-NAME on the left (click it for the
 command bar, as Super+Space; type System Info there for the MeccanicOS build,
-session, NixOS, kernel, CPU, memory and disks), then the four
-workspaces, 01 DEV  02 WEB  03 TERM  04 DOC, the current one in amber (click one
-to go there). On the right: where you're running and how your files are kept
-(USB · NOT SAVED, USB · SAVED, INSTALLED · ENCRYPTED, and 1 VAULT OPEN in amber
-while a USB vault is unlocked; `mos-status` prints the same), the date, the
-window/workspace list, CPU use in % (amber from 80 °C, red from 90 °C; click it
+session, NixOS, kernel, CPU, memory and disks). On the right: where you're running
+and how your files are kept (USB · NOT SAVED, USB · SAVED, INSTALLED · ENCRYPTED, and
+1 VAULT OPEN in amber while a USB vault is unlocked; `mos-status` prints the same),
+the date, the window/workspace list (also **Super+W**: every window, under its
+workspace, 01 DEV  02 WEB  03 TERM  04 DOC; pick a window, or a workspace to go
+there; Ctrl+F1…F4 too), CPU use in % (amber from 80 °C, red from 90 °C; click it
 for btop), the tray, volume, battery and Log Out.
 The command bar (Super+Space) shows the same readout above the search.
 

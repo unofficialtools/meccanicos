@@ -13,7 +13,6 @@ const TopBar: React.FC = () => (
     padding: "0 12px", gap: 14, fontFamily: MONO, fontSize: 17, color: C.dim, borderBottom: `1px solid ${C.line}` }}>
     <svg width="22" height="22" viewBox="0 0 34 34"><path d="M0 0H24L34 10V34H10L0 24Z" fill={C.amber} /><path d="M8 26V9h4l5 7 5-7h4v17h-4V16l-5 6-5-6v10Z" fill={C.ink} /></svg>
     <span style={{ color: C.text, letterSpacing: "0.3em" }}>MECCANICOS</span>
-    <span style={{ color: C.amber, borderBottom: `2px solid ${C.amber}` }}>01 DEV</span><span>02 WEB</span><span>03 TERM</span><span>04 DOC</span>
     <span style={{ marginLeft: "auto" }}>Mon 12 Oct  09:00   CPU 4%   ▲ Wi-Fi   ◖ 87%</span>
   </div>
 );

@@ -68,33 +68,12 @@ let
         '';
       });
   gtkThemeName = "Graphite-Dark";
-  # The top bar: a thin inset line under it, and the workspace buttons
-  # (keyboard.nix's pager, plugin 12) as 01 DEV  02 WEB …: dim, the current
-  # one amber with an amber underline.
+  # The top bar: a thin inset line under it.
   shellCss = pkgs.writeText "meccanicos-gtk.css" ''
 
     /* ---- MeccanicOS (modules/branding.nix) ---- */
     .xfce4-panel.background {
       border-bottom: 1px solid ${style.line};
-    }
-    .xfce4-panel.background #pager-12 button {
-      font-family: "${style.mono}";
-      font-size: 9pt;
-      font-weight: bold;
-      color: ${style.dim};
-      border-radius: 0;
-      padding: 0 9px;
-      margin: 0 1px;
-      box-shadow: none;
-    }
-    .xfce4-panel.background #pager-12 button:hover {
-      color: ${style.text};
-      background-color: ${style.raised};
-    }
-    .xfce4-panel.background #pager-12 button:checked {
-      color: ${style.amber};
-      background-color: alpha(${style.amber}, 0.08);
-      box-shadow: inset 0 -2px ${style.amber};
     }
     /* One shape everywhere: square popups (menus, popovers, tooltips,
        dialogs), controls only just softened, focus in amber. */
@@ -117,8 +96,8 @@ let
       box-shadow: inset 0 -2px ${style.amber};
     }
     /* Log Out dialog (Log Out, Restart, Shut Down, Suspend, ...): square
-       graphite buttons with a thin border, the amber underline of the top
-       bar's workspaces on the one you point at or move to. */
+       graphite buttons with a thin border, an amber underline on the one
+       you point at or move to. */
     .xfsm-logout-dialog {
       background-color: ${style.base};
       border: 1px solid ${style.line};
@@ -148,14 +127,15 @@ let
     }
   '';
   # mos-look: after an upgrade that changes the look, asks at login whether
-  # to bring the settings your account saved (window shadows, mc's skin) to
-  # it. Raise lookVersion when a release changes a look default that users
+  # to bring the settings your account saved (window shadows, mc's skin, the
+  # top bar) to it. Raise lookVersion when a release changes a look default that users
   # keep a saved copy of.
-  lookVersion = "2026-10-12";
+  lookVersion = "2026-10-17";
   mos-look = pkgs.writeShellApplication {
     name = "mos-look";
     runtimeInputs = with pkgs; [
       xfconf
+      xfce4-panel # xfce4-panel -r: the top bar again, as changed
       libnotify
       gnused
       gnugrep
@@ -399,7 +379,7 @@ in
           <property name="theme" type="string" value="${gtkThemeName}"/>
           <property name="title_font" type="string" value="${style.mono} Bold 9"/>
           <property name="workspace_count" type="int" value="4"/>
-          <!-- The top bar shows them (keyboard.nix's pager). -->
+          <!-- The top bar's window/workspace list shows them (keyboard.nix). -->
           <property name="workspace_names" type="array">
             <value type="string" value="01 DEV"/>
             <value type="string" value="02 WEB"/>

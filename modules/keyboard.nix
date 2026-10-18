@@ -163,6 +163,7 @@ let
     [ "Alt+F4" "Close window" ]
     [ "Alt+Tab" "Switch window (this workspace)" ]
     [ "Super+Tab" "Next window of the same app" ]
+    [ "Super+W" "Windows and workspaces: pick one (the top bar's list)" ]
     [ "Ctrl+F1 … F4" "Go to workspace 1–4" ]
     [ "Super+Shift+1 … 4" "Move window to workspace 1–4" ]
     [ "Ctrl+Alt+D" "Show desktop" ]
@@ -224,6 +225,7 @@ let
   bind = key: action: ''          <property name="${esc key}" type="string" value="${action}"/>\'';
   commandBinds = [
     (bind "<Super>space" "mos-ask")
+    (bind "<Super>w" "xfce4-popup-windowmenu")
     (bind "<Alt>F2" "mos-ask")
     (bind "<Super>v" "xfce4-clipman-history")
     (bind "<Super>period" "rofimoji --skin-tone neutral")
@@ -260,7 +262,7 @@ let
     sed -e '/<property name="xfwm4" type="empty">/,$ {
     ${insertAfterFirstDefault wmBinds}
     }' step2 > $out
-    for v in mos-ask tile_left_key move_window_workspace_4_key "mos-screenshot area"; do
+    for v in mos-ask xfce4-popup-windowmenu tile_left_key move_window_workspace_4_key "mos-screenshot area"; do
       grep -q "value=\"$v\"" $out || { echo "missing $v"; exit 1; }
     done
     # One key per window-manager action (see wmBinds).
@@ -541,16 +543,15 @@ let
   ];
 
   # ---- The top bar: graphite, one line of instrument readouts ---------------
-  # Left: the mark, MECCANICOS // COMPUTER (click: the command bar), then the
-  # workspaces as 01 DEV  02 WEB  03 TERM  04 DOC, the current one in amber
-  # (click one to go there; Ctrl+F1…F4 too). Right: the session and storage
-  # (USB · NOT SAVED, INSTALLED · ENCRYPTED, an open vault in amber), date,
-  # window/workspace dropdown, CPU % (click: btop), tray, volume, battery,
-  # Log Out. One panel: a clock in a separate panel on top of it got covered
+  # Left: the mark, MECCANICOS // COMPUTER (click: the command bar). Right:
+  # the session and storage (USB · NOT SAVED, INSTALLED · ENCRYPTED, an open
+  # vault in amber), date, the window/workspace dropdown (Super+W; its
+  # sections are the workspaces, 01 DEV … 04 DOC: click one to go there, or
+  # Ctrl+F1…F4), CPU % (click: btop), tray, volume, battery, Log Out. One panel: a clock in a separate panel on top of it got covered
   # whenever the bar took focus (e.g. opening the dropdown). No applications
   # menu or task buttons: the command bar starts things, Alt+Tab switches.
   # Readouts in the monospace, as in the command center and the terminal tools;
-  # the bar's look (border, workspace buttons) is in branding.nix's CSS.
+  # the bar's look (its border) is in branding.nix's CSS.
   barFont = "${style.mono} 9";
   barFontBold = "${style.mono} Bold 9";
   # The panel's background, #rrggbb as xfconf's four doubles.
@@ -581,8 +582,6 @@ let
           <property name="plugin-ids" type="array">
             <value type="int" value="11"/>
             <value type="int" value="3"/>
-            <value type="int" value="13"/>
-            <value type="int" value="12"/>
             <value type="int" value="5"/>
             <value type="int" value="14"/>
             <value type="int" value="15"/>
@@ -608,18 +607,6 @@ let
           <property name="use-label" type="bool" value="false"/>
           <property name="font" type="string" value="${barFontBold}"/>
           <property name="update-period" type="int" value="86400000"/>
-        </property>
-        <!-- Invisible: room between the name and the workspaces. -->
-        <property name="plugin-13" type="string" value="separator">
-          <property name="expand" type="bool" value="false"/>
-          <property name="style" type="uint" value="0"/>
-        </property>
-        <!-- Workspaces as buttons with their names (xfwm4's workspace_names). -->
-        <property name="plugin-12" type="string" value="pager">
-          <property name="rows" type="uint" value="1"/>
-          <property name="miniature-view" type="bool" value="false"/>
-          <property name="wrap-workspaces" type="bool" value="false"/>
-          <property name="numbering" type="bool" value="false"/>
         </property>
         <!-- Expanding, invisible: pushes everything after it to the right. -->
         <property name="plugin-5" type="string" value="separator">
@@ -648,8 +635,12 @@ let
           <property name="expand" type="bool" value="false"/>
           <property name="style" type="uint" value="0"/>
         </property>
+        <!-- Every workspace's windows, under its name (xfwm4's workspace_names):
+             a name goes to that workspace. Super+W opens it. -->
         <property name="plugin-2" type="string" value="windowmenu">
           <property name="style" type="uint" value="0"/>
+          <property name="all-workspaces" type="bool" value="true"/>
+          <property name="workspace-names" type="bool" value="true"/>
         </property>
         <property name="plugin-10" type="string" value="genmon">
           <property name="command" type="string" value="${mos-cpu}"/>
