@@ -197,17 +197,20 @@ jobs:
             [[ $f == dist/SHA256SUMS ]] || put "${f#dist/}"
           done
           put SHA256SUMS
-          # The tag (what mos-upgrade follows) moves in one step.
-          if ! gh api -X PATCH "$repo/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null; then
-            # Refused (e.g. a tag ruleset): as before, a new release, with a short gap.
-            echo "::warning::could not move the tag latest; recreating the release"
-            gh release delete latest --yes --cleanup-tag
-            gh release create latest dist/* --target "$GITHUB_SHA" --title "Latest: $tag" --notes-file notes.md --latest
-            exit 0
-          fi
+          # The tag (what mos-upgrade follows) moves in one step. GitHub
+          # refuses this token a tag on a commit that changes .github/workflows
+          # (or a tag ruleset may): the release keeps its new files, never
+          # deleted (its own new tag would be refused too), and the run fails
+          # with what to do.
+          moved=true
+          gh api -X PATCH "$repo/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null || moved=false
           gh release edit latest --title "Latest: $tag" --notes-file notes.md --latest
           keep=$( (ls dist; awk '{ print $2 }' previous.sums) | sort -u)
           gh api "$repo/releases/$id/assets" --paginate --jq '.[] | "\(.id) \(.name)"' |
             while read -r a name; do
               grep -qxF "$name" <<<"$keep" || gh api -X DELETE "$repo/releases/assets/$a"
             done
+          if ! $moved; then
+            echo "::error::latest has $tag's files, but its tag could not be moved (mos-upgrade follows the tag). By hand: git tag -f latest $GITHUB_SHA && git push -f origin refs/tags/latest"
+            exit 1
+          fi
