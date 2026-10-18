@@ -84,6 +84,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: tools/mos-usb/go.mod
+          cache: false  # mos-usb has no dependencies: nothing to cache
       - name: Build mos-usb (makes the USB drive; downloaded from the release, not on the ISO)
         working-directory: tools/mos-usb
         run: |

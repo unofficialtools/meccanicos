@@ -49,6 +49,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: tools/mos-usb/go.mod
+          cache: false  # mos-usb has no dependencies: nothing to cache
       - name: gofmt
         run: test -z "$(gofmt -l . | tee /dev/stderr)"
       - name: go vet (Linux, Windows, macOS)
