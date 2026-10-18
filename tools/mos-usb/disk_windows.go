@@ -25,7 +25,7 @@ func ps(script string) (string, error) {
 func listUSB() ([]Disk, error) {
 	out, err := ps(`@(Get-Disk | Where-Object { $_.BusType -eq 'USB' -and -not $_.IsBoot -and -not $_.IsSystem } | ForEach-Object {
   $labels = @(Get-Partition -DiskNumber $_.Number -ErrorAction SilentlyContinue | Get-Volume -ErrorAction SilentlyContinue | ForEach-Object { $_.FileSystemLabel })
-  [pscustomobject]@{ Number = $_.Number; Model = $_.FriendlyName; Size = [int64]$_.Size; Labels = ($labels -join ',') }
+  [pscustomobject]@{ Number = $_.Number; Model = $_.FriendlyName; Serial = [string]$_.SerialNumber; Size = [int64]$_.Size; Labels = ($labels -join ',') }
 }) | ConvertTo-Json -Compress`)
 	if err != nil {
 		return nil, fmt.Errorf("listing disks: %v: %s", err, out)
@@ -40,6 +40,7 @@ func listUSB() ([]Disk, error) {
 	var rows []struct {
 		Number int
 		Model  string
+		Serial string
 		Size   int64
 		Labels string
 	}
@@ -52,6 +53,7 @@ func listUSB() ([]Disk, error) {
 			ID:     strconv.Itoa(r.Number),
 			Path:   fmt.Sprintf(`\\.\PhysicalDrive%d`, r.Number),
 			Model:  strings.TrimSpace(r.Model),
+			Serial: strings.TrimSpace(r.Serial),
 			Size:   r.Size,
 			Ventoy: strings.Contains(r.Labels, "VTOYEFI"),
 		})
@@ -60,9 +62,15 @@ func listUSB() ([]Disk, error) {
 }
 
 func openRaw(d Disk) (*os.File, error) {
-	// Remove its partitions first, so Windows lets go of its volumes.
-	ps(fmt.Sprintf(`Clear-Disk -Number %s -RemoveData -RemoveOEM -Confirm:$false`, d.ID))
-	ps(fmt.Sprintf(`Update-Disk -Number %s`, d.ID))
+	// Remove its partitions first, so Windows lets go of its volumes (a blank
+	// drive has none). If that fails, Windows may still be using the drive:
+	// nothing is written.
+	if out, err := ps(fmt.Sprintf(`if ((Get-Disk -Number %[1]s).PartitionStyle -ne 'RAW') {
+  Clear-Disk -Number %[1]s -RemoveData -RemoveOEM -Confirm:$false
+}
+Update-Disk -Number %[1]s`, d.ID)); err != nil {
+		return nil, fmt.Errorf("could not remove its partitions: %s", out)
+	}
 	return os.OpenFile(d.Path, os.O_RDWR, 0)
 }
 
@@ -94,7 +102,8 @@ func ventoyInstall(dir string, d Disk) error {
 }
 
 // dataMount gives Ventoy's first partition (where ISOs go) a drive letter.
-func dataMount(d Disk) (string, func(), error) {
+// release writes out what Windows still caches for it.
+func dataMount(d Disk) (string, func() error, error) {
 	var letter string
 	var err error
 	for i := 0; i < 20; i++ {
@@ -106,7 +115,12 @@ if (-not $p.DriveLetter -or $p.DriveLetter -eq [char]0) {
 $p.DriveLetter`, d.ID))
 		if err == nil && len(letter) == 1 {
 			if _, serr := os.Stat(letter + `:\`); serr == nil {
-				return letter + `:\`, func() { ps("Write-VolumeCache -DriveLetter " + letter) }, nil
+				return letter + `:\`, func() error {
+					if out, err := ps("Write-VolumeCache -DriveLetter " + letter); err != nil {
+						return fmt.Errorf("could not write out the drive's cache: %s", out)
+					}
+					return nil
+				}, nil
 			}
 		}
 		time.Sleep(time.Second)
@@ -114,7 +128,11 @@ $p.DriveLetter`, d.ID))
 	return "", nil, fmt.Errorf("no drive letter for the Ventoy partition: %v %s", err, letter)
 }
 
-func finish(Disk) {}
+// finish has nothing left to do: Windows does not hold back writes to USB
+// drives (their default is "quick removal"), and what was written has been
+// flushed already (writing directly, or Write-VolumeCache for Ventoy's
+// partition), with any failure reported then.
+func finish(Disk) error { return nil }
 
 func tailLines(s string, n int) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")

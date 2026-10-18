@@ -18,11 +18,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from mos_fleet import agent as ag  # noqa: E402
 from mos_fleet.common import MAX_LINE, dumps, parse  # noqa: E402
 
-try:
-    import pydal  # noqa: F401
-    from mos_fleet import server as sv
-except ImportError:
-    sv = None
+import importlib.util  # noqa: E402
+
+# The server's tests need pydal (in the fleet server's Python, not always here).
+sv = importlib.import_module("mos_fleet.server") if importlib.util.find_spec("pydal") else None
 
 SYSTEM = "/nix/store/" + "a" * 32 + "-nixos-system-ws1-26.05"
 

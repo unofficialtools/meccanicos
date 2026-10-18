@@ -18,6 +18,7 @@ type lsblkDev struct {
 	Tran        *string         `json:"tran"`
 	RM          json.RawMessage `json:"rm"`
 	Model       *string         `json:"model"`
+	Serial      *string         `json:"serial"`
 	Type        string          `json:"type"`
 	Label       *string         `json:"label"`
 	Mountpoints []*string       `json:"mountpoints"`
@@ -29,7 +30,7 @@ var systemMounts = map[string]bool{"/": true, "/boot": true, "/boot/efi": true, 
 	"/home": true, "/nix": true, "/nix/store": true, "/usr": true, "/var": true, "[SWAP]": true}
 
 func listUSB() ([]Disk, error) {
-	out, err := exec.Command("lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,TRAN,RM,MODEL,TYPE,LABEL,MOUNTPOINTS").Output()
+	out, err := exec.Command("lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,TRAN,RM,MODEL,SERIAL,TYPE,LABEL,MOUNTPOINTS").Output()
 	if err != nil {
 		return nil, fmt.Errorf("lsblk: %w", err)
 	}
@@ -49,7 +50,8 @@ func listUSB() ([]Disk, error) {
 		if size == 0 || holdsSystem(d) {
 			continue
 		}
-		disk := Disk{ID: d.Name, Path: d.Path, Model: strings.TrimSpace(deref(d.Model)), Size: size}
+		disk := Disk{ID: d.Name, Path: d.Path, Model: strings.TrimSpace(deref(d.Model)),
+			Serial: strings.TrimSpace(deref(d.Serial)), Size: size}
 		for _, c := range d.Children {
 			disk.Parts = append(disk.Parts, c.Path)
 			if deref(c.Label) == "VTOYEFI" {
@@ -161,16 +163,16 @@ func ventoyInstall(dir string, d Disk) error {
 	return fmt.Errorf("Ventoy did not install:\n%s", tail(string(out), 15))
 }
 
-// dataMount mounts Ventoy's first partition (where ISOs go); release unmounts
-// it again if this program mounted it.
-func dataMount(d Disk) (string, func(), error) {
+// dataMount mounts Ventoy's first partition (where ISOs go); release writes
+// out what is cached and unmounts it again if this program mounted it.
+func dataMount(d Disk) (string, func() error, error) {
 	d2, ok := find(d.ID)
 	if !ok || len(d2.Parts) == 0 {
 		return "", nil, fmt.Errorf("the drive or its partition is gone")
 	}
 	part := d2.Parts[0]
 	if mp, ok := mounts(d2)[part]; ok {
-		return mp, func() { exec.Command("sync").Run() }, nil
+		return mp, func() error { return exec.Command("sync").Run() }, nil
 	}
 	dir, err := os.MkdirTemp("", "mos-usb-")
 	if err != nil {
@@ -180,18 +182,28 @@ func dataMount(d Disk) (string, func(), error) {
 		os.Remove(dir)
 		return "", nil, fmt.Errorf("mount %s: %s", part, strings.TrimSpace(string(out)))
 	}
-	return dir, func() {
+	return dir, func() error {
 		exec.Command("sync").Run()
-		exec.Command("umount", dir).Run()
+		if out, err := exec.Command("umount", dir).CombinedOutput(); err != nil {
+			return fmt.Errorf("could not unmount %s: %s", part, strings.TrimSpace(string(out)))
+		}
 		os.Remove(dir)
+		return nil
 	}, nil
 }
 
-func finish(d Disk) {
-	exec.Command("sync").Run()
-	unmountAll(d)
-	// Switch the drive off where udisks is around; pulling it out is safe either way now.
+// finish makes the drive safe to pull out: everything written, nothing
+// mounted. An error means it is not.
+func finish(d Disk) error {
+	if err := exec.Command("sync").Run(); err != nil {
+		return fmt.Errorf("sync: %w", err)
+	}
+	if err := unmountAll(d); err != nil {
+		return err
+	}
+	// Switch the drive off where udisks is around; unmounted, pulling it out is safe either way.
 	exec.Command("udisksctl", "power-off", "-b", d.Path, "--no-user-interaction").Run()
+	return nil
 }
 
 func tail(s string, n int) string {

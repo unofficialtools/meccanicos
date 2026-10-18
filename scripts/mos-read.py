@@ -3,14 +3,21 @@
   mos-read            read the clipboard (or the mouse selection if it is empty)
   mos-read FILE       read a text file
   ... | mos-read -    read standard input
+  mos-read --forget   delete the saved copy of the last text read
 
 Keys: Space pause/resume · ←/→ previous/next sentence · +/- speed · q/Esc stop
+(after a problem: r try again)
+
+The last text read is kept in ~/.cache/mos-read/last.txt (only you can read
+it), so "Read from clipboard" works again after the app you copied from has
+closed; mos-read --forget deletes it.
 
 Only one voice speaks at a time: it waits for `say` (or another reader) to
 finish first. Speech is made one sentence at a time (the next one is prepared while the
 current one plays) and fed to PipeWire in small slices, so pausing, skipping
 and stopping react within a fraction of a second.
 """
+import contextlib
 import curses
 import fcntl
 import os
@@ -49,6 +56,13 @@ def get_text(argv):
     if len(argv) > 1 and argv[1] in ("-h", "--help", "help"):
         print(__doc__.strip())
         sys.exit(0)
+    if len(argv) > 1 and argv[1] == "--forget":
+        try:
+            os.remove(LAST)
+        except FileNotFoundError:
+            pass
+        print("The last text read is forgotten.")
+        sys.exit(0)
     if len(argv) > 1:
         if argv[1] == "-":
             text = sys.stdin.read()
@@ -81,7 +95,7 @@ def get_text(argv):
 def remember(text):
     try:
         os.makedirs(CACHE, exist_ok=True)
-        with open(LAST, "w") as f:
+        with open(os.open(LAST, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:  # only yours
             f.write(text)
         os.chmod(LAST, 0o600)
     except OSError:
@@ -111,6 +125,9 @@ class Reader:
         self.quit = False
         self.gen = 0  # bumped on skip/speed change: abandons the current audio
         self.cache = {}
+        self.error = None  # what went wrong; both threads wait until retry() or stop()
+        self.broken = 0  # times the sound player went away during this sentence
+        self.proc = None  # the sound player
         self.cond = threading.Condition()
 
     # -- controls (called from the UI thread) --
@@ -131,12 +148,25 @@ class Reader:
             self.quit = True
             self.cond.notify_all()
 
+    def fail(self, message):
+        """A problem: shown on screen, everything waits for r (retry) or q."""
+        with self.cond:
+            self.error = message
+            self.cond.notify_all()
+
+    def retry(self):
+        with self.cond:
+            self.error = None
+            self.broken = 0
+            self.gen += 1
+            self.cond.notify_all()
+
     # -- synthesis: keep the current and the next sentence ready --
     def prefetch_loop(self):
-        from piper import SynthesisConfig
-
         while True:
             with self.cond:
+                while self.error and not self.quit:
+                    self.cond.wait(0.2)
                 if self.quit:
                     return
                 want = [(i, self.speed) for i in (self.idx, self.idx + 1) if i < len(self.sentences)]
@@ -148,8 +178,14 @@ class Reader:
                     self.cond.wait(0.2)
                     continue
             i, speed = todo
-            cfg = SynthesisConfig(length_scale=LENGTH_SCALE / speed)
-            audio = b"".join(c.audio_int16_bytes for c in self.voice.synthesize(speakable(self.sentences[i]), syn_config=cfg))
+            try:
+                from piper import SynthesisConfig
+
+                cfg = SynthesisConfig(length_scale=LENGTH_SCALE / speed)
+                audio = b"".join(c.audio_int16_bytes for c in self.voice.synthesize(speakable(self.sentences[i]), syn_config=cfg))
+            except Exception as e:  # anything from Piper or onnxruntime: say so instead of going quiet
+                self.fail(f"Piper could not say sentence {i + 1}: {e}")
+                continue
             with self.cond:
                 self.cache[todo] = audio
                 self.cond.notify_all()
@@ -165,11 +201,34 @@ class Reader:
         )
 
     def play_loop(self):
-        proc = None
+        try:
+            self._play()
+        except Exception as e:  # never leave the screen waiting for a dead thread
+            self.fail(f"Playback stopped: {e}")
+        finally:
+            if self.proc and not (self.quit or self.error):
+                with contextlib.suppress(OSError):
+                    self.proc.stdin.close()  # let the last sentence finish
+                self.proc.wait()
+            self._drop_player()
+            with self.cond:
+                self.finished = True
+                self.cond.notify_all()
+
+    def _drop_player(self):
+        """Stop the sound player, and what it has queued."""
+        proc, self.proc = self.proc, None
+        if proc:
+            proc.kill()
+            with contextlib.suppress(OSError):
+                proc.stdin.close()
+            proc.wait()
+
+    def _play(self):
         slice_bytes = self.rate * 2 // 20  # 50 ms
         while True:
             with self.cond:
-                while not self.quit and (self.idx, self.speed) not in self.cache:
+                while not self.quit and (self.error or (self.idx, self.speed) not in self.cache):
                     if self.idx >= len(self.sentences):
                         break
                     self.cond.wait(0.1)
@@ -177,11 +236,10 @@ class Reader:
                     break
                 i, gen = self.idx, self.gen
                 audio = self.cache[(i, self.speed)]
-            proc = proc or self._player()
             pos, played, start = 0, 0.0, time.monotonic()
             interrupted = False
             while pos < len(audio):
-                if self.quit or self.gen != gen:
+                if self.quit or self.gen != gen or self.error:
                     interrupted = True
                     break
                 if self.paused:
@@ -194,30 +252,31 @@ class Reader:
                     continue
                 piece = audio[pos:pos + slice_bytes]
                 try:
-                    proc.stdin.write(piece)
-                    proc.stdin.flush()
-                except BrokenPipeError:
-                    proc = self._player()
+                    self.proc = self.proc or self._player()
+                    self.proc.stdin.write(piece)
+                    self.proc.stdin.flush()
+                except BrokenPipeError:  # the player went away: a new one, a few times
+                    self._drop_player()
+                    self.broken += 1
+                    if self.broken > 3:
+                        self.fail(f"The sound player ({PW_PLAY}) keeps stopping (is the sound server running?)")
+                        interrupted = True
+                        break
                     continue
+                except OSError as e:
+                    self.fail(f"The sound player ({PW_PLAY}) doesn't work: {e}")
+                    interrupted = True
+                    break
                 pos += len(piece)
                 played += len(piece) / (self.rate * 2)
             if interrupted:
-                proc.kill()  # drop what is already queued
-                proc.wait()
-                proc = None
+                self._drop_player()  # drop what is already queued
                 continue
             with self.cond:
+                self.broken = 0
                 if self.gen == gen and self.idx == i:
                     self.idx += 1
                     self.cond.notify_all()
-        if proc:
-            if self.quit:
-                proc.kill()
-            else:
-                proc.stdin.close()  # let the last sentence finish
-            proc.wait()
-        with self.cond:
-            self.finished = True
 
 
 def draw(scr, reader):
@@ -232,7 +291,7 @@ def draw(scr, reader):
     cur = min(reader.idx, len(reader.sentences) - 1)
     first = next(k for k, (_, n) in enumerate(lines) if n == cur)
     top = max(0, min(first - body // 3, len(lines) - body))
-    state = "Paused" if reader.paused else "Reading"
+    state = "Problem" if reader.error else "Paused" if reader.paused else "Reading"
     tui.bar(scr, 0, "Reading aloud · Piper / Amy", f"{state}  {cur + 1}/{len(reader.sentences)}  {reader.speed:.1f}x")
     for row, (text, n) in enumerate(lines[top:top + body]):
         # The sentence being read: dark on orange, as what has focus in every tool.
@@ -240,7 +299,11 @@ def draw(scr, reader):
             tui.put(scr, 2 + row, 1, f" {text} ", tui.attr(tui.SELECTED))
         else:
             tui.put(scr, 2 + row, 2, text, tui.attr(tui.NORMAL))
-    tui.keybar(scr, h - 1, [("Space", "pause"), ("←→", "sentence"), ("+/-", "speed"), ("q", "stop")])
+    if reader.error:
+        tui.put(scr, h - 2, 1, reader.error[:w - 2], tui.attr(tui.ERR))
+        tui.keybar(scr, h - 1, [("r", "try again"), ("q", "quit")])
+    else:
+        tui.keybar(scr, h - 1, [("Space", "pause"), ("←→", "sentence"), ("+/-", "speed"), ("q", "stop")])
     scr.refresh()
 
 
@@ -252,6 +315,8 @@ def ui(scr, reader):
         key = scr.getch()
         if key in (ord("q"), ord("Q"), 27):
             reader.stop()
+        elif key in (ord("r"), ord("R")) and reader.error:
+            reader.retry()
         elif key == ord(" "):
             reader.paused = not reader.paused
         elif key in (curses.KEY_RIGHT, ord("l"), ord("n")):
@@ -295,8 +360,17 @@ def main():
     try:
         curses.wrapper(ui, reader)
     except KeyboardInterrupt:
+        pass
+    finally:
         reader.stop()
-    threads[1].join(timeout=2)
+        threads[1].join(timeout=2)
+        proc = reader.proc
+        if proc and proc.poll() is None:  # the player outlives no reader
+            proc.kill()
+        lock.close()  # the next voice may speak
+    if reader.error:
+        print(reader.error)
+        return 1
     return 0
 
 

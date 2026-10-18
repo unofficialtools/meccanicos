@@ -164,11 +164,13 @@ USAGE_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/mos-ask/usage"
 # Count launches so frequently used apps float to the top of the list.
 bump_usage() {
     mkdir -p "${USAGE_FILE%/*}"
+    # A unique file next to it, then a rename: atomic (same file system), so
+    # the list is never seen half written.
     local tmp
-    tmp=$(mktemp)
+    tmp=$(mktemp "$USAGE_FILE.XXXXXX") || return 0
     awk -F'\t' -v k="$1" 'BEGIN{OFS="\t"} $1==k{$2++; f=1} {print} END{if(!f) print k, 1}' \
         "$USAGE_FILE" 2>/dev/null >"$tmp" || printf '%s\t1\n' "$1" >"$tmp"
-    mv "$tmp" "$USAGE_FILE"
+    mv -f "$tmp" "$USAGE_FILE" || rm -f "$tmp"
 }
 
 # Visible desktop applications: "Name<TAB>Icon", one per app, deduplicated.

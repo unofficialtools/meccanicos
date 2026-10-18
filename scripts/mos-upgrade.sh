@@ -21,8 +21,11 @@
 # release or a commit; --to changes it. This moves both to the newest
 # (flake.lock) and rebuilds. Staying on a release or commit, the NixOS packages
 # still get their fixes. The system before stays in the boot menu; if the
-# rebuild fails, the previous flake.nix and flake.lock are put back. When a
-# release moves to a newer NixOS (26.05 -> 26.11), this follows it.
+# rebuild fails, the previous flake.nix and flake.lock are put back (that does
+# not undo a system that was partly switched to: pick the previous entry in the
+# boot menu). One update at a time: one started meanwhile says so and stops,
+# changing nothing. When a release moves to a newer NixOS (26.05 -> 26.11),
+# this follows it.
 #
 # Needs a network connection. --auto (the weekly mos-auto-upgrade) builds for
 # the next start.
@@ -56,6 +59,13 @@ GITHUB=$(locked '.nodes.meccanicos.original | select(.owner) | "\(.owner)/\(.rep
 [[ -n $GITHUB ]] ||
     { echo "mos-upgrade: $DEST/flake.lock does not follow a MeccanicOS release (see flake.nix: mkInstalled)" >&2; exit 1; }
 if [[ $EUID -ne 0 && $mode != check && $mode != list ]]; then exec sudo "$(readlink -f "$0")" "${args[@]}"; fi
+# One update at a time (this, the weekly mos-auto-upgrade, another terminal):
+# a lock on $DEST, held from reading flake.nix to the end of the rebuild.
+if [[ $mode != check && $mode != list ]]; then
+    exec 9<"$DEST"
+    flock -n 9 ||
+        { echo "mos-upgrade: another update is running (perhaps the weekly one: systemctl status mos-auto-upgrade). Try again when it is done. Nothing changed." >&2; exit 1; }
+fi
 
 # What flake.nix follows: latest, main, a release (v2026-10-12) or a commit.
 following() {
@@ -147,24 +157,32 @@ if [[ -n $to ]]; then
 fi
 
 # Put things back as they were: on any way out but success (a failed
-# download or rebuild, an error, Ctrl+C).
+# download or rebuild, an error, Ctrl+C). From this run's own copy, so two
+# runs never restore each other's files.
+SAVED=$(mktemp -d)
 undo() {
-    [[ -e $DEST/flake.lock.previous ]] && cp "$DEST/flake.lock.previous" "$DEST/flake.lock"
-    [[ -e $DEST/flake.nix.previous ]] && cp "$DEST/flake.nix.previous" "$DEST/flake.nix"
+    [[ -e $SAVED/flake.lock ]] && cp "$SAVED/flake.lock" "$DEST/flake.lock"
+    [[ -e $SAVED/flake.nix ]] && cp "$SAVED/flake.nix" "$DEST/flake.nix"
     return 0
 }
 finished=0 # set once it worked; until then, any way out puts things back
 on_exit() {
     if ((!finished)); then
-        echo "Putting the previous $DEST back." >&2
+        echo "Putting the previous $DEST/flake.nix and flake.lock back." >&2
         undo
     fi
+    rm -rf "$SAVED"
 }
 trap 'exit 130' INT TERM
 trap on_exit EXIT
 
-cp "$DEST/flake.nix" "$DEST/flake.nix.previous"
-cp "$DEST/flake.lock" "$DEST/flake.lock.previous" 2>/dev/null || rm -f "$DEST/flake.lock.previous"
+cp "$DEST/flake.nix" "$SAVED/flake.nix"
+cp "$DEST/flake.lock" "$SAVED/flake.lock" 2>/dev/null || true
+# The flake.lock before, kept in $DEST once the update worked (mos-updates).
+keep_previous() {
+    [[ -e $SAVED/flake.lock ]] || return 0
+    cp "$SAVED/flake.lock" "$DEST/flake.lock.previous.new" && mv -f "$DEST/flake.lock.previous.new" "$DEST/flake.lock.previous"
+}
 if [[ -n $to && $to != "$(following)" ]]; then
     sed -i -E "s|\"github:$GITHUB(/[^\"?]*)?\"|\"github:$GITHUB/$to\"|" "$DEST/flake.nix"
     [[ $(following) == "$to" ]] ||
@@ -187,19 +205,23 @@ if [[ -n $want && -n $have && $want != "$have" ]]; then
     nix flake update --flake "$DEST"
 fi
 
-if cmp -s "$DEST/flake.lock" "$DEST/flake.lock.previous"; then
+if cmp -s "$DEST/flake.lock" "$SAVED/flake.lock"; then
     finished=1
-    rm -f "$DEST/flake.nix.previous"
     echo "Already up to date: $NAME $(describe "$(locked .nodes.meccanicos.locked.rev)" 2>/dev/null || locked .nodes.meccanicos.locked.rev | cut -c1-7)."
     exit 0
 fi
 
 how=switch
 [[ $mode == switch ]] || how=boot
+# The system before, to tell afterwards whether a failed rebuild got as far as
+# putting the new one in place.
+PROFILE=${MECCANICOS_SYSTEM_PROFILE:-/nix/var/nix/profiles/system}
+system() { readlink -f "$PROFILE" 2>/dev/null || true; readlink -f /run/current-system 2>/dev/null || true; }
+before=$(system)
 echo "Building the new system ($how)..."
 if nixos-rebuild "$how" --flake "$DEST#installed"; then
     finished=1
-    rm -f "$DEST/flake.nix.previous"
+    keep_previous || true
     echo
     new=$(describe "$(locked .nodes.meccanicos.locked.rev)" 2>/dev/null || locked .nodes.meccanicos.locked.rev | cut -c1-7)
     if [[ $how == boot ]]; then
@@ -210,6 +232,12 @@ if nixos-rebuild "$how" --flake "$DEST#installed"; then
     echo "Something wrong? Pick the previous entry in the boot menu when the computer starts."
 else
     echo >&2
-    echo "The new version did not build." >&2
+    if [[ $(system) == "$before" ]]; then
+        echo "The new version did not build." >&2
+    else
+        echo "The new version was built and partly put in place, then failed." >&2
+        echo "Putting flake.nix and flake.lock back does not undo that. If something is wrong," >&2
+        echo "restart and pick the previous entry in the boot menu, or: sudo nixos-rebuild switch --rollback" >&2
+    fi
     exit 1
 fi

@@ -49,6 +49,7 @@ let
       pkgs.gnugrep
       pkgs.gawk
       pkgs.git # git ls-remote: the release names
+      pkgs.util-linux # flock: one update at a time
     ];
     text = ''
       export MECCANICOS_NAME=${lib.escapeShellArg distro.name}
@@ -326,6 +327,8 @@ in
         pkgs.coreutils
         pkgs.gnugrep
         pkgs.hostname
+        pkgs.util-linux # findmnt, lsblk: the disk under /
+        pkgs.gawk
         config.system.build.nixos-rebuild
       ];
       text = builtins.readFile ../scripts/mos-unlock.sh;

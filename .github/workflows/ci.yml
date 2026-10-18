@@ -1,6 +1,7 @@
 name: CI
 # The quick jobs (lint, eval, mos-usb) run on every push to any branch; the
-# slow VM tests on pushes to main, and on demand.
+# slow VM tests on pushes to main, and on demand. release.yml runs it too
+# (workflow_call), for the tag's commit, before it publishes anything.
 on:
   push:
     branches: ["**"]
@@ -11,9 +12,17 @@ on:
         description: Run the (slow) VM tests
         type: boolean
         default: true
+  workflow_call:
+    inputs:
+      vm-tests:
+        description: Run the (slow) VM tests
+        type: boolean
+        default: false
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # github.workflow: called by Release, it is "Release", so a release built by
+  # hand from main neither cancels CI on main nor is cancelled by it.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -68,8 +77,9 @@ jobs:
           nix eval --raw .#packages.x86_64-linux.iso.drvPath
 
   vm-tests:
-    # Building the ISO and booting it takes a while: run on main and on demand.
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.vm-tests)
+    # Building the ISO and booting it takes a while: run on main, on demand
+    # and before a release (inputs: from workflow_dispatch or workflow_call).
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || inputs.vm-tests
     needs: [lint, eval, mos-usb]
     runs-on: ubuntu-latest
     timeout-minutes: 360

@@ -22,8 +22,26 @@ case ${1:-} in
     -h | --help | help) sed -n '/^# mos-unlock - /,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
 esac
 
-DEV=/dev/disk/by-partlabel/MOS_CRYPT
-[[ -e $DEV ]] || { echo "No MeccanicOS encrypted disk found ($DEV)." >&2; exit 1; }
+# The encrypted partition this system runs from: the LUKS device under the
+# root file system (lsblk -s walks from / down to the disk). Only when that
+# finds none (the live USB) the partition label, which every MeccanicOS disk
+# shares: with several such disks attached it would be a guess, so stop.
+root_luks() {
+    local src
+    src=$(findmnt -nvo SOURCE /) || return 1
+    lsblk -nlps -o NAME,FSTYPE "$src" 2>/dev/null | awk '$2 == "crypto_LUKS" { print $1; exit }'
+}
+DEV=$(root_luks || true)
+if [[ -z $DEV ]]; then
+    mapfile -t labelled < <(lsblk -nlp -o NAME,PARTLABEL 2>/dev/null | awk '$2 == "MOS_CRYPT" { print $1 }')
+    case ${#labelled[@]} in
+        0) echo "No MeccanicOS encrypted disk found." >&2; exit 1 ;;
+        1) DEV=${labelled[0]} ;;
+        *) echo "Several MeccanicOS encrypted disks are attached (${labelled[*]}):" >&2
+           echo "start the MeccanicOS you want to change and run mos-unlock there." >&2
+           exit 1 ;;
+    esac
+fi
 if [[ $EUID -ne 0 ]]; then exec sudo "$(readlink -f "$0")" "$@"; fi
 
 KEYS=/etc/nixos/remote-unlock-keys
@@ -63,8 +81,14 @@ remote() {
 case ${1:-status} in
     status)
         systemd-cryptenroll "$DEV"
+        echo "Disk: $DEV"
         if [[ -f $KEYS ]]; then
-            echo "Remote unlock: on (ssh -p 2222 root@HOST, $(wc -l < "$KEYS") key(s) in $KEYS)"
+            # The boot stage that has it is the one built after the keys were
+            # saved: saved since this boot started, it works from the next one.
+            booted=$(awk '$1 == "btime" { print $2 }' /proc/stat)
+            when="on"
+            (( $(stat -c %Y "$KEYS") > booted )) && when="on from the next boot"
+            echo "Remote unlock: $when (ssh -p 2222 root@HOST, $(wc -l < "$KEYS") key(s) in $KEYS)"
         else
             echo "Remote unlock: off (mos-unlock remote)"
         fi

@@ -10,7 +10,14 @@ It uses only a drive plugged in **after** it says "Insert the USB drive". Before
 erasing one it shows a big red warning naming it ("USB DRIVE (/dev/sdb)"; on
 Windows "USB DRIVE (Disk 2)") and goes on only if the user types `YES` (any case). A drive that already has Ventoy is not erased: the
 ISO is added and nothing on it is deleted, older MeccanicOS ISOs included (if there
-is not enough room, mos-usb says so and changes nothing).
+is not enough room, mos-usb says so and changes nothing). Right before erasing, it
+checks the drive is still the one the user said YES to (serial number where the
+system reports one, size and model).
+
+It downloads as the user, and only then asks for administrator rights. The part
+run as administrator writes nothing in the download folder: it checks the
+downloads again, keeps the checked ISO open while writing it, and unpacks and
+runs Ventoy only from a private copy in a folder of its own.
 
 Users download it from the [latest release](https://github.com/unofficialtools/meccanicos/releases/tag/latest)
 (see the main README, "Make a USB drive"); it is not on the ISO. The release

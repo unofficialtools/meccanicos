@@ -12,16 +12,20 @@
 #   --disk SIZE       also attach an empty hard disk (e.g. 64G) to film the installer
 #   --installed       boot the hard disk only (after installing), no USB stick
 #   --fresh           start over: new USB stick, disk and firmware settings
+#                     (deletes the persistent home and vaults on the stick, and
+#                     what is installed on the disk; asks first in a terminal)
 #   --offline         no network (show that everything works offline)
 #   --gl              GPU-accelerated display (smoother; needs working host OpenGL)
 #   --fullscreen      start full screen (toggle with Ctrl+Alt+F)
 #   --no-audio        no sound device
 #   --bios            legacy BIOS instead of UEFI (live USB only)
 #   --state DIR       where the VM's stick/disk/firmware live (default ~/.cache/mos-vm)
-#   --dry-run         print the QEMU command instead of running it
+#   --dry-run         print the QEMU command instead of running it (changes nothing)
 #
 # The virtual USB stick is copy-on-write on top of the ISO and is kept between
 # runs, so vaults and the persistent home you create survive (--fresh resets).
+# A different ISO (a new build) also starts the stick over; in a terminal mos-vm
+# asks first, otherwise it goes ahead.
 #
 # In the window: click inside, then press Ctrl+Alt+G so keys like Super+Space
 # go to MeccanicOS instead of your own desktop (Ctrl+Alt+G again to release).
@@ -67,37 +71,36 @@ done
 [[ $RES =~ ^([0-9]+)x([0-9]+)$ ]] || die "--res must look like 1920x1080"
 XRES=${BASH_REMATCH[1]} YRES=${BASH_REMATCH[2]}
 ((INSTALLED && BIOS)) && die "the installed system needs UEFI; drop --bios"
+((INSTALLED && FRESH)) && die "--fresh deletes the installed disk; drop --installed"
 
-mkdir -p "$STATE"
+# First the plan (what to reset, create, boot), then, unless --dry-run, do it:
+# --dry-run changes nothing.
+stick="$STATE/stick.qcow2" disk="$STATE/disk.qcow2" vars="$STATE/OVMF_VARS.fd"
+reset=() lost=() create=()
 if ((FRESH)); then
-    rm -f "$STATE"/stick.qcow2 "$STATE"/disk.qcow2 "$STATE"/OVMF_VARS.fd
-    echo "Starting fresh."
+    for f in "$stick" "$disk" "$vars"; do [[ -f $f ]] && reset+=("$f"); done
+    [[ -f $stick ]] && lost+=("the virtual USB stick: its persistent home and vaults")
+    [[ -f $disk ]] && lost+=("the hard disk: the system installed on it and its files")
 fi
-
 drives=()
 if ((!INSTALLED)); then
     [[ -n $ISO ]] || die "no ISO given (use --iso PATH, or run it as: nix run .#vm)"
     [[ -f $ISO ]] || die "ISO not found: $ISO"
     ISO=$(readlink -f "$ISO")
-    stick="$STATE/stick.qcow2"
     # Re-create the stick when the ISO changed (new build), keeping nothing stale.
-    if [[ -f $stick ]] && [[ $(cat "$STATE/stick.iso" 2>/dev/null) != "$ISO" ]]; then
-        echo "New ISO: resetting the virtual USB stick."
-        rm -f "$stick"
+    if ((!FRESH)) && [[ -f $stick ]] && [[ $(cat "$STATE/stick.iso" 2>/dev/null) != "$ISO" ]]; then
+        echo "New ISO: the virtual USB stick starts over (it was made from $(cat "$STATE/stick.iso" 2>/dev/null || echo "another ISO"))."
+        reset+=("$stick")
+        lost+=("the virtual USB stick: its persistent home and vaults")
     fi
-    if [[ ! -f $stick ]]; then
-        qemu-img create -q -f qcow2 -b "$ISO" -F raw "$stick" 16G
-        echo "$ISO" >"$STATE/stick.iso"
-    fi
+    [[ -f $stick ]] && ((!FRESH && !${#reset[@]})) || create+=(stick)
     drives+=(-drive "id=stick,file=$stick,format=qcow2,if=none"
         -device "usb-storage,drive=stick,removable=on,bootindex=1")
 fi
 if [[ -n $DISK ]] || ((INSTALLED)); then
-    disk="$STATE/disk.qcow2"
-    if [[ ! -f $disk ]]; then
+    if [[ ! -f $disk ]] || ((FRESH)); then
         ((INSTALLED)) && die "no installed disk yet: run once with --disk 64G and install"
-        qemu-img create -q -f qcow2 "$disk" "$DISK"
-        echo "Created an empty $DISK hard disk for the installer (shows up as /dev/vda)."
+        create+=(disk)
     fi
     drives+=(-drive "id=hd,file=$disk,format=qcow2,if=none"
         -device "virtio-blk-pci,drive=hd,bootindex=$((INSTALLED ? 1 : 2))")
@@ -106,8 +109,7 @@ fi
 firmware=()
 if ((!BIOS)); then
     [[ -n $OVMF_CODE && -f $OVMF_CODE ]] || die "UEFI firmware (OVMF) not found; run via 'nix run .#vm'"
-    vars="$STATE/OVMF_VARS.fd"
-    [[ -f $vars ]] || { cp "$OVMF_VARS" "$vars"; chmod u+w "$vars"; }
+    [[ -f $vars ]] && ((!FRESH)) || create+=(vars) # firmware settings
     firmware=(-drive "if=pflash,format=raw,unit=0,readonly=on,file=$OVMF_CODE"
         -drive "if=pflash,format=raw,unit=1,file=$vars")
 fi
@@ -144,9 +146,37 @@ cmd=(qemu-system-x86_64 -name "MeccanicOS" "${accel[@]}" -smp "$CPUS" -m "$MEM"
     -boot menu=on)
 
 if ((DRY)); then
+    ((${#reset[@]})) && echo "Would delete (--dry-run: nothing changed): ${reset[*]}"
     printf '%q ' "${cmd[@]}"
     echo
     exit 0
 fi
+
+# Starting over loses what was made inside the VM: say what, and ask when
+# someone is there to answer (otherwise, as documented, it goes ahead).
+if ((${#reset[@]})); then
+    if ((${#lost[@]})); then
+        echo "Starting over deletes:"
+        printf '  %s\n' "${lost[@]}"
+        if [[ -t 0 ]]; then
+            read -r -p "Delete them? [y/N] " answer
+            [[ $answer == [yY]* ]] || die "nothing deleted"
+        fi
+    fi
+    rm -f -- "${reset[@]}"
+    ((FRESH)) && echo "Starting fresh."
+fi
+mkdir -p "$STATE"
+for what in "${create[@]}"; do
+    case $what in
+        stick)
+            qemu-img create -q -f qcow2 -b "$ISO" -F raw "$stick" 16G
+            echo "$ISO" >"$STATE/stick.iso" ;;
+        disk)
+            qemu-img create -q -f qcow2 "$disk" "$DISK"
+            echo "Created an empty $DISK hard disk for the installer (shows up as /dev/vda)." ;;
+        vars) cp "$OVMF_VARS" "$vars"; chmod u+w "$vars" ;;
+    esac
+done
 echo "Booting MeccanicOS (${XRES}x${YRES}, ${MEM} RAM, ${CPUS} CPUs). Ctrl+Alt+G grabs the keyboard."
 exec "${cmd[@]}"

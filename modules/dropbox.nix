@@ -23,9 +23,11 @@ in
 
   # Two-way sync every 5 minutes, only for users who ran `mos-dropbox sync`:
   # the timer is not wanted by default; `mos-dropbox sync`/`resume` enable it
-  # per user and `pause`/`logout` disable it again.
+  # per user and `pause`/`logout` disable it again. `tick` syncs the folder
+  # that `mos-dropbox sync` remembered (~/.config/mos-dropbox/folder), so a
+  # MECCANICOS_DROPBOX_DIR given by hand is used here too.
   systemd.user.services.mos-dropbox-sync = {
-    description = "Sync ~/Dropbox (mos-dropbox)";
+    description = "Sync the Dropbox folder (mos-dropbox)";
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${mos-dropbox}/bin/mos-dropbox tick";

@@ -6,7 +6,6 @@ import stat
 import sys
 import tarfile
 import tempfile
-import tomllib
 import unittest
 from unittest.mock import patch
 

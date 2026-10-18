@@ -171,17 +171,38 @@ confirm_erase() {
     [[ ${answer,,} == yes ]] || { echo "[$tag] cancelled: nothing was written to $name"; exit 1; }
 }
 
+# Unmounts every partition of $1; exits if one stays mounted (writing to the
+# disk then would damage it, or be lost).
 unmount_all() {
-    local part
-    for part in $(lsblk -nro NAME "$1" | tail -n +2); do
-        sudo umount "/dev/$part" 2>/dev/null || true
-    done
+    local part mp
+    while read -r part mp; do
+        [[ -n $mp ]] || continue
+        sudo umount "$part" ||
+            { echo "[usb] could not unmount $part ($mp): close what uses it and run again; nothing was written" >&2; exit 1; }
+    done < <(lsblk -nrpo NAME,MOUNTPOINT "$1")
+    if lsblk -nro MOUNTPOINT "$1" | grep -q .; then
+        echo "[usb] $1 is still mounted; nothing was written" >&2
+        exit 1
+    fi
+}
+
+# What tells this drive from another one given the same /dev name after an
+# unplug: serial number, size, model. A drive with no serial number is told
+# apart by size and model only.
+disk_identity() { lsblk -bdno SERIAL,SIZE,MODEL "$1" 2>/dev/null | xargs; }
+
+# Exits unless $2 (the device, $1 the tag) is still the drive whose
+# disk_identity was $3 when the user said YES.
+same_disk() {
+    local tag=$1 dev=$2 id=$3
+    [[ -n $id && $(disk_identity "$dev") == "$id" ]] ||
+        { echo "[$tag] $dev is not the drive you said YES to any more (unplugged or swapped); nothing was written" >&2; exit 1; }
 }
 
 # Raw image ("DD mode"), which the encrypted storage on the stick needs.
 # Refuses anything that isn't a whole USB/removable disk, and asks first.
 burn() {
-    local dev=${1:-} iso isosize devsize
+    local dev=${1:-} iso isosize devsize id
     if [[ -z $dev ]]; then
         echo "usage: $0 burn /dev/sdX"
         echo
@@ -198,9 +219,11 @@ burn() {
     echo "ISO:    $iso ($((isosize / 1000000)) MB)"
     echo "Target: USB DRIVE ($dev)"
     lsblk -o NAME,SIZE,TRAN,MODEL,LABEL,MOUNTPOINT "$dev"
+    id=$(disk_identity "$dev")
     confirm_erase burn "$dev" "MeccanicOS is then written on it."
 
     unmount_all "$dev"
+    same_disk burn "$dev" "$id"
     sudo dd if="$iso" of="$dev" bs=4M status=progress oflag=sync conv=fsync
     sync
     echo "[burn] done - you can unplug $dev"
@@ -227,7 +250,7 @@ ventoy_bin() {
 
 # Put the ISO on a Ventoy stick; make it one first if needed (erases it).
 ventoy() {
-    local dev=${1:-} iso name part mnt v need have
+    local dev=${1:-} iso name part mnt v need have id
     if [[ -z $dev ]]; then
         echo "usage: $0 ventoy /dev/sdX"
         echo
@@ -245,10 +268,12 @@ ventoy() {
     if ! is_ventoy "$dev"; then
         echo "USB DRIVE ($dev) is not a Ventoy stick yet:"
         lsblk -o NAME,SIZE,TRAN,MODEL,LABEL,MOUNTPOINT "$dev"
+        id=$(disk_identity "$dev")
         confirm_erase ventoy "$dev" "Ventoy is then installed on it, and MeccanicOS copied to it."
         echo "[ventoy] getting Ventoy (from the pinned nixpkgs)"
         v=$(ventoy_bin)
         unmount_all "$dev"
+        same_disk ventoy "$dev" "$id"
         # Ventoy asks twice more; we already have the YES.
         { yes y || true; } | sudo "$v/bin/ventoy" -i "$dev"
         sudo udevadm settle 2>/dev/null || true
@@ -279,17 +304,24 @@ ventoy() {
         trap "sync; sudo umount $(printf %q "$mnt") 2>/dev/null || true; rmdir $(printf %q "$mnt") 2>/dev/null || true" EXIT
     fi
     # Nothing on the stick is deleted, older ISOs included; only a file with
-    # this ISO's name is replaced.
+    # this ISO's name is replaced, once the new copy (written next to it as
+    # .part) is complete and checked: so there must be room for all of it.
+    # A .part left by an earlier try is overwritten: its space counts.
     need=$(stat -Lc %s "$iso")
     have=$(df --output=avail -B1 "$mnt" | tail -n1)
-    [[ -e $mnt/$name ]] && have=$((have + $(stat -Lc %s "$mnt/$name")))
+    [[ -f $mnt/$name.part ]] && have=$((have + $(stat -c %s "$mnt/$name.part")))
     ((need <= have)) || {
         echo "[ventoy] not enough free space on the stick for $name; nothing was changed:" >&2
         echo "         delete files you no longer need from it (older ISOs, for example)" >&2
+        [[ -e $mnt/$name ]] && echo "         (its older copy stays until the new one is checked: room for both is needed)" >&2
         exit 1
     }
     echo "[ventoy] copying $name"
-    $as cp "$iso" "$mnt/$name.part"
+    if ! $as cp "$iso" "$mnt/$name.part" || ! sync || ! $as cmp -s "$iso" "$mnt/$name.part"; then
+        $as rm -f "$mnt/$name.part"
+        echo "[ventoy] the copy on the stick is damaged; nothing on it was replaced" >&2
+        exit 1
+    fi
     $as mv "$mnt/$name.part" "$mnt/$name"
     # MeccanicOS-README.pdf next to it (on a stick written directly it is inside
     # the ISO). Optional: if it cannot be built or copied, it is skipped.

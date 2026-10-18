@@ -1,18 +1,22 @@
 name: Release
 # Push a tag like v2026-10-08 to build the ISO and publish it, under that tag
 # and as the "latest" release (the README and get-iso point there).
+# Only once CI (lint, evaluation, mos-usb's tests and, for a tag, the VM
+# tests) has passed for that same commit. Run by hand (workflow_dispatch): the
+# quick checks and a build, nothing published.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  iso:
+  published:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    outputs:
+      skip: ${{ steps.published.outputs.skip }}
     steps:
       - name: Already published? (a release made by hand, with its tag)
         id: published
@@ -23,15 +27,31 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "Release $GITHUB_REF_NAME exists already: nothing to build."
           fi
+
+  ci:
+    needs: published
+    if: needs.published.outputs.skip != 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      vm-tests: ${{ startsWith(github.ref, 'refs/tags/') }}
+    secrets: inherit
+
+  iso:
+    needs: [published, ci]
+    if: needs.published.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write # the release
+      id-token: write # the build provenance (attestation) of its files
+      attestations: write
+    steps:
       - uses: actions/checkout@v7
-        if: steps.published.outputs.skip != 'true'
       - uses: ./.github/actions/setup-nix
-        if: steps.published.outputs.skip != 'true'
         with:
           cachix-name: ${{ vars.CACHIX_CACHE }}
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build the ISO
-        if: steps.published.outputs.skip != 'true'
         # The tag (v2026-10-16) goes into the ISO's name and /etc/os-release,
         # with the commit and today's date and time into /etc/meccanicos/version
         # (see flake.nix). Run by hand (workflow_dispatch): the branch's name.
@@ -40,7 +60,6 @@ jobs:
           MECCANICOS_RELEASE=$GITHUB_REF_NAME MECCANICOS_BUILD_DATE=${now:0:8} MECCANICOS_BUILD_TIME=${now:8:4} \
             nix build -L --impure .#iso --out-link iso
       - name: Split into parts (GitHub release files must be under 2 GB)
-        if: steps.published.outputs.skip != 'true'
         run: |
           set -euo pipefail
           src=$(ls iso/iso/*.iso)
@@ -63,11 +82,9 @@ jobs:
           fi
           ls -lh dist
       - uses: actions/setup-go@v6
-        if: steps.published.outputs.skip != 'true'
         with:
           go-version-file: tools/mos-usb/go.mod
       - name: Build mos-usb (makes the USB drive; downloaded from the release, not on the ISO)
-        if: steps.published.outputs.skip != 'true'
         working-directory: tools/mos-usb
         run: |
           set -euo pipefail
@@ -78,8 +95,14 @@ jobs:
             GOOS=$os GOARCH=$arch go build -trimpath -ldflags='-s -w' -o "../../dist/mos-usb-$name" .
           done
           cd ../../dist && sha256sum mos-usb-* >> SHA256SUMS
+      - name: Provenance (gh attestation verify FILE -R unofficialtools/meccanicos)
+        if: startsWith(github.ref, 'refs/tags/')
+        # Every file in SHA256SUMS, the joined ISO too: built here, from this commit.
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-checksums: dist/SHA256SUMS
       - name: Publish
-        if: steps.published.outputs.skip != 'true' && startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -113,8 +136,77 @@ jobs:
           More: [meccanicos.com](https://meccanicos.com). Support: [the MeccanicOS group](https://groups.google.com/g/meccanicos).
           NOTES
           gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md --latest=false
-          # The same files again as "latest" (moved to this commit), which the
-          # README and get-iso download from.
-          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create latest dist/* --target "$GITHUB_SHA" \
-            --title "Latest: $GITHUB_REF_NAME" --notes-file notes.md --latest
+
+  latest:
+    # The same files again as "latest" (moved to this commit), which the
+    # README, get-iso, mos-usb and mos-upgrade use. One run at a time; a run
+    # still waiting is replaced by a newer one, which moves it further anyway.
+    needs: iso
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-latest
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Move "latest" to this release (never back to an older one)
+        run: |
+          set -euo pipefail
+          tag=$GITHUB_REF_NAME repo=repos/$GITHUB_REPOSITORY
+          # The newest release is the highest version (as mos-upgrade sorts
+          # them): a run for an older tag that finishes later leaves it alone.
+          newest=$(gh api "$repo/releases" --paginate --jq '.[] | select(.draft | not) | .tag_name' | grep '^v' | sort -V | tail -n1)
+          if [[ $newest != "$tag" ]]; then
+            echo "$newest is newer than $tag: latest stays where it is."
+            exit 0
+          fi
+          mkdir dist && gh release download "$tag" -D dist
+          gh release view "$tag" --json body --jq .body > notes.md
+          if ! gh release view latest >/dev/null 2>&1; then  # the first one
+            gh release create latest dist/* --target "$GITHUB_SHA" --title "Latest: $tag" --notes-file notes.md --latest
+            exit 0
+          fi
+          id=$(gh api "$repo/releases/tags/latest" --jq .id)
+          asset() { gh api "$repo/releases/$id/assets" --paginate --jq ".[] | select(.name == \"$1\") | .id"; }
+          # The files that clients may be downloading now (named in the old SHA256SUMS) stay
+          # until the next release; older ones go at the end.
+          gh release download latest -p SHA256SUMS -O previous.sums 2>/dev/null || : > previous.sums
+          # A file already there is replaced without a moment when it is
+          # missing: uploaded under another name, the old one deleted, the new renamed.
+          put() {
+            local f=$1 old new
+            old=$(asset "$f")
+            if [[ -z $old ]]; then
+              gh release upload latest "dist/$f"
+              return
+            fi
+            ln "dist/$f" "dist/next.$f"
+            gh release upload latest "dist/next.$f"
+            new=$(asset "next.$f")
+            gh api -X DELETE "$repo/releases/assets/$old"
+            gh api -X PATCH "$repo/releases/assets/$new" -f name="$f" >/dev/null
+            rm "dist/next.$f"
+          }
+          # New files first, SHA256SUMS (which names the parts to fetch) last.
+          for f in dist/*; do
+            [[ $f == dist/SHA256SUMS ]] || put "${f#dist/}"
+          done
+          put SHA256SUMS
+          # The tag (what mos-upgrade follows) moves in one step.
+          if ! gh api -X PATCH "$repo/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null; then
+            # Refused (e.g. a tag ruleset): as before, a new release, with a short gap.
+            echo "::warning::could not move the tag latest; recreating the release"
+            gh release delete latest --yes --cleanup-tag
+            gh release create latest dist/* --target "$GITHUB_SHA" --title "Latest: $tag" --notes-file notes.md --latest
+            exit 0
+          fi
+          gh release edit latest --title "Latest: $tag" --notes-file notes.md --latest
+          keep=$( (ls dist; awk '{ print $2 }' previous.sums) | sort -u)
+          gh api "$repo/releases/$id/assets" --paginate --jq '.[] | "\(.id) \(.name)"' |
+            while read -r a name; do
+              grep -qxF "$name" <<<"$keep" || gh api -X DELETE "$repo/releases/assets/$a"
+            done

@@ -8,18 +8,11 @@ import (
 	"time"
 )
 
-const elevatedFlag = "--elevated"
+func isAdmin() bool { return exec.Command("net", "session").Run() == nil }
 
-// ensureAdmin starts the program again as administrator (Windows asks the
-// user to allow it) when it is not; the new window does the work.
-func ensureAdmin() error {
-	elevated := elevatedWindow()
-	if exec.Command("net", "session").Run() == nil {
-		return nil // already administrator
-	}
-	if elevated {
-		return fmt.Errorf("administrator rights were not given")
-	}
+// elevate starts the program again as administrator (Windows asks the user
+// to allow it), told where the downloads are; the new window does the rest.
+func elevate() error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -35,8 +28,14 @@ func ensureAdmin() error {
 	if r := os.Getenv("MOS_USB_RELEASE"); r != "" {
 		args = append(args, "--release="+r)
 	}
+	// Start-Process joins these with spaces and no quotes: one with a space
+	// (C:\Users\Mario Rossi\...) goes in double quotes, or it becomes two.
+	// (A Windows path holds no double quote, and this one ends in no \.)
 	quoted := make([]string, len(args))
 	for i, a := range args {
+		if strings.ContainsAny(a, " \t") {
+			a = `"` + a + `"`
+		}
 		quoted[i] = quote(a)
 	}
 	if out, err := ps(fmt.Sprintf("Start-Process -FilePath %s -Verb RunAs -ArgumentList %s",
@@ -52,10 +51,10 @@ func ensureAdmin() error {
 // it open until the user has read the result.
 func pauseAtEnd() bool { return true }
 
-// elevatedWindow: this is the window started by ensureAdmin. It also takes
-// the download folder and release from its arguments (the environment is
-// not passed on by RunAs).
-func elevatedWindow() bool {
+// elevatedRun: this is the window started by elevate. It also takes the
+// download folder and release from its arguments (the environment is not
+// passed on by RunAs).
+func elevatedRun() bool {
 	found := false
 	for _, a := range os.Args[1:] {
 		switch {

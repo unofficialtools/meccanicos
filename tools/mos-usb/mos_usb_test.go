@@ -55,10 +55,12 @@ func TestFetchISO(t *testing.T) {
 	t.Setenv("MOS_USB_RELEASE", srv.URL)
 	cache := t.TempDir()
 
-	// A half-downloaded first part and a stale ISO from an older release.
+	// A half-downloaded first part, a stale ISO from an older release, and
+	// a file of the user's.
 	name := "meccanicos-26.05-20261008-x86_64-linux-abcdef12.iso"
 	os.WriteFile(filepath.Join(cache, name+".part01"), iso[:400_000], 0o644)
 	os.WriteFile(filepath.Join(cache, "meccanicos-old.iso"), []byte("old"), 0o644)
+	os.WriteFile(filepath.Join(cache, "other.iso"), []byte("mine"), 0o644)
 
 	got, err := fetchISO(cache)
 	if err != nil {
@@ -68,12 +70,12 @@ func TestFetchISO(t *testing.T) {
 	if got.Name != name || got.Size != int64(len(iso)) || string(b) != string(iso) {
 		t.Fatalf("wrong ISO: %+v", got)
 	}
-	if r, _ := os.ReadFile(got.Readme); string(r) != "%PDF readme" {
+	if string(got.Readme) != "%PDF readme" {
 		t.Fatalf("MeccanicOS-README.pdf not downloaded: %q", got.Readme)
 	}
 	left, _ := filepath.Glob(filepath.Join(cache, "*"))
-	if len(left) != 2 {
-		t.Fatalf("cache should hold only the ISO and MeccanicOS-README.pdf, has %v", left)
+	if len(left) != 3 {
+		t.Fatalf("cache should hold only the ISO, MeccanicOS-README.pdf and other.iso, has %v", left)
 	}
 
 	// Run again: the ISO in the cache is checked and reused.
@@ -94,7 +96,7 @@ func TestFetchISOWithoutReadme(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Readme != "" {
+	if got.Readme != nil {
 		t.Fatalf("no MeccanicOS-README.pdf to download, yet got %q", got.Readme)
 	}
 }
@@ -141,15 +143,20 @@ func TestBootGuide(t *testing.T) {
 }
 
 // MOS_USB_NET=1 go test -run Ventoy -v: fetch and unpack Ventoy's real
-// latest release (Linux and Windows only).
+// latest release (Linux and Windows only), and unpack it in a private folder.
 func TestFetchVentoy(t *testing.T) {
 	if os.Getenv("MOS_USB_NET") == "" {
 		t.Skip("set MOS_USB_NET=1 to download Ventoy")
 	}
-	dir, err := fetchVentoy(t.TempDir())
+	cache := t.TempDir()
+	if err := downloadVentoy(cache); err != nil {
+		t.Fatal(err)
+	}
+	dir, cleanup, err := prepareVentoy(cache)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer cleanup()
 	t.Log("Ventoy2Disk in", dir)
 }
 

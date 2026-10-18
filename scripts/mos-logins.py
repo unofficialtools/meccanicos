@@ -9,7 +9,8 @@
   mos-logins trust IP|KEY     no alerts for this address or SSH key
   mos-logins disconnect       end remote sessions, stop SSH, cut every
                                 network, lock the screen (also Super+Shift+Esc)
-  mos-logins reconnect        networks back, and SSH if it was on
+  mos-logins reconnect        networks and radios back as they were before
+                                the disconnect, and SSH if it was on
   mos-logins watch            the watcher (a user service, from login)
   mos-logins demo             a sample alert; nothing is changed
 
@@ -30,6 +31,7 @@ security.auto_disconnect on disconnects by itself on an unknown SSH login.
 """
 
 import collections
+import contextlib
 import curses
 import datetime
 import ipaddress
@@ -41,6 +43,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -52,6 +55,9 @@ SELF = os.environ.get("MECCANICOS_LOGINS_SELF") or os.path.abspath(sys.argv[0])
 STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "meccanicos", "logins.json")
 SETTINGS = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "meccanicos", "settings.toml")
 RUN = "/run/mos-logins"  # root's: was SSH on before a disconnect
+# Root's: which networks and radios were on before a disconnect, so reconnect
+# turns back on only those (on disk: rfkill and NetworkManager keep "off" across a restart).
+BEFORE = "/var/lib/mos-logins/before-disconnect.json"
 ENV = dict(os.environ, LC_ALL="C")
 
 # ---- what the journal says -----------------------------------------------------------
@@ -142,12 +148,29 @@ def load_state():
     return s
 
 
+def write_json(path, data, mode=0o600):
+    """Replace path in one step, through a temporary file of its own (two
+    writers never share one); an existing file keeps its permissions."""
+    folder = os.path.dirname(path)
+    os.makedirs(folder, exist_ok=True)
+    try:
+        mode = os.stat(path).st_mode & 0o777
+    except OSError:
+        pass
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix="." + os.path.basename(path) + ".", suffix=".part")
+    try:
+        with os.fdopen(fd, "w") as f:
+            os.fchmod(f.fileno(), mode)
+            json.dump(data, f, indent=1)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
+
+
 def save_state(s):
-    os.makedirs(os.path.dirname(STATE), exist_ok=True)
-    tmp = STATE + ".part"
-    with open(tmp, "w") as f:
-        json.dump(s, f, indent=1)
-    os.replace(tmp, STATE)
+    write_json(STATE, s, mode=0o644)
 
 
 def setting(name, default):
@@ -244,23 +267,55 @@ def root_main(args):
         a = ipaddress.ip_address(text.split("%")[0])
         return str(a), "blocked4" if a.version == 4 else "blocked6"
 
+    def sh(*a):
+        """The exit code of a command (127 if it isn't there)."""
+        try:
+            return subprocess.run(a, capture_output=True, text=True).returncode
+        except OSError:
+            return 127
+
+    def output(*a):
+        """What a command printed; None if it failed."""
+        try:
+            p = subprocess.run(a, capture_output=True, text=True, env=dict(os.environ, LC_ALL="C"))
+        except OSError:
+            return None
+        return p.stdout if p.returncode == 0 else None
+
+    def networking():
+        """NetworkManager's networking: True on, False off, None can't tell."""
+        out = output("nmcli", "networking")
+        return None if out is None else out.strip() == "enabled"
+
+    def radios():
+        """{rfkill id: [type, switched off]} (Wi-Fi, Bluetooth, ...); None can't tell."""
+        out = output("rfkill", "-rn", "-o", "ID,TYPE,SOFT")
+        if out is None:
+            return None
+        return {w[0]: [w[1], w[2] == "blocked"] for w in map(str.split, out.splitlines()) if len(w) == 3}
+
     def end_sessions():
+        """(sessions ended, sessions that would not end)."""
         out = subprocess.run(["loginctl", "list-sessions", "--no-legend"], capture_output=True, text=True).stdout
-        n = 0
+        n = stuck = 0
         for line in out.splitlines():
             sid = line.split()[0] if line.split() else ""
             remote = subprocess.run(["loginctl", "show-session", sid, "-p", "Remote", "--value"],
                                     capture_output=True, text=True).stdout.strip()
             if sid and remote == "yes":
-                subprocess.run(["loginctl", "terminate-session", sid])
-                n += 1
-        return n
+                if sh("loginctl", "terminate-session", sid) == 0:
+                    n += 1
+                else:
+                    stuck += 1
+        return n, stuck
 
     def stop_ssh():
-        if subprocess.run(["systemctl", "is-active", "--quiet", "sshd.service"]).returncode == 0:
+        """True if SSH is off now."""
+        if sh("systemctl", "is-active", "--quiet", "sshd.service") == 0:
             os.makedirs(RUN, exist_ok=True)
             open(os.path.join(RUN, "ssh-was-on"), "w").close()
-            subprocess.run(["systemctl", "stop", "sshd.service"])
+            sh("systemctl", "stop", "sshd.service")
+        return sh("systemctl", "is-active", "--quiet", "sshd.service") != 0
 
     try:
         if cmd == "block":
@@ -284,28 +339,87 @@ def root_main(args):
                             left = e.get("expires", "") if isinstance(e, dict) else ""
                             print(f"{ip}\t{left}")
         elif cmd == "end-sessions":
-            print(f"{end_sessions()} remote session(s) ended")
+            n, stuck = end_sessions()
+            print(f"{n} remote session(s) ended" + (f"; {stuck} would not end" if stuck else ""))
+            return 1 if stuck else 0
         elif cmd == "stop-ssh":
             end_sessions()
-            stop_ssh()
+            if not stop_ssh():
+                sys.exit("mos-logins: SSH is still running (systemctl stop sshd didn't stop it)")
             print("SSH stopped (until you start it, or the next start)")
         elif cmd == "start-ssh":
             subprocess.run(["systemctl", "start", "sshd.service"], check=True)
             print("SSH started")
         elif cmd == "disconnect":
-            end_sessions()
-            stop_ssh()
-            subprocess.run(["nmcli", "networking", "off"])
-            subprocess.run(["rfkill", "block", "all"])
+            done, failed = [], []
+            net = networking()
+            if net or not os.path.exists(BEFORE):  # disconnecting twice keeps the first record
+                try:
+                    write_json(BEFORE, {"networking": net, "radios": radios()})
+                except OSError as e:  # cut the networks all the same
+                    print(f"Note: what was on wasn't recorded ({e}), so reconnect will switch every radio on.")
+            n, stuck = end_sessions()
+            if stuck:
+                failed.append(f"{stuck} remote session(s) would not end")
+            done.append(f"{n} remote session(s) ended")
+            if stop_ssh():
+                done.append("SSH stopped")
+            else:
+                failed.append("SSH is still running")
+            sh("nmcli", "networking", "off")
+            if networking() is False:
+                done.append("networks off")
+            else:
+                failed.append("networks still on (nmcli networking off failed)")
+            sh("rfkill", "block", "all")
+            r = radios()
+            if r is not None and all(off for _, off in r.values()):
+                done.append("radios off")
+            else:
+                failed.append("Wi-Fi/Bluetooth radios still on (rfkill block all failed)")
+            if failed:
+                print("Done: " + "; ".join(done) + ".")
+                print("Only partly disconnected: " + "; ".join(failed) + ". Unplug the network cable"
+                      " and switch Wi-Fi off by hand to be sure.")  # the last line is what the screens show
+                return 1
             print("Disconnected: remote sessions ended, SSH stopped, every network off")
         elif cmd == "reconnect":
-            subprocess.run(["rfkill", "unblock", "all"])
-            subprocess.run(["nmcli", "networking", "on"])
+            try:
+                with open(BEFORE) as f:
+                    before = json.load(f)
+            except (OSError, ValueError):
+                before = {}  # no record (or unreadable): everything back on
+            failed, kept = [], []
+            was = before.get("radios")
+            if was is None:
+                if sh("rfkill", "unblock", "all"):
+                    failed.append("the radios could not be switched on")
+            else:
+                now = radios() or {}
+                for rid, (kind, off) in was.items():
+                    if off:
+                        kept.append(kind)
+                    elif rid in now and now[rid][0] == kind and now[rid][1] and sh("rfkill", "unblock", rid):
+                        failed.append(f"the {kind} radio could not be switched on")
+            if before.get("networking") is False:
+                kept.append("NetworkManager networking")
+            else:
+                sh("nmcli", "networking", "on")
+                if networking() is not True:
+                    failed.append("networks still off (nmcli networking on failed)")
             flag = os.path.join(RUN, "ssh-was-on")
             if os.path.exists(flag):
-                subprocess.run(["systemctl", "start", "sshd.service"])
-                os.remove(flag)
-            print("Reconnected")
+                if sh("systemctl", "start", "sshd.service"):
+                    failed.append("SSH could not be started")
+                else:
+                    os.remove(flag)
+            if failed:
+                print("Only partly reconnected: " + "; ".join(failed) + ".")
+                return 1
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(BEFORE)
+            print("Reconnected" + (f" (left off, as before the disconnect: {', '.join(kept)};"
+                                   " rfkill unblock all and nmcli networking on turn them on)" if kept else ""))
         else:
             sys.exit(f"mos-logins root: unknown {cmd!r}")
     except (subprocess.CalledProcessError, ValueError, IndexError) as e:
@@ -470,8 +584,10 @@ class Watcher:
             return
         if ev["kind"] == "ssh-ok" and not known(self.state, ev["ip"], ev["key"]):
             if setting("auto_disconnect", False):
-                disconnect()
-                body = f"{ev['user']} logged in from {ev['ip']}. The computer was disconnected (auto_disconnect)."
+                ok, out = disconnect()
+                body = f"{ev['user']} logged in from {ev['ip']}. " + (
+                    "The computer was disconnected (auto_disconnect)." if ok else
+                    "Disconnecting (auto_disconnect) didn't fully work: " + (out.splitlines()[-1] if out else "failed"))
                 self.notify.send(f"ok:{ev['ip']}", "LOGINS // UNKNOWN SSH LOGIN // DISCONNECTED", body, "critical",
                                  [("reconnect", "Reconnect"), ("open", "Open Logins")],
                                  lambda c: reconnect() if c == "reconnect" else None)

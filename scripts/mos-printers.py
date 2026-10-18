@@ -32,10 +32,15 @@ import mos_tui as ui  # noqa: E402
 ENV = dict(os.environ, LC_ALL="C")  # lpstat's words, to read them
 TESTPAGE = os.environ.get("MECCANICOS_TESTPAGE", "/run/current-system/sw/share/cups/data/testprint")
 DENIED = re.compile(r"forbidden|not authorized|unauthorized|permission|password", re.I)
+NONE_ADDED = re.compile(r"no destinations added|no printers", re.I)  # lpstat -p: there are none
 
 
 class Failed(Exception):
     pass
+
+
+class Unreachable(Failed):
+    """CUPS did not answer (not running, or refused): not the same as no printers."""
 
 
 def run(cmd, admin=False, timeout=30):
@@ -58,8 +63,10 @@ def printers():
     """[{name, state, default, uri, info, location, reason}]."""
     try:
         out = run(["lpstat", "-l", "-p"])
-    except Failed:
-        return []  # no printers (lpstat says so on stderr) or no CUPS
+    except Failed as e:
+        if NONE_ADDED.search(str(e)):
+            return []  # no printers: lpstat says so on stderr, and fails
+        raise Unreachable(f"Can't reach the printing service (CUPS): {str(e).rstrip('.')}")
     found, cur = [], None
     for line in out.splitlines():
         m = re.match(r"printer (\S+) (?:is (\w+)|now printing (\S+?))\.?\s+(enabled|disabled)", line)
@@ -99,10 +106,14 @@ def default_printer():
 
 def jobs(name=None):
     """[{id, user, size, when}] waiting or printing."""
+    # Nothing waiting is an empty answer; a failure (CUPS not answering, no
+    # such printer) is raised, not shown as an empty queue.
     try:
         out = run(["lpstat", "-o", *([name] if name else [])])
-    except Failed:
-        return []
+    except Failed as e:
+        if NONE_ADDED.search(str(e)):
+            return []
+        raise
     found = []
     for line in out.splitlines():
         m = re.match(r"(\S+-\d+)\s+(\S+)\s+(\d+)\s+(.*)", line)
@@ -235,13 +246,17 @@ class App:
         self.load()
 
     def load(self):
-        self.printers = printers()
-        cur = self.printer()
-        self.jobs = jobs(cur["name"]) if cur and self.view == "queue" else []
-        self.counts = {}
-        for j in jobs():
-            q = j["id"].rsplit("-", 1)[0]
-            self.counts[q] = self.counts.get(q, 0) + 1
+        self.cups_error = ""
+        self.printers, self.jobs, self.counts = [], [], {}
+        try:
+            self.printers = printers()
+            cur = self.printer()
+            self.jobs = jobs(cur["name"]) if cur and self.view == "queue" else []
+            for j in jobs():
+                q = j["id"].rsplit("-", 1)[0]
+                self.counts[q] = self.counts.get(q, 0) + 1
+        except Failed as e:  # shown instead of the list: not "no printers"
+            self.cups_error = str(e)
 
     def printer(self):
         if not self.printers:
@@ -296,6 +311,9 @@ class App:
         else:
             head = f"  {'Printer':<40}{'How':<10}Address"
             empty = "No new printers found. Is it on, and on the same network (or plugged in)?"
+        failed = self.cups_error and self.view != "found"
+        if failed:  # CUPS did not answer: say so, not "no printers"
+            empty = f"{self.cups_error.rstrip('.')}. r tries again."
         ui.put(s, y, 0, head, ui.attr(ui.HEADING))
         ui.put(s, y + 1, 0, "─" * w, ui.attr(ui.BORDER))
         y += 2
@@ -303,7 +321,7 @@ class App:
         cur = self.sel[self.view] = min(self.sel[self.view], max(0, len(rows) - 1))
         top = max(0, cur - list_h + 1)
         if not rows:
-            ui.put(s, y, 2, empty, ui.attr(ui.DIM))
+            ui.put(s, y, 2, empty, ui.attr(ui.ERR if failed else ui.DIM))
         for i, r in enumerate(rows[top: top + list_h]):
             n = top + i
             if self.view == "printers":
@@ -450,7 +468,10 @@ class App:
                 self.back()
             elif k == "r":
                 self.load()
-                self.say("reloaded")
+                if self.cups_error:
+                    self.say(f"✗ {self.cups_error}", True)
+                else:
+                    self.say("reloaded")
             elif isinstance(k, str):
                 for i, (_, key, _) in enumerate(self.buttons()):
                     if k.lower() == key:

@@ -75,17 +75,20 @@ run() {
     fi
 }
 
-# Fill %f / %d into COMMAND (or append the file).
+# Fill %f / %d into COMMAND (or append the file), in one pass: what goes in
+# is quoted and never looked at again (a file named "50%d.txt" stays so).
 expand() {
-    local cmd=$1 target=$2 qf qd
+    local rest=$1 target=$2 qf qd out="" before
     qf=$(printf '%q' "$target")
     qd=$(printf '%q' "$(dirname -- "$target")")
-    if [[ $cmd == *%f* ]]; then
-        cmd=${cmd//%f/$qf}
-    else
-        cmd+=" $qf"
-    fi
-    printf '%s' "${cmd//%d/$qd}"
+    [[ $rest == *%f* ]] || rest+=" %f"
+    while [[ $rest == *%[fd]* ]]; do
+        before=${rest%%%[fd]*}
+        rest=${rest:${#before}}
+        if [[ $rest == %f* ]]; then out+=$before$qf; else out+=$before$qd; fi
+        rest=${rest:2}
+    done
+    printf '%s' "$out$rest"
 }
 
 # Print "COMMAND" of the first rule matching TARGET (MIME, name, scheme).

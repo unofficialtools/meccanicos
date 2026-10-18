@@ -17,7 +17,8 @@ For one folder only (a project's compilers, tools, ...):
 
 --here writes them into the folder's .envrc (`use nix -p NAME...`, between
 two "mos-apps" lines; the rest of the file is left alone), which direnv
-loads in every terminal. Commit .envrc to give a project's users the same
+loads in every terminal. If .envrc has other lines you haven't allowed yet
+(a downloaded project's), they are shown and you run `direnv allow`. Commit .envrc to give a project's users the same
 tools (with direnv and Nix). Desktop apps started from the command bar don't
 see them: for those, plain `apps install`.
 
@@ -356,8 +357,49 @@ def here_split(folder):
     return lines[:b], apps, lines[e + 1:]
 
 
+def here_allowed(folder):
+    """True if direnv already trusts folder's .envrc exactly as it is now."""
+    try:
+        out = subprocess.run(["direnv", "status", "--json"], cwd=folder,
+                             capture_output=True, text=True).stdout
+        rc = json.loads(out)["state"]["foundRC"] or {}
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return (rc.get("allowed") == 0  # 0 is "allowed" in direnv's status
+            and os.path.realpath(rc.get("path") or "") == os.path.realpath(envrc(folder)))
+
+
+def here_trust(folder, was_allowed):
+    """Tell direnv to load the .envrc just written, but only when mos-apps
+    wrote all of it or the user already trusted it: a downloaded project's
+    .envrc is shell code, and adding an app mustn't approve it. False if
+    the folder's apps won't load until the user runs direnv allow."""
+    before, _, after = here_split(folder)
+    other = [l for l in before + after if l.strip()]
+    if other and not was_allowed:
+        print(f"\n{envrc(folder)} also has lines mos-apps didn't write, which direnv")
+        print("hasn't been told to trust. They run in every terminal here once allowed:")
+        for l in other[:30]:
+            print("    " + l)
+        if len(other) > 30:
+            print(f"    ... ({len(other) - 30} more lines)")
+        print(f"If you trust all of it: direnv allow {folder}")
+        return False
+    try:
+        code = subprocess.run(["direnv", "allow", folder]).returncode  # direnv loads no .envrc it wasn't told to
+    except OSError:
+        code = 1
+    if code:
+        print(f"apps: direnv allow didn't work, so this folder's apps don't load yet "
+              f"(try: direnv allow {folder})", file=sys.stderr)
+        return False
+    return True
+
+
 def here_write(folder, apps):
-    """Rewrite the block (none without apps); False if .envrc is now gone."""
+    """Rewrite the block (none without apps). (kept, loads): kept is False if
+    .envrc is now gone, loads is False if direnv won't load it yet."""
+    was_allowed = os.path.exists(envrc(folder)) and here_allowed(folder)
     before, _, after = here_split(folder)
     block = [BEGIN, "use nix -p " + " ".join(apps), END] if apps else []
     while before and not before[-1].strip() and not block:  # the gap left by the block
@@ -369,12 +411,11 @@ def here_write(folder, apps):
     if not any(l.strip() for l in lines):
         if os.path.exists(path):
             os.remove(path)
-        return False
+        return False, True
     with open(path + ".part", "w") as f:
         f.write("\n".join(lines) + "\n")
     os.replace(path + ".part", path)
-    subprocess.run(["direnv", "allow", folder])  # direnv loads no .envrc it wasn't told to
-    return True
+    return True, here_trust(folder, was_allowed)
 
 
 def here_names(names):
@@ -398,12 +439,13 @@ def here_install(names):
     code = run(NIX + ["build", "--impure", "--no-link"] + [f"{FLAKE}#{n}" for n in new])
     if code:
         return code
-    here_write(folder, have + new)
+    _, loads = here_write(folder, have + new)
     print(f"\n\033[1;38;5;214m{', '.join(have + new)}\033[0m: on PATH in a terminal in {folder}")
-    print("and the folders inside it (this one too, from the next prompt); not elsewhere.")
+    print("and the folders inside it (this one too, from the next prompt); not elsewhere." if loads else
+          "and the folders inside it once direnv is allowed to load .envrc (see above).")
     if os.path.exists(os.path.join(folder, ".git")):
         print("To share them, commit .envrc (and put .direnv/ in .gitignore).")
-    return 0
+    return 0 if loads else 1
 
 
 def here_remove(names):
@@ -417,11 +459,11 @@ def here_remove(names):
     if not gone:
         return 1
     left = [a for a in have if a not in gone]
-    kept = here_write(folder, left)
+    kept, loads = here_write(folder, left)
     print(f"Removed {', '.join(gone)} from this folder." +
           (f" Still here: {', '.join(left)}." if left else "") +
           ("" if kept else " (.envrc had nothing else, so it is gone.)"))
-    return 0
+    return 0 if loads else 1
 
 
 def here_list():
@@ -441,8 +483,10 @@ def here_update():
     if not here_split(folder)[1]:
         print("No apps for this folder: nothing to update.")
         return 1
+    was_allowed = here_allowed(folder)
     os.utime(envrc(folder))
-    subprocess.run(["direnv", "allow", folder])
+    if not here_trust(folder, was_allowed):
+        return 1
     print("This folder's apps are brought up to date at the next prompt here.")
     return 0
 
