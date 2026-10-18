@@ -7,12 +7,15 @@ display, disk.
                                sound (audio), display (video), disk
   mos-doctor AREA --reset    also restart it from scratch (service, driver)
   mos-doctor --check [--json]  only report, change nothing
+  mos-doctor AREA --explain  also show the commands behind each finding
   mos-doctor --fix           fix everything it can without asking
   mos-doctor --report [FILE] save a report for asking for help (serial
                                numbers and addresses left out)
 
-Every fix is shown before it is made, asks first (unless --fix), and is
-written to ~/.local/state/meccanicos/doctor.log.
+Every fix is shown before it is made, asks first (unless --fix; without a
+terminal it fixes nothing), is checked again afterwards, and is written to
+~/.local/state/meccanicos/doctor.log. Exit code with --fix: 1 if a problem
+is left.
 """
 
 import datetime
@@ -25,6 +28,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 
 import common as c
 
@@ -87,9 +91,10 @@ def reload_module(mod):
 
 
 def reconnect():
-    for name in c.output("nmcli", "-t", "-f", "NAME", "connection", "show", "--active").splitlines():
-        c.run("nmcli", "connection", "down", name)
-        c.run("nmcli", "connection", "up", name, check=True)
+    # By UUID: two connections can have the same name.
+    for uuid in c.output("nmcli", "-t", "-f", "UUID", "connection", "show", "--active").splitlines():
+        c.run("nmcli", "connection", "down", "uuid", uuid)
+        c.run("nmcli", "connection", "up", "uuid", uuid, check=True)
 
 
 def check_network(reset=False):
@@ -138,7 +143,10 @@ def check_network(reset=False):
         elif state in ("none", "limited"):
             probs.append(Problem("network", "connected, but no internet", reconnect, "reconnect"))
         elif not c.output("getent", "hosts", "nixos.org"):
-            probs.append(Problem("network", "internet works, but names (like nixos.org) are not found (DNS)",
+            # "unknown": NetworkManager couldn't tell (or doesn't check), so no internet is possible too.
+            probs.append(Problem("network", "connected to the internet, but names (like nixos.org) are not found (DNS)"
+                                 if state == "full" else
+                                 "names (like nixos.org) are not found: no internet, or names (DNS) don't work",
                                  lambda: c.run("systemctl", "restart", "NetworkManager", sudo=True, check=True),
                                  "restart NetworkManager"))
     elif wifi and not any(p.area == "network" for p in probs):
@@ -334,7 +342,8 @@ def check_disk(reset=False):
             if c.installed() and path == "/":
                 fix = lambda: c.run("nix-collect-garbage", "--delete-older-than", "30d", sudo=True, check=True, timeout=1800)
             probs.append(Problem("disk", f"{name} is almost full ({gb:.1f} GB free)", fix,
-                                 "remove system versions older than 30 days and unused downloads",
+                                 "remove system versions older than 30 days (you can no longer start them) "
+                                 "and unused downloads",
                                  None if fix else "empty the trash (trash-empty) and delete what you don't need"))
             break
     return probs
@@ -417,31 +426,70 @@ def report(path):
 
 
 # ---- main ---------------------------------------------------------------------------
+RAN = {}  # area: [(command, exit code, output)] from the last run_checks, for --explain
+
+
 def run_checks(areas, reset=False):
     found = []
     for a in areas:
+        RAN[a] = c.TRACE = []
         try:
             found += AREAS[a](reset)
+            # A missing program or a timeout reads as "nothing wrong": say the check is incomplete.
+            gone = list(dict.fromkeys(cmd[0] for cmd, code, _ in RAN[a] if code in (124, 127)))
+            if gone:
+                found.append(Problem(a, f"could not check everything ({', '.join(gone)} missing or too slow)",
+                                     advice="try again; if it persists, mos-doctor --report helps ask for help"))
         except Exception as e:  # a check must never stop the others
-            c.warn(f"{a}: could not check ({e})")
+            found.append(Problem(a, f"could not check ({e})", advice="mos-doctor --report helps ask for help"))
+        finally:
+            c.TRACE = None
     return found
+
+
+def explain(area):
+    """The commands an area's check ran, with their exit code and first lines."""
+    for cmd, code, out in RAN.get(area, []):
+        c.info(f"  $ {' '.join(cmd)}  → {code}")
+        lines = out.splitlines()
+        for line in lines[:3]:
+            c.info(f"      {line[:100]}")
+        if len(lines) > 3:
+            c.info(f"      … {len(lines) - 3} more line(s)")
+
+
+def still(p):
+    """Is p still there? Network and Bluetooth take a few seconds to come back."""
+    for wait in (0, 2, 4, 8):
+        time.sleep(wait)
+        now = run_checks([p.area])
+        if not any(q.what == p.what or q.what.startswith("could not check") for q in now):
+            return False
+        if p.area not in ("network", "bluetooth"):
+            break
+    return True
 
 
 def fix(p, force):
     if not p.fix:
         c.info(f"→ {p.advice}" if p.advice else "→ no automatic fix")
         return False
-    if not force and not c.ask(f"  Fix: {p.how}?"):
+    # Without a terminal nobody answers: fix nothing unless --fix.
+    if not force and not (sys.stdin.isatty() and c.ask(f"  Fix: {p.how}?")):
         return False
     try:
         p.fix()
-        c.ok(f"done: {p.how}")
-        c.log("doctor", f"{p.area}: {p.what} -> {p.how}")
-        return True
     except (c.Failed, OSError) as e:
         c.bad(f"could not {p.how}: {e}")
         c.log("doctor", f"{p.area}: {p.what} -> {p.how} FAILED: {e}")
         return False
+    if p.what != "reset requested" and still(p):
+        c.warn(f"done: {p.how}, but the problem is still there")
+        c.log("doctor", f"{p.area}: {p.what} -> {p.how} DONE, STILL THERE")
+        return False
+    c.ok(f"fixed: {p.how}")
+    c.log("doctor", f"{p.area}: {p.what} -> {p.how}")
+    return True
 
 
 def main(argv):
@@ -450,7 +498,7 @@ def main(argv):
         return 0
     flags = {a for a in argv if a.startswith("--")}
     words = [a for a in argv if not a.startswith("--")]
-    unknown = flags - {"--check", "--json", "--fix", "--reset", "--report"}
+    unknown = flags - {"--check", "--json", "--fix", "--reset", "--report", "--explain"}
     if unknown:
         raise c.UsageError(f"unknown option {sorted(unknown)[0]} (mos-doctor --help)")
     if "--report" in flags:
@@ -478,15 +526,25 @@ def main(argv):
                 pass
         for p in mine:
             c.info(f"• {p.what}")
+        if "--explain" in flags:
+            explain(a)
     if "--check" in flags:
         return 1 if any(p.what != "reset requested" for p in probs) else 0
     real = [p for p in probs if p.what != "reset requested"]
+    left, changed = [], set()
     for p in probs:
+        # A fix in the same area (a restart) may have fixed this one too.
+        if p.area in changed and p.fix and p.what != "reset requested" and \
+                not any(q.what == p.what for q in run_checks([p.area])):
+            continue
         if p.what == "reset requested":
             c.title(f"\nReset {LABELS[p.area].lower()}:")
         else:
             c.title(f"\n{p.what}")
-        fix(p, "--fix" in flags)
+        if fix(p, "--fix" in flags):
+            changed.add(p.area)
+        elif p.what != "reset requested":
+            left.append(p)
     if not real and not asked and "--fix" not in flags:
         i = c.choose("\nNothing obviously wrong. What isn't working?",
                      [LABELS[a] for a in AREAS] + ["Something else"])
@@ -497,4 +555,4 @@ def main(argv):
                 fix(p, False)
         elif i is not None:
             c.info("mos-doctor --report saves what's needed to ask for help.")
-    return 0
+    return 1 if left and "--fix" in flags else 0

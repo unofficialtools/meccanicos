@@ -41,12 +41,22 @@ def have(prog):
 
 # True while a full-screen view owns the terminal: sudo must not ask there.
 NO_PROMPT = False
+# A list to record every run() in, as (command, exit code, output); None: off.
+TRACE = None
 
 
 def run(*cmd, check=False, sudo=False, input=None, timeout=30):
     """Run a program; returns (exit code, output). Never raises for a
     missing program or a timeout: those come back as code 127 / 124."""
     cmd = [str(c) for c in cmd]
+    if TRACE is not None:
+        code, out = _run(cmd, check, sudo, input, timeout)
+        TRACE.append((cmd, code, out))
+        return code, out
+    return _run(cmd, check, sudo, input, timeout)
+
+
+def _run(cmd, check, sudo, input, timeout):
     if sudo and os.geteuid() != 0:
         # Passwordless for MeccanicOS's own user (wheel); asks otherwise.
         cmd = ["sudo", "-n", *cmd] if NO_PROMPT or not sys.stdin.isatty() else ["sudo", *cmd]

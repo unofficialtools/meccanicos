@@ -484,8 +484,10 @@ and encrypts them).
 **Configuration Doctor** (`mos-doctor`) checks Wi-Fi and the internet, Bluetooth,
 sound, the screen (including which graphics driver is used; details:
 `mos-gpu-driver`, also in **System Info**) and disk space, explains what's wrong and offers a fix
-(it asks first; every fix is logged in `~/.local/state/meccanicos/doctor.log`).
+(it asks first, checks again afterwards that the problem is gone, and logs every fix in
+`~/.local/state/meccanicos/doctor.log`).
 `mos-doctor sound --reset` restarts one area from scratch; `--check` only reports;
+`--explain` also shows the commands behind each finding;
 `--report` saves a file to ask for help, with serial numbers and addresses removed.
 
 ### Updates — `mos-updates`
