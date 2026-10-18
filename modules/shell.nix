@@ -204,6 +204,21 @@ let
     mkdir -p $out/tldr-pages
     cp -r ${tldrPages}/pages $out/tldr-pages/pages.en
   '';
+  # Jed's defaults (lib/defaults.sl): the colours above, and Delete, Home and
+  # End, which its default (Emacs) keys leave unbound: only Ctrl+D, Ctrl+A
+  # and Ctrl+E. Both forms the terminal can send (cursor and application
+  # mode). A user's own keybindings_hook in ~/.jedrc replaces this one.
+  jedDefaults = pkgs.writeText "defaults.sl" ''
+    _Jed_Default_Color_Scheme = "meccanicos";
+    require ("keydefs");
+    define keybindings_hook (emulation)
+    {
+       if (emulation != "emacs") return;
+       foreach $1 ([Key_Del, "\e[3~"]) setkey ("delete_char_cmd", $1);
+       foreach $1 ([Key_Home, "\e[H", "\eOH", "\e[1~"]) setkey ("beg_of_line", $1);
+       foreach $1 ([Key_End, "\e[F", "\eOF", "\e[4~"]) setkey ("eol_cmd", $1);
+    }
+  '';
   # Jed in MeccanicOS's colours (modules/style.nix, as 256-colour indices,
   # terminal background), like mc's skin below: graphite menus and status bar
   # (235), off-white on graphite for the selection (254 on 238), amber (214)
@@ -432,10 +447,11 @@ in
             'if ((1 == file_status (libfslc)) && (file_time_cmp(libfslc, libfsl) >= 0))'
         '';
         # Default colour scheme "meccanicos": MeccanicOS's colours, like mc's
-        # skin (see jedColors). A user's ~/.jedrc can still set_color_scheme(...).
+        # skin (see jedColors), and the Delete/Home/End keys (jedDefaults).
+        # A user's ~/.jedrc can still set_color_scheme(...).
         postInstall = (old.postInstall or "") + ''
           cp ${jedColors} $out/share/jed/lib/colors/meccanicos.sl
-          echo '_Jed_Default_Color_Scheme = "meccanicos";' > $out/share/jed/lib/defaults.sl
+          cp ${jedDefaults} $out/share/jed/lib/defaults.sl
         '';
       });
     })
