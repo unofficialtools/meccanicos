@@ -52,7 +52,7 @@ latest MeccanicOS (and checks it), tells you to insert a USB drive (16 GB or
 larger), makes the drive bootable with [Ventoy](https://www.ventoy.net) and copies
 MeccanicOS onto it, then explains how to start a computer from it. Before erasing
 a drive it shows a big red warning naming it (for example "USB DRIVE (/dev/sdb)"),
-and goes on only if you type `YES`. A drive that already has Ventoy keeps all its files, older MeccanicOS ISOs included. On macOS, where
+and goes on only if you type `YES`. A drive that already has Ventoy keeps all its files, older MeccanicOS ISOs included; if its Ventoy is older than the latest, it offers to update it (the files stay). On macOS, where
 Ventoy does not run, it writes MeccanicOS directly to the drive (erasing it).
 
 | Your computer | Get it | Run it |
@@ -173,12 +173,17 @@ If macOS says the disk is "not readable" afterwards, click **Ignore** — that's
 
 Copy the `.iso` file onto a [Ventoy](https://www.ventoy.net) stick and boot it from
 Ventoy's menu. Nothing else to configure (no `VTOY_LINUX_REMOUNT` needed).
+An old Ventoy can fail to start MeccanicOS on some computers (an HP ProDesk 600 G3
+stopped in Ventoy's own shell, `ventoy/busybox/sh: can't access tty`): update it with
+`sudo ventoy -u /dev/sdX` (or the Update button of Ventoy's own program), which keeps
+the files on the stick.
 
 From a checkout of this repository, `./start ventoy /dev/sdX` does it for you: it copies
 the newest ISO from `dist/` onto a Ventoy stick (deleting nothing on it, older MeccanicOS ISOs
 included), or, if the stick isn't a Ventoy stick yet, installs Ventoy
 first (this erases the stick: a big red warning, and you type `YES`; `./start burn` asks the same way). `./start ventoy` alone lists the
-USB disks and marks the Ventoy ones. Ventoy comes from the pinned nixpkgs, which labels it
+USB disks and marks the Ventoy ones. On a stick with an older Ventoy than the pinned one,
+it offers to update it first (the files on it stay). Ventoy comes from the pinned nixpkgs, which labels it
 unfree and insecure (prebuilt binaries); it is allowed for this command only.
 
 - **Your stick's files:** Ventoy keeps its partition busy while MeccanicOS runs (it serves the

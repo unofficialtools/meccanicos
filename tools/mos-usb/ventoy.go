@@ -13,7 +13,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -81,22 +83,22 @@ func downloadVentoy(cache string) error {
 // downloadVentoy left in the cache (a folder of the user's) into a new folder
 // that only the administrator can change, checking it again on the way, and
 // unpacks it there: Ventoy then runs only from files nobody else could have
-// changed. It returns the folder holding Ventoy2Disk, and cleanup, which
-// deletes the private folder.
-func prepareVentoy(cache string) (string, func(), error) {
-	pkg, _, sum, _, err := ventoyRelease()
+// changed. It returns the folder holding Ventoy2Disk, Ventoy's version, and
+// cleanup, which deletes the private folder.
+func prepareVentoy(cache string) (string, string, func(), error) {
+	pkg, _, sum, version, err := ventoyRelease()
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	priv, err := os.MkdirTemp(privateBase(), "mos-usb-ventoy-")
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	cleanup := func() { os.RemoveAll(priv) }
 	archive := filepath.Join(priv, pkg)
 	if err := copyChecked(filepath.Join(cache, pkg), archive, sum); err != nil {
 		cleanup()
-		return "", nil, fmt.Errorf("Ventoy was not downloaded, or changed after it was checked: %w", err)
+		return "", "", nil, fmt.Errorf("Ventoy was not downloaded, or changed after it was checked: %w", err)
 	}
 	dest := filepath.Join(priv, "unpacked")
 	if strings.HasSuffix(pkg, ".zip") {
@@ -106,15 +108,15 @@ func prepareVentoy(cache string) (string, func(), error) {
 	}
 	if err != nil {
 		cleanup()
-		return "", nil, fmt.Errorf("unpacking Ventoy: %w", err)
+		return "", "", nil, fmt.Errorf("unpacking Ventoy: %w", err)
 	}
 	// The archive holds one folder, ventoy-VERSION/.
 	matches, _ := filepath.Glob(filepath.Join(dest, "*", "Ventoy2Disk*"))
 	if len(matches) == 0 {
 		cleanup()
-		return "", nil, fmt.Errorf("no Ventoy2Disk in %s", pkg)
+		return "", "", nil, fmt.Errorf("no Ventoy2Disk in %s", pkg)
 	}
-	return filepath.Dir(matches[0]), cleanup, nil
+	return filepath.Dir(matches[0]), version, cleanup, nil
 }
 
 // privateBase is where prepareVentoy makes its folder: a system folder in
@@ -168,6 +170,66 @@ func installVentoy(dir string, d Disk) error {
 	}
 	note("Ventoy is installed.")
 	return nil
+}
+
+// updateVentoy replaces Ventoy on d with the one in dir. Only Ventoy's own
+// partition and boot code are rewritten: the files on the drive stay.
+func updateVentoy(dir string, d Disk) error {
+	step("Updating Ventoy on %s (the files on it stay).", d)
+	if err := ventoyUpdate(dir, d); err != nil {
+		return fmt.Errorf("updating Ventoy (the files on the drive are still there; run mos-usb again to retry): %w", err)
+	}
+	note("Ventoy is updated.")
+	return nil
+}
+
+// Ventoy's version is in its own partition (VTOYEFI, 32 MB at the end of the
+// drive), as plain text: set VENTOY_VERSION="1.1.12".
+var ventoyVersionRe = regexp.MustCompile(`VENTOY_VERSION="([0-9]+(?:\.[0-9]+)*)"`)
+
+// ventoyTail is how much of the end of a drive holds Ventoy's partition.
+const ventoyTail = 64 << 20
+
+// ventoyVersionOn is the version of Ventoy on d, or "" if it cannot be told
+// (a drive with space reserved after Ventoy's partitions, for example).
+func ventoyVersionOn(d Disk) string {
+	if d.Size < ventoyTail {
+		return ""
+	}
+	f, err := openRawRead(d)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	buf := make([]byte, ventoyTail)
+	for off := 0; off < len(buf); off += 1 << 20 { // whole sectors at a time
+		if _, err := f.ReadAt(buf[off:off+1<<20], d.Size-ventoyTail+int64(off)); err != nil {
+			return ""
+		}
+	}
+	m := ventoyVersionRe.FindSubmatch(buf)
+	if m == nil {
+		return ""
+	}
+	return string(m[1])
+}
+
+// olderVersion: version a (like 1.0.97) comes before b.
+func olderVersion(a, b string) bool {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := range max(len(as), len(bs)) {
+		var x, y int
+		if i < len(as) {
+			x, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			y, _ = strconv.Atoi(bs[i])
+		}
+		if x != y {
+			return x < y
+		}
+	}
+	return false
 }
 
 // copyToVentoy adds the ISO to the drive's Ventoy partition, and MeccanicOS-README.pdf

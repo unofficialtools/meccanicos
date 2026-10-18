@@ -72,6 +72,7 @@ func openRawRead(d Disk) (*os.File, error) { return os.Open(rawPath(d)) }
 func flushDisk(f *os.File) error { return f.Sync() }
 
 func ventoyInstall(string, Disk) error             { return errUnsupported }
+func ventoyUpdate(string, Disk) error              { return errUnsupported }
 func dataMount(Disk) (string, func() error, error) { return "", nil, errUnsupported }
 func freeSpace(string) (int64, error)              { return 0, errUnsupported }
 func deviceName(d Disk) string                     { return d.Path }

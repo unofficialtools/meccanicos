@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -152,7 +153,7 @@ func TestFetchVentoy(t *testing.T) {
 	if err := downloadVentoy(cache); err != nil {
 		t.Fatal(err)
 	}
-	dir, cleanup, err := prepareVentoy(cache)
+	dir, _, cleanup, err := prepareVentoy(cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,6 +171,64 @@ func TestConfirmErase(t *testing.T) {
 		stdin = bufio.NewReader(strings.NewReader(in))
 		if got := confirmErase(d); got != want {
 			t.Errorf("answer %q: confirmErase = %v, want %v", in, got, want)
+		}
+	}
+}
+
+// Ventoy's version is read from the end of the drive (its VTOYEFI partition).
+func TestVentoyVersionOn(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the drive is a plain file only on Linux")
+	}
+	disk := func(size int64, at int64, text string) Disk {
+		path := filepath.Join(t.TempDir(), "disk")
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := f.Truncate(size); err != nil { // sparse: no real 128 MB written
+			t.Fatal(err)
+		}
+		if text != "" {
+			if _, err := f.WriteAt([]byte(text), at); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return Disk{ID: "sdz", Path: path, Size: size}
+	}
+	const size = 128 << 20
+	cfg := "\nset VENTOY_VERSION=\"1.0.97\"\n"
+	for _, c := range []struct {
+		d    Disk
+		want string
+	}{
+		{disk(size, size-20<<20, cfg), "1.0.97"},
+		{disk(size, size-100<<20, cfg), ""}, // not in Ventoy's partition
+		{disk(size, size-1<<20, `VENTOY_VERSION="x"`), ""},
+		{disk(size, 0, ""), ""},
+		{disk(32<<20, 1<<20, cfg), ""}, // smaller than Ventoy's partitions
+	} {
+		if got := ventoyVersionOn(c.d); got != c.want {
+			t.Errorf("ventoyVersionOn = %q, want %q", got, c.want)
+		}
+	}
+}
+
+func TestOlderVersion(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"1.0.97", "1.1.12", true},
+		{"1.1.9", "1.1.12", true}, // numbers, not text
+		{"1.1.12", "1.1.12", false},
+		{"1.1.12", "1.0.99", false},
+		{"1.1", "1.1.1", true},
+		{"1.1.0", "1.1", false},
+	} {
+		if got := olderVersion(c.a, c.b); got != c.want {
+			t.Errorf("olderVersion(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
 		}
 	}
 }

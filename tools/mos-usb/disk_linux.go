@@ -141,13 +141,19 @@ func flushDisk(f *os.File) error {
 	return nil
 }
 
-func ventoyInstall(dir string, d Disk) error {
+func ventoyInstall(dir string, d Disk) error { return ventoy2Disk(dir, d, "install", "-i", "-g") }
+
+func ventoyUpdate(dir string, d Disk) error { return ventoy2Disk(dir, d, "update", "-u") }
+
+// ventoy2Disk runs Ventoy2Disk.sh on d with the options, then waits for the
+// drive's Ventoy partition to be back.
+func ventoy2Disk(dir string, d Disk, what string, opts ...string) error {
 	if err := unmountAll(d); err != nil {
 		return err
 	}
-	cmd := exec.Command("sh", "Ventoy2Disk.sh", "-i", "-g", d.Path)
+	cmd := exec.Command("sh", append(append([]string{"Ventoy2Disk.sh"}, opts...), d.Path)...)
 	cmd.Dir = dir
-	cmd.Stdin = strings.NewReader("y\ny\ny\n") // Ventoy asks twice; we told the user already
+	cmd.Stdin = strings.NewReader("y\ny\ny\n") // Ventoy asks up to twice; we asked the user already
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v\n%s", err, tail(string(out), 15))
@@ -160,7 +166,7 @@ func ventoyInstall(dir string, d Disk) error {
 		}
 		time.Sleep(time.Second)
 	}
-	return fmt.Errorf("Ventoy did not install:\n%s", tail(string(out), 15))
+	return fmt.Errorf("Ventoy did not %s:\n%s", what, tail(string(out), 15))
 }
 
 // dataMount mounts Ventoy's first partition (where ISOs go); release writes

@@ -10,7 +10,9 @@ It uses only a drive plugged in **after** it says "Insert the USB drive". Before
 erasing one it shows a big red warning naming it ("USB DRIVE (/dev/sdb)"; on
 Windows "USB DRIVE (Disk 2)") and goes on only if the user types `YES` (any case). A drive that already has Ventoy is not erased: the
 ISO is added and nothing on it is deleted, older MeccanicOS ISOs included (if there
-is not enough room, mos-usb says so and changes nothing). Right before erasing, it
+is not enough room, mos-usb says so and changes nothing). If its Ventoy is older than
+Ventoy's latest release, mos-usb offers to update it first (Ventoy's update rewrites only
+its own partition and boot code: the files on the drive stay). Right before erasing, it
 checks the drive is still the one the user said YES to (serial number where the
 system reports one, size and model).
 
@@ -42,7 +44,7 @@ with `SHA256SUMS` and the ISO or its `.partNN` files) and `MOS_USB_CACHE=dir`
 |---|---|
 | `main.go` | the steps, waiting for the drive, asking before erasing it |
 | `download.go` | SHA256SUMS, resumable checked downloads, joining the parts |
-| `ventoy.go` | Ventoy's latest release; copying onto a Ventoy drive; writing directly |
+| `ventoy.go` | Ventoy's latest release; the version on a drive, updating it; copying onto a Ventoy drive; writing directly |
 | `guide.go` | how to start MeccanicOS from the drive, firmware gotchas |
 | `disk_linux.go`, `disk_darwin.go`, `disk_windows.go` | finding USB drives, writing, Ventoy per system |
 | `admin_*.go` | getting administrator rights (sudo; Windows' prompt) |

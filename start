@@ -18,7 +18,8 @@
 #   ./start burn                list the USB disks it can see
 #   ./start ventoy /dev/sdX     copy the ISO onto a Ventoy stick (deletes nothing
 #                               on it); not a Ventoy stick yet: install
-#                               Ventoy first (erases it; asks first)
+#                               Ventoy first (erases it; asks first); an older
+#                               Ventoy on it: offers to update it (files stay)
 #   ./start ventoy              list the USB disks, marking Ventoy sticks
 #   ./start drivers-check       hardware support vs EndeavourOS's live ISO
 #                               (modules/drivers/): --upstream compares with
@@ -248,6 +249,35 @@ ventoy_bin() {
       in pkgs.ventoy' | tail -n1
 }
 
+# An older Ventoy can fail to start MeccanicOS on some computers (it stopped
+# in Ventoy's own shell on an HP ProDesk 600 G3): offer to update the stick's
+# Ventoy to the pinned one. Updating rewrites only Ventoy's own partition and
+# boot code; the files on the stick stay. A version it can't tell is left alone.
+ventoy_update() {
+    local dev=$1 v have want answer id
+    v=$(ventoy_bin)
+    want=$(< "$v/share/ventoy/ventoy/version")
+    have=$(sudo "$v/bin/ventoy" -l "$dev" 2>/dev/null | sed -n 's/^Ventoy Version in Disk: *//p') || true
+    [[ -n $have && $have != "$want" ]] || return 0
+    [[ $(printf '%s\n' "$have" "$want" | sort -V | head -n1) == "$have" ]] || return 0
+    echo "[ventoy] the stick has Ventoy $have; the pinned one is $want."
+    echo "         An older Ventoy can fail to start MeccanicOS on some computers."
+    id=$(disk_identity "$dev")
+    read -r -p "Update Ventoy on USB DRIVE ($dev)? The files on it stay. [Y/n] " answer
+    [[ -z $answer || ${answer,,} == y || ${answer,,} == yes ]] || { echo "[ventoy] keeping Ventoy $have"; return 0; }
+    unmount_all "$dev"
+    same_disk ventoy "$dev" "$id"
+    # Ventoy asks once more; we already have the yes.
+    if ! { yes y || true; } | sudo "$v/bin/ventoy" -u "$dev"; then
+        echo "[ventoy] updating Ventoy failed; the files on the stick are still there" >&2
+        exit 1
+    fi
+    sudo udevadm settle 2>/dev/null || true
+    sudo partprobe "$dev" 2>/dev/null || true
+    sleep 2
+    is_ventoy "$dev" || { echo "[ventoy] Ventoy's partition did not come back on $dev after the update" >&2; exit 1; }
+}
+
 # Put the ISO on a Ventoy stick; make it one first if needed (erases it).
 ventoy() {
     local dev=${1:-} iso name part mnt v need have id
@@ -280,6 +310,8 @@ ventoy() {
         sudo partprobe "$dev" 2>/dev/null || true
         sleep 2
         is_ventoy "$dev" || { echo "[ventoy] Ventoy did not install on $dev" >&2; exit 1; }
+    else
+        ventoy_update "$dev"
     fi
 
     # Partition 1 is Ventoy's data partition (exFAT by default): ISOs go there.

@@ -79,9 +79,18 @@ func openRawRead(d Disk) (*os.File, error) { return os.Open(d.Path) }
 func flushDisk(f *os.File) error { return f.Sync() }
 
 func ventoyInstall(dir string, d Disk) error {
+	return ventoyCLI(dir, "install", "/I", "/PhyDrive:"+d.ID, "/GPT", "/NOUSBCheck")
+}
+
+func ventoyUpdate(dir string, d Disk) error {
+	return ventoyCLI(dir, "update", "/U", "/PhyDrive:"+d.ID, "/NOUSBCheck")
+}
+
+// ventoyCLI runs Ventoy2Disk.exe's command line with the options.
+func ventoyCLI(dir, what string, opts ...string) error {
 	done := filepath.Join(dir, "cli_done.txt")
 	os.Remove(done)
-	cmd := exec.Command(filepath.Join(dir, "Ventoy2Disk.exe"), "VTOYCLI", "/I", "/PhyDrive:"+d.ID, "/GPT", "/NOUSBCheck")
+	cmd := exec.Command(filepath.Join(dir, "Ventoy2Disk.exe"), append([]string{"VTOYCLI"}, opts...)...)
 	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		return err
@@ -98,7 +107,7 @@ func ventoyInstall(dir string, d Disk) error {
 		time.Sleep(time.Second)
 	}
 	log, _ := os.ReadFile(filepath.Join(dir, "cli_log.txt"))
-	return fmt.Errorf("Ventoy did not install:\n%s", tailLines(string(log), 15))
+	return fmt.Errorf("Ventoy did not %s:\n%s", what, tailLines(string(log), 15))
 }
 
 // dataMount gives Ventoy's first partition (where ISOs go) a drive letter.

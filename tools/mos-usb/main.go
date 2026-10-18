@@ -5,7 +5,8 @@
 // the computer can run Ventoy (Linux, Windows), so the stick keeps room for
 // other ISOs and files; written directly otherwise (macOS). Before erasing a
 // drive it shows a big red warning naming it, and goes on only if the user
-// types YES. A drive that already has Ventoy is not erased.
+// types YES. A drive that already has Ventoy is not erased; if its Ventoy is
+// older than the latest, it offers to update it (the files on it stay).
 //
 // The downloads are done as the user; only then does it ask for administrator
 // rights, and the part run as administrator writes nothing in the download
@@ -20,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -88,20 +90,20 @@ func run() error {
 		note("Ventoy is not available on macOS: the ISO is written directly to the USB drive.")
 	}
 
-	// Ventoy is unpacked only for a drive that needs it installed: adding the
-	// ISO to a drive that has Ventoy already does not.
-	var ventoyDir string
+	// Ventoy is unpacked only for a drive that needs it installed or
+	// updated: adding the ISO to a drive with an up-to-date Ventoy does not.
+	var ventoyDir, ventoyVersion string
 	var ventoyErr error
 	ventoyTried, ventoyCleanup := false, func() {}
 	defer func() { ventoyCleanup() }()
-	ventoy := func() (string, error) {
+	ventoy := func() (string, string, error) {
 		if !ventoyTried {
 			ventoyTried = true
-			if ventoyDir, ventoyCleanup, ventoyErr = prepareVentoy(cache); ventoyErr != nil {
+			if ventoyDir, ventoyVersion, ventoyCleanup, ventoyErr = prepareVentoy(cache); ventoyErr != nil {
 				ventoyCleanup = func() {}
 			}
 		}
-		return ventoyDir, ventoyErr
+		return ventoyDir, ventoyVersion, ventoyErr
 	}
 
 	need := iso.Size + 64<<20 // Ventoy's own partition and some room
@@ -113,13 +115,16 @@ func run() error {
 		usedVentoy := ventoyRuns && d.Ventoy
 		if usedVentoy {
 			step("Ventoy is already on %s: adding the ISO, nothing else on the drive is erased.", d)
+			if err := offerVentoyUpdate(d, ventoy); err != nil {
+				return err
+			}
 			if err := copyToVentoy(iso, d); err != nil {
 				return err
 			}
 		} else {
 			dir := ""
 			if ventoyRuns {
-				if dir, err = ventoy(); err != nil {
+				if dir, _, err = ventoy(); err != nil {
 					warn("Could not get Ventoy (%v).", err)
 					note("MeccanicOS can still be written directly to the drive: it starts the same way,")
 					note("but the drive then holds only MeccanicOS, with no room for other ISOs or files.")
@@ -158,6 +163,37 @@ func run() error {
 		printBootGuide(usedVentoy)
 		return nil
 	}
+}
+
+// offerVentoyUpdate offers to update the Ventoy on d when it is older than
+// the latest: an older Ventoy can fail to start MeccanicOS on some computers
+// (it stopped in Ventoy's own shell on an HP ProDesk 600 G3). Updating keeps
+// the files on the drive. A Ventoy whose version cannot be told is left alone.
+func offerVentoyUpdate(d Disk, ventoy func() (string, string, error)) error {
+	have := ventoyVersionOn(d)
+	if have == "" {
+		return nil
+	}
+	dir, latest, err := ventoy()
+	if err != nil {
+		warn("Could not get the latest Ventoy (%v): keeping Ventoy %s on the drive.", err, have)
+		return nil
+	}
+	if !olderVersion(have, latest) {
+		return nil
+	}
+	note("The drive has Ventoy %s; the latest is %s. An older Ventoy can fail to start", have, latest)
+	note("MeccanicOS on some computers. Updating it keeps all the files on the drive.")
+	fmt.Printf("\n  Update Ventoy on %s? Type Y or N, then Enter [Y]: ", d.Name())
+	answer, _ := stdin.ReadString('\n')
+	if a := strings.ToLower(strings.TrimSpace(answer)); a != "" && a != "y" && a != "yes" {
+		note("Keeping Ventoy %s.", have)
+		return nil
+	}
+	if now, ok := find(d.ID); !ok || !d.same(now) {
+		return fmt.Errorf("%s is not the drive you said yes to any more (it was removed, or another drive took its place): nothing was written", d.Name())
+	}
+	return updateVentoy(dir, d)
 }
 
 // waitForDisk returns the first USB drive plugged in after the call; drives
