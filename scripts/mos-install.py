@@ -1686,8 +1686,21 @@ def main():
     if not TEST and sys.stdin.isatty():
         a = input("\nReboot now? [Y/n] ").strip().lower()
         if a in ("", "y", "yes"):
-            subprocess.run(["systemctl", "reboot"])
+            reboot()
     return 0
+
+
+def reboot():
+    # `systemctl reboot` only queues the reboot: stay until the system goes
+    # down, so the window doesn't just close; if it was refused, or nothing
+    # happens, say so and force it (the new disk is already unmounted).
+    print("Rebooting…")
+    for cmd in (["systemctl", "reboot"], ["systemctl", "reboot", "--force"]):
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode == 0:
+            time.sleep(60)
+        print(f"\033[1;31m{' '.join(cmd)} didn't reboot:\033[0m {(r.stderr or '').strip() or 'still running after a minute'}")
+    input("\nRemove the USB stick and restart the computer by hand. Press Enter to close.")
 
 
 if __name__ == "__main__":
