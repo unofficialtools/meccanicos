@@ -301,6 +301,20 @@ def do_undo():
     return run(NIX + ["profile", "rollback"] + PROFILE)
 
 
+def windowed(out):
+    """True if store path OUT has a menu entry that opens its own window:
+    one with Terminal=true (helix, htop) is a command-line tool."""
+    for f in glob.glob(os.path.join(out, "share", "applications", "*.desktop")):
+        try:
+            with open(f, errors="replace") as fh:
+                entry = fh.read().split("\n[", 1)[0]  # [Desktop Entry] only
+        except OSError:
+            continue
+        if not re.search(r"^Terminal=true", entry, re.M):
+            return True
+    return False
+
+
 def do_try(name, program=""):
     """Download NAME into the store without installing it, then run it: a
     desktop app in its own window, a command-line tool in a shell where it is
@@ -311,13 +325,13 @@ def do_try(name, program=""):
         return res.returncode
     outs = res.stdout.split()
     bins = [os.path.join(o, "bin") for o in outs if os.path.isdir(os.path.join(o, "bin"))]
-    gui = any(os.path.isdir(os.path.join(o, "share", "applications")) for o in outs)
+    gui = any(windowed(o) for o in outs)
     progs = sorted({p for b in bins for p in os.listdir(b)})
     if gui and progs:
         prog = program if program in progs else (name if name in progs else progs[0])
         exe = next(os.path.join(b, prog) for b in bins if os.path.exists(os.path.join(b, prog)))
         print(f"Starting {prog} in its own window.", flush=True)
-        subprocess.Popen([exe], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen([exe], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return 0
     path = ":".join(bins + [os.environ.get("PATH", "")])
     print(f"\n\033[1;38;5;214m{name}\033[0m is ready to try in this shell: " + (", ".join(progs[:12]) or "(no commands)"))
