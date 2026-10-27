@@ -3,7 +3,8 @@
 # the network hands out, so hotel/café sign-in pages, VPN-only names and the
 # router's names (nas.lan) work; public resolvers (Cloudflare, Google) only
 # when a network gives none. *.localhost answers 127.0.0.1 (local web apps);
-# .local names go through Avahi (printers, fleet servers).
+# .local names go through Avahi (printers, fleet servers). With a cable and
+# Wi-Fi both connected, the cable's servers answer.
 # meccanicos.dns.public (mos-config network.public_dns): always the public
 # resolvers, over every connection's (Wi-Fi, wired, VPN); then sign-in pages
 # may not appear and names only a VPN or the router knows are not found.
@@ -46,6 +47,15 @@ in
           MulticastDNS = false;
           LLMNR = false;
         };
+      };
+      # Wired and Wi-Fi both up: names go to the wired network's servers, not
+      # both. Wi-Fi's priority is worse (bigger) than the default 100, so only
+      # the wired connection gets the catch-all "~."; Wi-Fi still answers its
+      # own search domains, and takes over when the cable comes out.
+      networking.networkmanager.settings."connection-wifi-dns" = {
+        match-device = "type:wifi";
+        "ipv4.dns-priority" = 200;
+        "ipv6.dns-priority" = 200;
       };
     }
     (lib.mkIf cfg.public {
