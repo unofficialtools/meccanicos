@@ -744,6 +744,10 @@ SETTINGS = [
     Setting("network.hostname", "this computer's name, as other machines see it",
             from_system("hostname", None, socket.gethostname), set_hostname, system=True, rebuild=True,
             live=False, choices=hostname_choice, example="laptop", machine=True),
+    Setting("network.public_dns", "always look names up with Cloudflare and Google, not the network's "
+            "servers (sign-in pages and VPN-only names may stop working)",
+            from_system("public_dns", False), to_system("public_dns"), system=True, rebuild=True, live=False,
+            choices=onoff),
     Setting("graphics.driver", "graphics driver: auto, nvidia or open (applies at the next start)",
             get_gpu, to_system("gpu"), system=True, rebuild=True, live=False, choices=["auto", "nvidia", "open"]),
 ]

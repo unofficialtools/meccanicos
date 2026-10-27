@@ -8,6 +8,7 @@
 #   udp_ports = []
 #   hibernate = true           meccanicos.hibernate
 #   auto_update = true         meccanicos.autoUpgrade
+#   public_dns = false         meccanicos.dns.public (dns.nix)
 #   lid = "suspend"            closing the lid: suspend | hibernate | lock | nothing
 #   charge_limit = 80          stop charging the battery at this %, if it can
 #   gpu = "auto"               auto | nvidia | open  (the meccanicos.gpu= boot option)
@@ -36,6 +37,7 @@ in
     (lib.mkIf (has "udp_ports") { networking.firewall.allowedUDPPorts = s.udp_ports; })
     (lib.mkIf (has "hibernate") { meccanicos.hibernate = s.hibernate; })
     (lib.mkIf (has "auto_update") { meccanicos.autoUpgrade = s.auto_update; })
+    (lib.mkIf (has "public_dns") { meccanicos.dns.public = s.public_dns; })
     (lib.mkIf (has "lid") {
       services.logind.settings.Login = {
         HandleLidSwitch = lib.mkForce lidAction.${s.lid};

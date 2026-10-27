@@ -632,6 +632,10 @@ on with key login only** (add keys to `~/.ssh/authorized_keys`), and your own SS
 The firewall lets everything out but nothing unsolicited in, except SSH (TCP 22,
 installed systems only) and printer/scanner discovery (mDNS, UDP 5353); pings are
 ignored.
+Names (DNS) are looked up through a local cache (systemd-resolved), asking the servers the
+network provides, so hotel/café sign-in pages, VPN-only names and the router's names work;
+Cloudflare `1.1.1.1` and Google `8.8.8.8` only when a network provides none. To always use those
+instead: `mos-config set network.public_dns on` (sign-in pages and VPN-only names may then fail).
 
 ### Security: what is protected and what is not
 
@@ -723,6 +727,7 @@ Commits to `main` reach no one until they are released.
 | Automatic updates | weekly in the background, applied at the next restart (notification); off with `mos-config set updates.auto off` |
 | SSH, firewall ports, lid, hibernation, graphics driver | `mos-config set security.ssh off`, `mos-config set security.tcp_ports 8080` … (`mos-config` lists them) |
 | Computer name (hostname) | `mos-config set network.hostname laptop` (rebuilds; open windows keep working) |
+| Always public DNS (Cloudflare, Google) | `mos-config set network.public_dns on` (rebuilds; hotel sign-in pages and VPN-only names may stop working) |
 | Something isn't working | `mos-doctor` |
 | Roll back | `mos-updates` → *Go back to the previous system*, or pick an older entry in the boot menu |
 | Backups | `mos-backup init /media/disk` → `mos-backup now` → `mos-backup auto on` (nightly); `mos-backup browse` or *Versions from Backups…* to get files back |

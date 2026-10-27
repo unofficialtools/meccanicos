@@ -109,6 +109,7 @@
         ./modules/backup.nix
         ./modules/dropbox.nix
         ./modules/hardening.nix
+        ./modules/dns.nix
         ./modules/logins.nix
         ./packages.nix
       ];
