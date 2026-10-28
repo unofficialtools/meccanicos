@@ -363,8 +363,8 @@ in
           machine.succeed("grep -qx 'hostname = \"newbox\"' /etc/nixos/meccanicos.toml")
           machine.fail("grep -q hostname /home/tester/.config/meccanicos/settings.toml")  # stays with this machine
           machine.succeed("rm /etc/nixos/meccanicos.toml")
-          # firewall: SSH and mDNS only; no LAN-sync port, no mosh, no ping
-          machine.succeed("iptables -S nixos-fw | grep >/dev/null -- '--dport 22 '")
+          # firewall: mDNS only; no SSH (off by default), no LAN-sync port, no mosh, no ping
+          machine.fail("iptables -S nixos-fw | grep >/dev/null -- '--dport 22 '")
           machine.fail("iptables -S nixos-fw | grep >/dev/null -- '17500'")
           machine.fail("iptables -S nixos-fw | grep >/dev/null -- '60000:61000'")
           machine.fail("iptables -S nixos-fw | grep >/dev/null -- 'icmp-type 8'")
