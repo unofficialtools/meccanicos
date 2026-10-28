@@ -56,10 +56,15 @@ in
     (lib.mkIf (has "hostname") { networking.hostName = lib.mkForce s.hostname; })
     (lib.mkIf (has "gpu" && s.gpu != "auto") { boot.kernelParams = [ "meccanicos.gpu=${s.gpu}" ]; })
     # Laptops that can stop charging early expose the threshold in sysfs.
+    # Some firmware forgets it while asleep: set again after each wake-up.
     (lib.mkIf (has "charge_limit") {
       systemd.services.mos-charge-limit = {
         description = "Stop charging the battery at ${toString s.charge_limit}%";
-        wantedBy = [ "multi-user.target" ];
+        wantedBy = [
+          "multi-user.target"
+          "post-resume.target"
+        ];
+        after = [ "post-resume.target" ];
         serviceConfig.Type = "oneshot";
         script = ''
           for f in /sys/class/power_supply/BAT*/charge_control_end_threshold; do
