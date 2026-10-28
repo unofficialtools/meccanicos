@@ -48,6 +48,14 @@ let
         > /run/systemd/logind.conf.d/50-mos-no-hibernate.conf
       echo "Closing the lid suspends instead of hibernating"
     '';
+  # powerSource 1 (on AC) or 0 (on battery): sets the power profile when
+  # that differs from the last time (remembered in /run until the next start).
+  powerSource = pkgs.writeShellScript "mos-power-source" ''
+    last=/run/mos-power-source
+    [ -r $last ] && read -r was <$last && [ "$was" = "$1" ] && exit 0
+    if [ "$1" = 1 ]; then profile=balanced; else profile=power-saver; fi
+    ${pkgs.power-profiles-daemon}/bin/powerprofilesctl set $profile && echo "$1" >$last
+  '';
   # Written by `mos-unlock remote` into /etc/nixos (flake.nix: mkInstalled's root).
   remoteUnlockKeys = meccanicosRoot + "/remote-unlock-keys";
 
@@ -509,10 +517,12 @@ in
     HandleLidSwitchDocked = "ignore"; # logind: "docked" = a dock or a second screen
   };
   services.thermald.enable = pkgs.stdenv.hostPlatform.isx86; # Intel thermal management (idles on AMD)
-  # Power-saver profile on battery, balanced on AC.
+  # Power-saver profile on battery, balanced on AC. Only when the power
+  # source changes: some laptops repeat the charger's event while nothing
+  # changed, which would undo a profile picked by hand.
   services.udev.extraRules = ''
-    SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ATTR{online}=="0", RUN+="${pkgs.power-profiles-daemon}/bin/powerprofilesctl set power-saver"
-    SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ATTR{online}=="1", RUN+="${pkgs.power-profiles-daemon}/bin/powerprofilesctl set balanced"
+    SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ATTR{online}=="0", RUN+="${powerSource} 0"
+    SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ATTR{online}=="1", RUN+="${powerSource} 1"
   '';
 
   # ---- Nix ----------------------------------------------------------------
