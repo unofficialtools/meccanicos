@@ -400,8 +400,10 @@ in
     authorizedKeyFiles = lib.optional (builtins.pathExists remoteUnlockKeys) remoteUnlockKeys;
   };
   boot.initrd.systemd.users.root.shell = lib.mkIf config.meccanicos.remoteUnlock "/bin/systemd-tty-ask-password-agent";
-  # Wired network cards (and USB adapters) common on PCs, laptops and VMs.
+  # Wired network cards (and USB adapters) common on PCs, laptops and VMs
+  # (VirtualBox: e1000, VMware: vmxnet3, Hyper-V: hv_netvsc).
   boot.initrd.availableKernelModules = lib.mkIf config.meccanicos.initrdNetwork [
+    "e1000"
     "e1000e"
     "igb"
     "igc"
@@ -414,6 +416,8 @@ in
     "atlantic"
     "alx"
     "virtio_net"
+    "vmxnet3"
+    "hv_netvsc"
     "r8152"
     "ax88179_178a"
     "asix"
