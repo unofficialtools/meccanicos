@@ -507,7 +507,7 @@ in
     dates = "weekly";
     options = "--delete-older-than 30d";
   };
-  nixpkgs.config.allowUnfree = true;
+  nixpkgs.config.allowUnfree = true; # this computer's own rebuilds; what ships: redistributable.nix
   documentation.nixos.enable = true;
 
   # VM guest helpers (harmless on real hardware).

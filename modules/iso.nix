@@ -278,6 +278,6 @@
     "hv_vmbus"
   ];
 
-  nixpkgs.config.allowUnfree = true; # firmware + NVIDIA, like EndeavourOS
+  # Unfree only when redistributable (firmware + NVIDIA, like EndeavourOS): redistributable.nix
   system.stateVersion = "26.05";
 }

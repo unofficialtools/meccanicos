@@ -330,7 +330,10 @@
 
       # The system installed to disk by `mos-install`, prebuilt into the ISO
       # (none of an installed computer's own files yet).
-      installed = mkInstalled { root = ./.; };
+      installed = mkInstalled {
+        root = ./.;
+        modules = [ ./modules/redistributable.nix ]; # it ships inside the ISO
+      };
 
       # MeccanicOS-README.pdf, next to MeccanicOS on the USB drive (the ISO's root; Ventoy
       # sticks: mos-usb, ./start ventoy; each release publishes it): thanks,
@@ -366,6 +369,7 @@
           flakeCommit = commit;
         };
         modules = common ++ [
+          ./modules/redistributable.nix
           ./modules/iso.nix
           ./modules/branding-boot.nix
           ./modules/installer.nix
