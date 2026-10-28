@@ -1,0 +1,59 @@
+name: Python vs python-build-standalone
+# Weekly: is the Python in modules/python.nix (pinned by hand: version and
+# release) still the newest build of its minor version? Security fixes only
+# arrive with a bump. If not, one open issue (label "python") says what to
+# bump to; later runs comment on it rather than opening more.
+on:
+  schedule:
+    - cron: "41 6 * * 1" # Mondays
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(sed -n 's/^ *version = "\(.*\)";/\1/p' modules/python.nix)
+          release=$(sed -n 's/^ *release = "\(.*\)";/\1/p' modules/python.nix)
+          minor=${version%.*}
+          latest=$(gh api repos/astral-sh/python-build-standalone/releases/latest --jq .tag_name)
+          newest=$(gh api "repos/astral-sh/python-build-standalone/releases/tags/$latest" --jq \
+            ".assets[].name | capture(\"^cpython-(?<v>${minor//./\\\\.}\\\\.[0-9]+)\\\\+[0-9]+-x86_64-unknown-linux-gnu-install_only_stripped\\\\.tar\\\\.gz$\") | .v")
+          echo "pinned: $version ($release); newest: ${newest:-none} ($latest)"
+          if [ -z "$newest" ] || [ "$release" = "$latest" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "modules/python.nix pins Python $version from python-build-standalone $release;"
+              echo "the newest is Python $newest ($latest)."
+            } > report.md
+          fi
+      - name: Open or update the issue
+        if: steps.check.outputs.ok == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create python --color 3572A5 --description "The bundled Python needs a bump" --force
+          {
+            cat report.md
+            echo
+            echo "From [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+            echo "Fix: set \`version\` and \`release\` in \`modules/python.nix\`, and its \`hash\` (the build prints the right one)."
+          } > body.md
+          n=$(gh issue list --label python --state open --json number --jq '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body-file body.md
+          else
+            gh issue create --title "Python: a newer python-build-standalone release" --label python --body-file body.md
+          fi
+          exit 1
