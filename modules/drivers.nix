@@ -41,6 +41,16 @@ let
   '';
 in
 {
+  # Kernel modules never to load by themselves, e.g. in local.nix:
+  #   meccanicos.blacklistedKernelModules = [ "pcspkr" ];
+  # (boot.blacklistedKernelModules itself is set below, over every module's.)
+  options.meccanicos.blacklistedKernelModules = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    description = "Kernel modules that should not load by themselves (boot.blacklistedKernelModules is taken).";
+  };
+
+  config = {
   # All kernel modules usable in the initrd for booting arbitrary hardware
   # (USB/SATA/NVMe/virtio/MMC controllers, keyboards, etc).
   hardware.enableAllHardware = true;
@@ -94,12 +104,17 @@ in
     package = config.boot.kernelPackages.nvidiaPackages.stable;
   };
   # The NVIDIA module blacklists nouveau; the install hooks below decide
-  # instead. (usblp: from printing.nix, which ipp-usb replaces.)
-  boot.blacklistedKernelModules = lib.mkForce [
-    "nova_core"
-    "nvidiafb"
-    "usblp"
-  ];
+  # instead. (usblp: from printing.nix, which ipp-usb replaces.) Forced, so
+  # other modules' entries are dropped: yours go in
+  # meccanicos.blacklistedKernelModules.
+  boot.blacklistedKernelModules = lib.mkForce (
+    [
+      "nova_core"
+      "nvidiafb"
+      "usblp"
+    ]
+    ++ config.meccanicos.blacklistedKernelModules
+  );
   boot.extraModprobeConfig =
     let
       modprobe = "${pkgs.kmod}/bin/modprobe";
@@ -228,4 +243,5 @@ in
     blueman
     networkmanagerapplet
   ];
+  };
 }
