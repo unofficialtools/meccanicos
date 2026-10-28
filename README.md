@@ -636,7 +636,8 @@ ignored.
 Names (DNS) are looked up through a local cache (systemd-resolved), asking the servers the
 network provides, so hotel/café sign-in pages, VPN-only names and the router's names work;
 Cloudflare `1.1.1.1` and Google `8.8.8.8` only when a network provides none. To always use those
-instead: `mos-config set network.public_dns on` (sign-in pages and VPN-only names may then fail).
+instead: `mos-config set network.public_dns on` (sign-in pages and VPN-only names may then fail;
+the lookups are encrypted, DNS over TLS, wherever the network lets port 853 through).
 
 ### Security: what is protected and what is not
 

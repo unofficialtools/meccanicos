@@ -7,7 +7,9 @@
 # Wi-Fi both connected, the cable's servers answer.
 # meccanicos.dns.public (mos-config network.public_dns): always the public
 # resolvers, over every connection's (Wi-Fi, wired, VPN); then sign-in pages
-# may not appear and names only a VPN or the router knows are not found.
+# may not appear and names only a VPN or the router knows are not found. The
+# lookups are then encrypted (DNS over TLS, port 853), so the network can't
+# read them; where 853 is blocked they go out plain, so names still work.
 {
   config,
   lib,
@@ -60,6 +62,9 @@ in
     }
     (lib.mkIf cfg.public {
       networking.nameservers = cfg.servers;
+      # Every connection follows this (NetworkManager's connection.dns-over-tls
+      # is unset: the resolver's global setting).
+      services.resolved.settings.Resolve.DNSOverTLS = "opportunistic";
       # Overrides every connection's DNS servers.
       networking.networkmanager.settings."global-dns-domain-*".servers =
         lib.concatStringsSep "," cfg.servers;
