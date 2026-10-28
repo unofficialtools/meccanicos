@@ -531,8 +531,13 @@ in
       "nix-command"
       "flakes"
     ];
-    auto-optimise-store = true;
     trusted-users = [ "@wheel" ];
+  };
+  # Identical files in the store become one (hard links), weekly, instead of
+  # after every build (auto-optimise-store), which slowed each update down.
+  nix.optimise = {
+    automatic = true;
+    dates = [ "weekly" ];
   };
   # /tmp and builds (mos-update, nixos-rebuild) on the disk, never in RAM: a
   # system rebuild can need several GB. (The live USB keeps them in RAM.)
