@@ -9,14 +9,8 @@ let
   braveWithArgs = pkgs.brave.override {
     commandLineArgs = builtins.concatStringsSep " " (
       [
-        # Use the GPU even if Chromium's blocklist distrusts the driver
-        # (common on older Intel/AMD and fresh-from-USB setups).
-        "--ignore-gpu-blocklist"
         "--enable-gpu-rasterization"
         "--enable-zero-copy"
-        # Machines/VMs with no usable GPU: still provide WebGL via SwiftShader
-        # (software rendering) instead of disabling it.
-        "--enable-unsafe-swiftshader"
         # Hardware video decode where available.
         "--enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxZeroCopyGL"
         # No "Restore pages?" after a live USB is switched off without quitting.
@@ -24,6 +18,16 @@ let
         # No welcome tour ("Set Brave as default?", import bookmarks): on the
         # live USB every start would be a first run.
         "--no-first-run"
+      ]
+      # The live USB, on whatever machine it is plugged into: use the GPU even
+      # if Chromium's blocklist distrusts the driver (common on older
+      # Intel/AMD), and with no usable GPU (VMs) still provide WebGL via
+      # SwiftShader (software rendering) instead of disabling it. An installed
+      # system keeps Chromium's own judgement: the blocklist names drivers
+      # known to crash or misdraw.
+      ++ lib.optionals config.meccanicos.browserForceGpu [
+        "--ignore-gpu-blocklist"
+        "--enable-unsafe-swiftshader"
       ]
       # No keyring: with no login password there is nothing to unlock it, and
       # the "choose a password for the new keyring" prompt would come up instead.
@@ -120,6 +124,7 @@ let
 in
 {
   options.meccanicos.browserBasicPasswordStore = lib.mkEnableOption "Brave keeping its passwords and cookies without the keyring";
+  options.meccanicos.browserForceGpu = lib.mkEnableOption "Brave using the GPU despite Chromium's blocklist, and WebGL in software without one";
 
   config = {
     environment.systemPackages = [

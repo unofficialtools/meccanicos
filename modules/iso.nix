@@ -139,6 +139,8 @@
 
   # Autologin leaves the keyring locked: Brave would ask for a keyring password.
   meccanicos.browserBasicPasswordStore = true;
+  # Any machine it is plugged into: WebGL and the GPU even on distrusted drivers.
+  meccanicos.browserForceGpu = true;
 
   # Log straight into XFCE; don't suspend a live session behind the user's back.
   services.displayManager.autoLogin = {
