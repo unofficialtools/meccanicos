@@ -38,12 +38,20 @@ in
     (lib.mkIf (has "hibernate") { meccanicos.hibernate = s.hibernate; })
     (lib.mkIf (has "auto_update") { meccanicos.autoUpgrade = s.auto_update; })
     (lib.mkIf (has "public_dns") { meccanicos.dns.public = s.public_dns; })
-    (lib.mkIf (has "lid") {
-      services.logind.settings.Login = {
-        HandleLidSwitch = lib.mkForce lidAction.${s.lid};
-        HandleLidSwitchExternalPower = lib.mkForce lidAction.${s.lid};
-      };
-    })
+    (lib.mkIf (has "lid") (
+      let
+        # Hibernation turned off: closing the lid suspends instead of doing nothing.
+        off = s.lid == "hibernate" && !config.meccanicos.hibernate;
+        action = if off then "suspend" else lidAction.${s.lid};
+      in
+      {
+        services.logind.settings.Login = {
+          HandleLidSwitch = lib.mkForce action;
+          HandleLidSwitchExternalPower = lib.mkForce action;
+        };
+        warnings = lib.optional off "lid = \"hibernate\" but hibernate = false: closing the lid suspends.";
+      }
+    ))
     # Over local.nix's (the installer writes one there).
     (lib.mkIf (has "hostname") { networking.hostName = lib.mkForce s.hostname; })
     (lib.mkIf (has "gpu" && s.gpu != "auto") { boot.kernelParams = [ "meccanicos.gpu=${s.gpu}" ]; })

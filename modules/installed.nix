@@ -33,6 +33,21 @@ let
       done
     fi
   '';
+  # The lid settings that would hibernate, made to suspend (mos-swapfile).
+  lidSuspends =
+    let
+      login = config.services.logind.settings.Login;
+      keys = lib.filter (k: (login.${k} or "") == "hibernate") [
+        "HandleLidSwitch"
+        "HandleLidSwitchExternalPower"
+      ];
+    in
+    lib.optionalString (keys != [ ]) ''
+      mkdir -p /run/systemd/logind.conf.d
+      printf '%s\n' '[Login]' ${lib.concatMapStringsSep " " (k: "'${k}=suspend'") keys} \
+        > /run/systemd/logind.conf.d/50-mos-no-hibernate.conf
+      echo "Closing the lid suspends instead of hibernating"
+    '';
   # Written by `mos-unlock remote` into /etc/nixos (flake.nix: mkInstalled's root).
   remoteUnlockKeys = meccanicosRoot + "/remote-unlock-keys";
 
@@ -118,10 +133,14 @@ in
   # Resume needs no kernel parameters: systemd stores the file's location in
   # the HibernateLocation EFI variable, and the initrd resumes from it right
   # after the disk is unlocked.
+  # Without the file (too little disk space), a lid set to hibernate
+  # (mos-config power.lid) suspends instead: logind reads that override from
+  # /run when it starts, hence before it.
   systemd.services.mos-swapfile = lib.mkIf config.meccanicos.hibernate {
     description = "Swap file for hibernation";
     wantedBy = [ "multi-user.target" ];
     after = [ "local-fs.target" ];
+    before = [ "systemd-logind.service" ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -143,6 +162,7 @@ in
         free=$(df -B1 --output=avail /var/lib/swap | tail -n1)
         if [ "$free" -lt $((size + 10 * gib)) ]; then
           echo "Not enough free disk space for a $((size / gib)) GiB swap file: hibernation is off"
+          ${lidSuspends}
           exit 0
         fi
         fallocate -l "$size" "$file.tmp"
