@@ -53,7 +53,7 @@ in
   config = {
   # All kernel modules usable in the initrd for booting arbitrary hardware
   # (USB/SATA/NVMe/virtio/MMC controllers, keyboards, etc).
-  hardware.enableAllHardware = true;
+  hardware.enableAllHardware = true; # live USB and installed system: boots on any machine
 
   # linux-firmware, sof-firmware, alsa-firmware, wireless-regdb ...
   # Redistributable firmware only (MeccanicOS ships nothing that can't be shared):

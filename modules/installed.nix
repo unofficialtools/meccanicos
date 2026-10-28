@@ -195,7 +195,6 @@ in
   boot.initrd.systemd.enable = true;
   boot.plymouth.enable = true; # graphical LUKS passphrase prompt
   boot.kernelPackages = pkgs.linuxPackages; # LTS, same as the ISO (see iso.nix)
-  hardware.enableAllHardware = true; # boots on any machine, like the ISO
 
   # ---- Identity / locale (runtime-adjustable) ----------------------------
   networking.hostName = lib.mkDefault distro.hostName;
