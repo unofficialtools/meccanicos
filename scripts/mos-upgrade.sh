@@ -211,6 +211,22 @@ if cmp -s "$DEST/flake.lock" "$SAVED/flake.lock"; then
     exit 0
 fi
 
+# SSH was on by default until 2026-10; now only meccanicos.toml's ssh = true
+# turns it on (mos-config set security.ssh on). A computer that runs it and
+# has keys to log in with keeps it, so nobody is locked out by this update.
+TOML=$DEST/meccanicos.toml
+ssh_in_use() {
+    # shellcheck disable=SC2086 # MECCANICOS_SSH_KEYS: a list of globs
+    systemctl -q is-enabled sshd.service 2>/dev/null &&
+        cat ${MECCANICOS_SSH_KEYS:-/etc/ssh/authorized_keys.d/* /home/*/.ssh/authorized_keys} 2>/dev/null |
+        grep -q '^[^#[:space:]]'
+}
+if ! grep -qE '^[[:space:]]*ssh[[:space:]]*=' "$TOML" 2>/dev/null && ssh_in_use; then
+    { echo "ssh = true # kept on by mos-upgrade (SSH is off unless asked for)"; cat "$TOML" 2>/dev/null || true; } >"$TOML.new" &&
+        mv -f "$TOML.new" "$TOML"
+    echo "SSH stays on (it is off by default now): mos-config set security.ssh off turns it off."
+fi
+
 how=switch
 [[ $mode == switch ]] || how=boot
 # The system before, to tell afterwards whether a failed rebuild got as far as

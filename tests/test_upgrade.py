@@ -45,7 +45,10 @@ class Upgrade(unittest.TestCase):
         self.dest, self.bin, self.log = os.path.join(t, "nixos"), os.path.join(t, "bin"), os.path.join(t, "log")
         os.makedirs(self.dest)
         os.makedirs(self.bin)
-        for name, text in (("nix", NIX), ("nixos-rebuild", REBUILD), ("git", "#!/bin/sh\nexit 0\n")):
+        # systemctl is-enabled sshd: exits $FAKE_SSHD (not enabled by default).
+        systemctl = '#!/bin/sh\nexit "${FAKE_SSHD:-1}"\n'
+        for name, text in (("nix", NIX), ("nixos-rebuild", REBUILD), ("git", "#!/bin/sh\nexit 0\n"),
+                           ("systemctl", systemctl)):
             with open(os.path.join(self.bin, name), "w") as fh:
                 fh.write(text)
             os.chmod(os.path.join(self.bin, name), 0o755)
@@ -71,6 +74,7 @@ class Upgrade(unittest.TestCase):
     def env(self, **fake):
         return {"PATH": self.bin + os.pathsep + os.environ["PATH"], "HOME": self.tmp.name, "TMPDIR": self.tmp.name,
                 "MECCANICOS_NIXOS_DIR": self.dest, "MECCANICOS_SYSTEM_PROFILE": self.profile,
+                "MECCANICOS_SSH_KEYS": os.path.join(self.tmp.name, "authorized_keys"),
                 "FAKE_LOG": self.log, "FAKE_DIR": self.tmp.name, "FAKE_NEW_LOCK": self.new_lock,
                 **{f"FAKE_{k.upper()}": str(v) for k, v in fake.items()}}
 
@@ -91,6 +95,30 @@ class Upgrade(unittest.TestCase):
         self.assertEqual(json.loads(self.read("flake.lock.previous")), OLD_LOCK)  # for mos-updates
         self.assertFalse(os.path.exists(os.path.join(self.dest, "flake.nix.previous")))
         self.assertEqual(self.leftovers(), [])
+
+    def test_ssh_in_use_stays_on(self):
+        with open(os.path.join(self.tmp.name, "authorized_keys"), "w") as fh:
+            fh.write("# a comment\nssh-ed25519 AAAA me@laptop\n")
+        self.write("meccanicos.toml", "# Written by mos-config\nlid = \"lock\"\n")
+        r = self.run_(sshd=0)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        toml = self.read("meccanicos.toml")
+        self.assertTrue(toml.startswith("ssh = true"), toml)
+        self.assertIn('lid = "lock"', toml)
+        self.assertIn("SSH stays on", r.stdout)
+        self.assertEqual(self.run_(sshd=0).returncode, 0)  # only once
+        self.assertEqual(self.read("meccanicos.toml").count("ssh ="), 1)
+
+    def test_ssh_without_keys_or_already_chosen_is_left_alone(self):
+        r = self.run_(sshd=0)  # running, but no keys to log in with
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.dest, "meccanicos.toml")))
+        with open(os.path.join(self.tmp.name, "authorized_keys"), "w") as fh:
+            fh.write("ssh-ed25519 AAAA me@laptop\n")
+        self.write("meccanicos.toml", "ssh = false\n")
+        self.write("flake.lock", json.dumps(OLD_LOCK))
+        self.assertEqual(self.run_(sshd=0).returncode, 0)
+        self.assertEqual(self.read("meccanicos.toml"), "ssh = false\n")
 
     def test_a_second_update_is_refused_while_one_runs(self):
         first = self.start("--boot", wait=1)

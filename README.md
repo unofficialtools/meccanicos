@@ -19,7 +19,7 @@ and a one-page installer.
 - **Installs offline from one page** — one TUI page; full-disk encryption (LUKS2), unlock by password, TPM or security key. (An organization's computer, from an admin's stick, downloads its system instead.)
 - **One look, boot to desktop** — brushed graphite, off-white and the logo's amber: the same brushed metal on the wallpaper, boot menu and login screen, icons drawn to match, a top bar of instrument readouts, notifications and terminal tools that all read as MeccanicOS.
 - **Broad hardware support** — a large collection of drivers and firmware, all of it freely redistributable (see [Licensing](#10-licensing)): Mesa/Vulkan, Intel/AMD video acceleration, PipeWire, Bluetooth, printers and scanners, and NVIDIA's driver picked automatically.
-- **Convenient defaults, stated plainly** — passwordless `sudo` (live and installed), and on an installed system an SSH server that accepts keys only. Both can be changed; see [Security](#security-what-is-protected-and-what-is-not).
+- **Convenient defaults, stated plainly** — passwordless `sudo` (live and installed), and on an installed system an SSH server (off until you turn it on; keys only). Both can be changed; see [Security](#security-what-is-protected-and-what-is-not).
 - **Reproducible** — the whole system is one Nix flake; `flake.lock` pins every package.
 
 <p align="center">
@@ -626,11 +626,12 @@ It downloads nothing — the installed system is prebuilt inside the ISO. (An or
 computer, installed from an admin's stick, is different: it downloads its system.)
 
 You get: GPT disk (1 GB EFI + LUKS2/ext4), systemd-boot,
-zram swap plus a RAM-sized swap file for hibernation, your user with **passwordless sudo**, root login disabled, and **SSH
-on with key login only** (add keys to `~/.ssh/authorized_keys`), and your own SSH key pair
+zram swap plus a RAM-sized swap file for hibernation, your user with **passwordless sudo**, root login disabled, an **SSH
+server that is off** until `mos-config set security.ssh on` (then key login only: add keys to
+`~/.ssh/authorized_keys`), and your own SSH key pair
 (`~/.ssh/id_ed25519`, to log in to other machines). Requires UEFI.
 The firewall lets everything out but nothing unsolicited in, except SSH (TCP 22,
-installed systems only) and printer/scanner discovery (mDNS, UDP 5353); pings are
+installed systems, once turned on) and printer/scanner discovery (mDNS, UDP 5353); pings are
 ignored.
 Names (DNS) are looked up through a local cache (systemd-resolved), asking the servers the
 network provides, so hotel/café sign-in pages, VPN-only names and the router's names work;
@@ -644,7 +645,7 @@ instead: `mos-config set network.public_dns on` (sign-in pages and VPN-only name
 | Your data at rest | not written anywhere (memory only) | encrypted (LUKS2, argon2id) | whole disk encrypted (LUKS2), incl. swap/hibernation |
 | Login password | none (set one with `live.passwd=` in the boot menu) | the home's password at start-up | yours |
 | `sudo` | no password | no password | **no password** (convenience: anyone at your unlocked session is root) |
-| SSH server | off | off | **on, keys only** (no passwords; `mos-config set security.ssh off` turns it off) |
+| SSH server | off | off | off; `mos-config set security.ssh on` turns it on, **keys only** (no passwords) |
 
 The trade-offs are deliberate: a single-user workstation where the disk
 password and the screen lock are the barriers. If others use your computer
@@ -725,7 +726,7 @@ Commits to `main` reach no one until they are released.
 | Update now | `mos-upgrade`: the newest MeccanicOS release and NixOS packages (`--check` shows yours and the newest, `--boot` applies at the next restart; `mos-update` is the same) |
 | Another version | `mos-upgrade --list` shows the releases; `mos-upgrade --to v2026-10-12` goes to one and stays on it, `--to 5b31f5e` a commit, `--to main` follows development (untested), `--to latest` follows the releases again |
 | Automatic updates | weekly in the background, applied at the next restart (notification); off with `mos-config set updates.auto off` |
-| SSH, firewall ports, lid, hibernation, graphics driver | `mos-config set security.ssh off`, `mos-config set security.tcp_ports 8080` … (`mos-config` lists them) |
+| SSH, firewall ports, lid, hibernation, graphics driver | `mos-config set security.ssh on`, `mos-config set security.tcp_ports 8080` … (`mos-config` lists them) |
 | Computer name (hostname) | `mos-config set network.hostname laptop` (rebuilds; open windows keep working) |
 | Always public DNS (Cloudflare, Google) | `mos-config set network.public_dns on` (rebuilds; hotel sign-in pages and VPN-only names may stop working) |
 | Something isn't working | `mos-doctor` |

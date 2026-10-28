@@ -3,7 +3,7 @@
 # it is absent in the repo and until something is changed, so the defaults
 # below are what an untouched system runs. Keys (all optional):
 #
-#   ssh = true                 SSH server, keys only (installed.nix)
+#   ssh = false                SSH server, keys only (installed.nix): off unless true
 #   tcp_ports = [8080]         let these in through the firewall
 #   udp_ports = []
 #   hibernate = true           meccanicos.hibernate

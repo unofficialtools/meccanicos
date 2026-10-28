@@ -37,6 +37,10 @@ let
     };
 
   installed = self.nixosConfigurations.installed.extendModules { modules = [ instrumented ]; };
+  # The SSH server's settings once it is turned on (mos-config set security.ssh on).
+  sshdConfig =
+    (installed.extendModules { modules = [ { services.openssh.enable = true; } ]; })
+    .config.environment.etc."ssh/sshd_config".source;
   live = self.nixosConfigurations.live.extendModules {
     modules = [ instrumented ];
     specialArgs.installedSystem = installed.config.system.build.toplevel;
@@ -338,14 +342,16 @@ in
           machine.succeed("id tester | grep >/dev/null wheel")
           machine.succeed("test \"$(hostname)\" = testbox")                     # name chosen in the installer
           machine.succeed("su - tester -c 'sudo -n true'")                      # passwordless sudo
-          machine.succeed("sshd -T | grep >/dev/null -i '^passwordauthentication no'")     # keys only
+          machine.fail("systemctl is-enabled sshd.service")                     # SSH off until asked for
+          # Turned on, keys only: no passwords, no root.
+          sshd = open("${sshdConfig}").read().splitlines()
+          for line in ("PasswordAuthentication no", "PermitRootLogin no", "AuthenticationMethods publickey",
+                       "KbdInteractiveAuthentication no"):
+              assert line in sshd, line
           # /tmp and nix builds on the disk, not in RAM (the live USB keeps them in RAM).
           machine.succeed("nix config show build-dir | grep >/dev/null -x /nix/var/nix/builds")
           machine.succeed("mkdir -p /nix/var/nix/builds && test \"$(stat -f -c %T /nix/var/nix/builds)\" != tmpfs")
           machine.succeed("test \"$(stat -f -c %T /tmp)\" != tmpfs")
-          machine.succeed("sshd -T | grep >/dev/null -i '^permitrootlogin no'")
-          machine.succeed("sshd -T | grep >/dev/null -i '^authenticationmethods publickey'")
-          machine.succeed("sshd -T | grep >/dev/null -i '^kbdinteractiveauthentication no'")
           # The user's own key pair, made by the installer.
           machine.succeed("su - tester -c 'ssh-keygen -l -f ~/.ssh/id_ed25519' | grep >/dev/null ED25519")
           machine.succeed("stat -c '%U %a' /home/tester/.ssh /home/tester/.ssh/id_ed25519 | tr '\\n' ' ' | grep >/dev/null -x 'tester 700 tester 600 '")

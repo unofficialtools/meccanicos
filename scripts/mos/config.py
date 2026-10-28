@@ -728,7 +728,7 @@ SETTINGS = [
             from_system("auto_update", True), to_system("auto_update"), system=True, rebuild=True,
             live=False, choices=onoff),
     Setting("security.ssh", "SSH server: log in from other computers with a key",
-            from_system("ssh", True, ssh_running), to_system("ssh"), system=True, rebuild=True, live=False,
+            from_system("ssh", False, ssh_running), to_system("ssh"), system=True, rebuild=True, live=False,
             choices=onoff),
     Setting("security.tcp_ports", "TCP ports let in through the firewall (none)", from_system("tcp_ports", []),
             to_system("tcp_ports"), system=True, rebuild=True, live=False, choices=ports, example="8080,8443"),

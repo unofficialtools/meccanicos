@@ -1567,7 +1567,8 @@ def write_nixos_config(v, s, org=None):
     description = {nix_str(v['fullname'])};
     extraGroups = [ {' '.join(nix_str(g) for g in USER_GROUPS.split(','))} ];
     # Password is managed with `passwd` (users.mutableUsers = true).
-    # SSH is key-only: add keys here or in ~/.ssh/authorized_keys
+    # SSH is off until `mos-config set security.ssh on`, then key-only:
+    # add keys here or in ~/.ssh/authorized_keys
     openssh.authorizedKeys.keys = [ ];
   }};
 """

@@ -65,6 +65,7 @@ let
       pkgs.gawk
       pkgs.git # git ls-remote: the release names
       pkgs.util-linux # flock: one update at a time
+      pkgs.systemd # systemctl: is SSH in use (meccanicos.toml's ssh)
     ];
     text = ''
       export MECCANICOS_NAME=${lib.escapeShellArg distro.name}
@@ -320,8 +321,9 @@ in
   users.mutableUsers = true; # installer creates the user; passwords stay local
   users.users.root.hashedPassword = "!"; # no root login; use sudo
   security.sudo.wheelNeedsPassword = lib.mkDefault false; # passwordless sudo for wheel (local.nix may say true)
+  # Off unless asked for: mos-config set security.ssh on (meccanicos.toml).
   services.openssh = {
-    enable = true;
+    enable = lib.mkDefault false;
     openFirewall = true;
     settings = {
       # Keys only (~/.ssh/authorized_keys): no passwords, no keyboard-
