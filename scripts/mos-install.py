@@ -50,6 +50,7 @@ HOSTNAME = os.environ.get("MECCANICOS_HOSTNAME", "meccanicos")
 HOSTNAME_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 SYSTEM = os.environ.get("MECCANICOS_SYSTEM", "")
 FLAKE = os.environ.get("MECCANICOS_FLAKE", "")
+STATE_VERSION = os.environ.get("MECCANICOS_STATE_VERSION", "26.05")  # NixOS release installed with
 ISO_LABEL = os.environ.get("MECCANICOS_ISO_LABEL", "MECCANICOS_LIVE")
 TEST = os.environ.get("MECCANICOS_INSTALL_TEST") == "1"
 LUKS_MIN = 16  # minimum disk password length
@@ -1583,6 +1584,9 @@ def write_nixos_config(v, s, org=None):
   }};
   boot.kernelParams = [ {' '.join(nix_str(p) for p in params)} ];
   boot.extraModprobeConfig = "options cfg80211 ieee80211_regdom={s['country']}";
+  # The NixOS release this computer was installed with: leave it as it is,
+  # also after upgrades (services keep their data in that release's format).
+  system.stateVersion = {nix_str(STATE_VERSION)};
 {"" if org else "  # meccanicos.autoUpgrade = false;   # uncomment to stop weekly background updates" + chr(10)}{users}}}
 """
     write("/etc/nixos/local.nix", local)

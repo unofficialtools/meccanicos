@@ -517,6 +517,13 @@ in
   # Same kernel/ZFS caveat as the ISO.
   boot.supportedFilesystems.zfs = lib.mkForce false;
 
-  system.stateVersion = "26.05";
+  # The NixOS release this computer was installed with, never the one it runs:
+  # services key their data migrations on it. mos-install writes it into
+  # local.nix. Older installs have no such line there; they were all made
+  # with 26.05, so that stays their value. The prebuilt system (no local.nix)
+  # takes this release, as the installer writes.
+  system.stateVersion = lib.mkDefault (
+    if builtins.pathExists (meccanicosRoot + "/local.nix") then "26.05" else config.system.nixos.release
+  );
   };
 }

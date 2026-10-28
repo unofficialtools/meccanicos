@@ -55,6 +55,7 @@ let
       export MECCANICOS_SYSTEM_DISK_BYTES
       export MECCANICOS_FLAKE=${etcNixos}
       export MECCANICOS_COMMIT=${flakeCommit}
+      export MECCANICOS_STATE_VERSION=${config.system.nixos.release} # local.nix: system.stateVersion
       export MECCANICOS_NAME=${lib.escapeShellArg distro.name}
       export MECCANICOS_HOSTNAME=${lib.escapeShellArg distro.hostName}
       export MECCANICOS_PYLIB=${../scripts/lib}
