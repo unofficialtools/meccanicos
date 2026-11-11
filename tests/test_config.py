@@ -2,6 +2,7 @@
 import contextlib
 import io
 import os
+import shutil
 import stat
 import sys
 import tarfile
@@ -22,12 +23,83 @@ def write(folder, name, text):
 
 
 class Values(unittest.TestCase):
-    def test_ports(self):
-        self.assertEqual(cfg.ports("8443, 8080"), [8080, 8443])
-        self.assertEqual(cfg.ports("none"), [])
-        for bad in ("-1", "0", "65536", "http"):
+    def test_port_rules(self):
+        self.assertEqual(cfg.port_rules("8443/udp, 22 8443/TCP 5353/udp"), ["22/tcp", "5353/udp", "8443/tcp+udp"])
+        self.assertEqual(cfg.port_rules("60000/both"), ["60000/tcp+udp"])
+        self.assertEqual(cfg.port_rules("none"), [])
+        for bad in ("-1", "0", "65536", "http", "80/sctp", "80/"):
             with self.subTest(bad=bad), self.assertRaises(c.UsageError):
-                cfg.ports(bad)
+                cfg.port_rules(bad)
+        rules = ["22/tcp", "5353/udp", "8080/tcp+udp"]
+        self.assertEqual(cfg.split_rules(rules), ([22, 8080], [5353, 8080]))
+        self.assertEqual(cfg.join_rules(*cfg.split_rules(rules)), rules)
+        self.assertEqual(cfg.port_rules(cfg.show(rules)), rules)  # what import reads back
+
+
+class Firewall(unittest.TestCase):
+    """security.firewall and its ports, in a fake /etc/nixos/meccanicos.toml."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.toml = os.path.join(self.tmp.name, "meccanicos.toml")
+        self.stack = contextlib.ExitStack()
+        for p in (patch.object(c, "SYSTEM_TOML", self.toml),
+                  patch.object(cfg, "FIREWALL_DEFAULTS", os.path.join(self.tmp.name, "firewall.json")),
+                  patch.object(c, "run", side_effect=self.fake_run), contextlib.redirect_stderr(io.StringIO())):
+            self.stack.enter_context(p)
+
+    def tearDown(self):
+        self.stack.close()
+        self.tmp.cleanup()
+
+    def fake_run(self, *cmd, **kw):  # install -m 644 TMP DEST, without sudo
+        assert cmd[:3] == ("install", "-m", "644"), cmd
+        shutil.copy(cmd[3], cmd[4])
+        return 0, ""
+
+    def system(self, text):
+        write(self.tmp.name, "meccanicos.toml", text)
+
+    def test_managed_by_default_with_the_systems_ports(self):
+        write(self.tmp.name, "firewall.json", '{"tcp": [22], "udp": [5353]}')
+        self.assertEqual(cfg.BY_KEY["security.firewall"].get(), "managed")
+        self.assertEqual(cfg.get_firewall_ports(), ["22/tcp", "5353/udp"])
+
+    def test_managing_starts_from_what_is_open_now(self):
+        write(self.tmp.name, "firewall.json", '{"tcp": [22], "udp": [5353]}')
+        self.system("tcp_ports = [8080]\n")  # added by an older mos-config
+        cfg.set_firewall("managed")
+        self.assertEqual(cfg.system_toml(), {"tcp_ports": [22, 8080], "udp_ports": [5353], "firewall": "managed"})
+        self.assertEqual(cfg.get_firewall_ports(), ["22/tcp", "5353/udp", "8080/tcp"])
+
+    def test_not_managed_and_back_keeps_your_ports(self):
+        self.system('firewall = "not-managed"\ntcp_ports = [443]\nudp_ports = []\n')
+        cfg.set_firewall("managed")
+        self.assertEqual(cfg.system_toml(), {"firewall": "managed", "tcp_ports": [443], "udp_ports": []})
+        cfg.set_firewall("not-managed")
+        self.assertEqual(cfg.system_toml()["tcp_ports"], [443])  # kept, unused while not managed
+        for bad in ("on", "off", "true"):
+            with self.subTest(bad=bad), self.assertRaises(c.UsageError):
+                cfg.BY_KEY["security.firewall"].parse(bad)
+
+    def test_ports_are_stored_as_two_lists(self):
+        cfg.BY_KEY["security.firewall_ports"]._set(cfg.port_rules("8080/tcp+udp 5353/udp"))
+        self.assertEqual(cfg.system_toml(), {"tcp_ports": [8080], "udp_ports": [5353, 8080], "firewall": "managed"})
+
+    def test_ssh_on_lets_22_in_when_managed(self):
+        self.system('firewall = "managed"\ntcp_ports = [443]\n')
+        cfg.set_ssh(True)
+        self.assertEqual(cfg.system_toml()["tcp_ports"], [22, 443])
+        self.system("tcp_ports = [443]\n")  # not managed: the system opens 22 itself
+        cfg.set_ssh(True)
+        self.assertEqual(cfg.system_toml()["tcp_ports"], [443])
+
+    def test_old_names(self):
+        with self.assertRaises(c.UsageError) as e:
+            cfg.setting("security.tcp_ports")
+        self.assertIn("security.firewall_ports", str(e.exception))
+        data = cfg.renamed({"security": {"tcp_ports": [22, 80], "udp_ports": [80], "ssh": True}})
+        self.assertEqual(data, {"security": {"ssh": True, "firewall_ports": ["22/tcp", "80/tcp+udp"]}})
 
     def test_time_zone_is_not_a_path(self):
         for bad in ("/etc/passwd", "../../etc/passwd", "Europe/../../etc/passwd"):

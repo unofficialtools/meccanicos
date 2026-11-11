@@ -1,0 +1,5 @@
+# The firewall managed by mos-config (checks.firewall): only these come in, SSH on or not.
+firewall = "managed"
+ssh = true
+tcp_ports = [8080]
+udp_ports = [5353, 8080]

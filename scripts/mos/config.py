@@ -119,10 +119,10 @@ def system_toml():
     return read_toml(c.SYSTEM_TOML)
 
 
-def set_system_toml(key, value):
-    """Change one key of /etc/nixos/meccanicos.toml (as root)."""
+def set_system_toml(key, value=None):
+    """Change one key of /etc/nixos/meccanicos.toml (as root), or several: {key: value}."""
     data = system_toml()
-    data[key] = value
+    data.update(key if isinstance(key, dict) else {key: value})
     tmp = tempfile.NamedTemporaryFile("w", delete=False, suffix=".toml")
     tmp.close()
     write_toml(tmp.name, data, "# Written by mos-config (modules/settings.nix reads it).")
@@ -179,16 +179,99 @@ def minutes(text):
     raise c.UsageError("minutes, or never")
 
 
-def ports(text):
-    if text in ("", "none"):
+# security.firewall / security.firewall_ports -- in /etc/nixos/meccanicos.toml as
+# firewall = "managed" | "not-managed" and tcp_ports, udp_ports (modules/settings.nix).
+# Managed (the default): the same ports come in on every network card, loopback and
+# everything going out stay allowed; until the ports are listed here they are the system's
+# own. Not managed: the system's own firewall, untouched.
+FIREWALL_DEFAULTS = "/etc/meccanicos/firewall.json"  # what the system opens by itself (settings.nix)
+
+
+def port_rules(text):
+    """'22/tcp, 5353/udp, 8080' -> ['22/tcp', '5353/udp', '8080/tcp']: each port once, by
+    number, with tcp, udp or tcp+udp (a bare number is tcp)."""
+    if text.strip() in ("", "none"):
         return []
+    found = {}
+    for item in text.replace(",", " ").split():
+        port, slash, protos = item.partition("/")
+        protos = set((protos if slash else "tcp").lower().replace("both", "tcp+udp").split("+"))
+        if not port.isdigit() or not 1 <= int(port) <= 65535 or not protos <= {"tcp", "udp"}:
+            raise c.UsageError("ports like 22/tcp, 5353/udp, 8080/tcp+udp (1 to 65535; or none)")
+        found.setdefault(int(port), set()).update(protos)
+    return [rule(p, "tcp" in found[p], "udp" in found[p]) for p in sorted(found)]
+
+
+def rule(port, tcp, udp):
+    return f"{port}/{'+'.join(n for n, on in (('tcp', tcp), ('udp', udp)) if on)}"
+
+
+def split_rules(rules):
+    """['22/tcp', '8080/tcp+udp'] -> ([22, 8080], [8080])"""
+    tcp, udp = [], []
+    for r in rules:
+        port, protos = r.split("/")
+        for name, out in (("tcp", tcp), ("udp", udp)):
+            if name in protos.split("+"):
+                out.append(int(port))
+    return tcp, udp
+
+
+def join_rules(tcp, udp):
+    return [rule(p, p in tcp, p in udp) for p in sorted(set(tcp) | set(udp))]
+
+
+def listed(data):
+    """The ports were chosen here (otherwise the system's own come in)."""
+    return "firewall" in data and ("tcp_ports" in data or "udp_ports" in data)
+
+
+def get_firewall_ports():
+    data = system_toml()
+    if listed(data):
+        return join_rules(data.get("tcp_ports", []), data.get("udp_ports", []))
+    return join_rules(*system_ports(data))
+
+
+def set_firewall_ports(rules):
+    tcp, udp = split_rules(rules)
+    change = {"tcp_ports": tcp, "udp_ports": udp}
+    if "firewall" not in system_toml():  # managed by default: from now on exactly these
+        change["firewall"] = "managed"
+    set_system_toml(change)
+
+
+def system_ports(data):
+    """The ports the system opens now by itself: SSH, printer discovery, ... (as the last
+    build wrote them), with the ones an older mos-config added."""
     try:
-        found = sorted({int(p) for p in text.replace(",", " ").split()})
-    except ValueError:
-        found = [0]
-    if not all(1 <= p <= 65535 for p in found):
-        raise c.UsageError("port numbers from 1 to 65535, e.g. 8080,8443 (or none)")
-    return found
+        with open(FIREWALL_DEFAULTS) as f:
+            found = json.load(f)
+    except (OSError, ValueError):  # not built with it yet: what MeccanicOS opens
+        found = {"tcp": [22] if data.get("ssh") else [], "udp": [5353]}
+    return (found.get("tcp", []) + data.get("tcp_ports", []), found.get("udp", []) + data.get("udp_ports", []))
+
+
+FIREWALL = ["managed", "not-managed"]
+
+
+def set_firewall(mode):
+    data = system_toml()
+    change = {"firewall": mode}
+    if mode == "managed" and not listed(data):  # no ports chosen yet: start from what is open now
+        tcp, udp = system_ports(data)
+        change |= {"tcp_ports": sorted(set(tcp)), "udp_ports": sorted(set(udp))}
+        c.info("incoming: " + (", ".join(join_rules(tcp, udp)) or "none") + " (security.firewall_ports)")
+    set_system_toml(change)
+
+
+def set_ssh(on):
+    data = system_toml()
+    change = {"ssh": on}
+    if on and listed(data) and data["firewall"] == "managed" and 22 not in data.get("tcp_ports", []):
+        change["tcp_ports"] = sorted(data.get("tcp_ports", []) + [22])  # or nobody could reach it
+        c.info("22/tcp added to security.firewall_ports")
+    set_system_toml(change)
 
 
 def percent_or_off(text):
@@ -728,12 +811,15 @@ SETTINGS = [
             from_system("auto_update", True), to_system("auto_update"), system=True, rebuild=True,
             live=False, choices=onoff),
     Setting("security.ssh", "SSH server: log in from other computers with a key",
-            from_system("ssh", False, ssh_running), to_system("ssh"), system=True, rebuild=True, live=False,
+            from_system("ssh", False, ssh_running), set_ssh, system=True, rebuild=True, live=False,
             choices=onoff),
-    Setting("security.tcp_ports", "TCP ports let in through the firewall (none)", from_system("tcp_ports", []),
-            to_system("tcp_ports"), system=True, rebuild=True, live=False, choices=ports, example="8080,8443"),
-    Setting("security.udp_ports", "UDP ports let in through the firewall (none)", from_system("udp_ports", []),
-            to_system("udp_ports"), system=True, rebuild=True, live=False, choices=ports, example="none"),
+    Setting("security.firewall", "managed: only security.firewall_ports come in, on every network card; "
+            "loopback and going out always allowed (not-managed: the system's own rules)",
+            from_system("firewall", "managed"), set_firewall, system=True, rebuild=True, live=False,
+            choices=FIREWALL),
+    Setting("security.firewall_ports", "ports let in when security.firewall is managed: 22/tcp, 5353/udp, "
+            "8080/tcp+udp (none)", get_firewall_ports, set_firewall_ports, system=True, rebuild=True,
+            live=False, choices=port_rules, example="22/tcp,8080/tcp+udp"),
     Setting("security.remote_unlock", "unlock the disk over SSH while starting (mos-unlock)",
             get_remote_unlock, set_remote_unlock, system=True, live=False, choices=onoff),
     Setting("security.login_alerts", "alerts on SSH logins from somewhere new and SSH attacks (mos-logins)",
@@ -766,8 +852,13 @@ def show(v, s=None):
     return str(v)
 
 
+RENAMED = {"security.tcp_ports": "security.firewall_ports", "security.udp_ports": "security.firewall_ports"}
+
+
 def setting(key):
     s = BY_KEY.get(key)
+    if key in RENAMED:
+        raise c.UsageError(f"{key} is now {RENAMED[key]}, e.g. 8080/tcp,5353/udp (with security.firewall managed)")
     if not s:
         near = [k for k in BY_KEY if key.split(".")[-1] in k]
         raise c.UsageError(f"no setting {key}" + (f" (did you mean {', '.join(near)}?)" if near else
@@ -785,7 +876,16 @@ SECRETS = [".ssh/id_*", ".ssh/*.pem", "*token*", "*secret*", "*.pass", "*passwor
 
 
 def mine():
-    return read_toml(c.SETTINGS)
+    return renamed(read_toml(c.SETTINGS))
+
+
+def renamed(data):
+    """settings.toml from before security.firewall_ports: its two lists become that one."""
+    sec = data.get("security", {})
+    if "tcp_ports" in sec or "udp_ports" in sec:
+        tcp, udp = sec.pop("tcp_ports", []), sec.pop("udp_ports", [])
+        sec.setdefault("firewall_ports", join_rules(tcp, udp))
+    return data
 
 
 def remember(key, value):
@@ -1337,7 +1437,7 @@ def cmd_import(args):
         raise c.UsageError("mos-config import FILE")
     yes = "--yes" in flags
     try:
-        data = read_toml(files[0])
+        data = renamed(read_toml(files[0]))
     except (OSError, tomllib.TOMLDecodeError) as e:
         raise c.Failed(f"cannot read {files[0]}: {e}")
     # Every value checked first, as `set` checks it; what can't be used here is left out.

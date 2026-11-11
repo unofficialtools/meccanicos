@@ -454,8 +454,8 @@ mos-dropbox status | logout
 **Configuration Management** in the menu (`mos-config`) shows the common
 settings in one place — screen scale, resolution and rotation (landscape or
 portrait), wallpaper, screensaver and lock, keyboard layouts, touchpad, power, sound,
-clock, time zone and, once installed, the lid, hibernation, updates, SSH and
-firewall ports, the graphics driver, the computer name:
+clock, time zone and, once installed, the lid, hibernation, updates, SSH, the
+firewall, the graphics driver, the computer name:
 
 In a terminal, `mos-config` opens them full screen: move with the arrows, Enter
 changes the one under the cursor (pick from a list, flip on/off, or type it),
@@ -633,6 +633,14 @@ server that is off** until `mos-config set security.ssh on` (then key login only
 The firewall lets everything out but nothing unsolicited in, except SSH (TCP 22,
 installed systems, once turned on) and printer/scanner discovery (mDNS, UDP 5353); pings are
 ignored.
+`mos-config` manages the firewall (`security.firewall managed`, the default): the same ports come
+in on every network card, while loopback and everything going out stay allowed. Until you change
+them the ports are the system's own (the ones above); once you choose them in
+`security.firewall_ports` only those are let in. In `mos-config` each port has a TCP and a UDP
+check box, and on the command line it is
+`mos-config set security.firewall_ports 22/tcp,5353/udp,8080/tcp+udp`. Turning SSH on adds
+22/tcp. With `mos-config set security.firewall not-managed` the firewall is the system's own, and
+mos-config doesn't change its rules.
 Names (DNS) are looked up through a local cache (systemd-resolved), asking the servers the
 network provides, so hotel/café sign-in pages, VPN-only names and the router's names work;
 Cloudflare `1.1.1.1` and Google `8.8.8.8` only when a network provides none. To always use those
@@ -727,7 +735,7 @@ Commits to `main` reach no one until they are released.
 | Update now | `mos-upgrade`: the newest MeccanicOS release and NixOS packages (`--check` shows yours and the newest, `--boot` applies at the next restart; `mos-update` is the same) |
 | Another version | `mos-upgrade --list` shows the releases; `mos-upgrade --to v2026-10-12` goes to one and stays on it, `--to 5b31f5e` a commit, `--to main` follows development (untested), `--to latest` follows the releases again |
 | Automatic updates | weekly in the background, applied at the next restart (notification); off with `mos-config set updates.auto off` |
-| SSH, firewall ports, lid, hibernation, graphics driver | `mos-config set security.ssh on`, `mos-config set security.tcp_ports 8080` … (`mos-config` lists them) |
+| SSH, firewall ports, lid, hibernation, graphics driver | `mos-config set security.ssh on`, `mos-config set security.firewall not-managed`, `mos-config set security.firewall_ports 22/tcp,8080/tcp+udp` … (`mos-config` lists them) |
 | Computer name (hostname) | `mos-config set network.hostname laptop` (rebuilds; open windows keep working) |
 | Always public DNS (Cloudflare, Google) | `mos-config set network.public_dns on` (rebuilds; hotel sign-in pages and VPN-only names may stop working) |
 | Something isn't working | `mos-doctor` |

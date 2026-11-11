@@ -6,6 +6,9 @@ collected and applied together on the way out. Anything that may ask a
 question (a sudo password, export/import, the doctor, the rebuild) runs on
 the plain terminal, then the view comes back.
 
+security.firewall_ports opens a box of its own: a line per port, with a TCP and a
+UDP check box.
+
 Network comes first: not settings but what `mos-config network` does (join
 a Wi-Fi network, sign in to a hotel/café network, VPNs on and off).
 """
@@ -201,6 +204,65 @@ class App:
             elif k in (ESC, "q", curses.KEY_LEFT):
                 return None
 
+    def ports_box(self, rules):
+        """The incoming ports, each with a TCP and a UDP check box; the new rules, or None (Esc)."""
+        tcp, udp = cfg.split_rules(rules)
+        lines = [[p, p in tcp, p in udp] for p in sorted(set(tcp) | set(udp))]
+        add = "+ add a port"
+        help = "↑↓ ←→ move  Space tick  a add  x remove  Enter save  Esc cancel"
+        i, col, note = 0, 1, ""  # col 1: TCP, 2: UDP
+        while True:
+            h, w = self.scr.getmaxyx()
+            ph, pw = min(len(lines) + 7, h - 2), min(max(len(help) + 4, 44), w - 2)
+            win = curses.newwin(ph, pw, (h - ph) // 2, (w - pw) // 2)
+            win.keypad(True)
+            n = ph - 6  # lines of ports + the add line that fit
+            i = min(i, len(lines))
+            top = max(0, i - n + 1)
+            ui.frame(win, "Incoming ports (every network card)")
+            ui.put(win, 1, 2, "port     TCP   UDP", ui.attr(ui.HEADING))
+            for r, line in enumerate((lines + [None])[top: top + n]):
+                at = top + r
+                if line is None:
+                    ui.row(win, 2 + r, 1, pw - 2, f" {add}", at == i)
+                    continue
+                port, t, u = line
+                ui.row(win, 2 + r, 1, pw - 2, f" {port:<7}  [{'x' if t else ' '}]   [{'x' if u else ' '}]", False)
+                if at == i:  # the box under the cursor
+                    ui.put(win, 2 + r, 11 if col == 1 else 17, f"[{'x' if line[col] else ' '}]", ui.attr(ui.SELECTED))
+            ui.put(win, ph - 3, 2, note or "Loopback and everything going out are always allowed.", ui.attr(ui.DIM))
+            ui.put(win, ph - 2, 2, help, ui.attr(ui.DIM))
+            win.refresh()
+            note = ""
+            k = win.get_wch()
+            if k in (curses.KEY_UP, "k"):
+                i = max(0, i - 1)
+            elif k in (curses.KEY_DOWN, "j"):
+                i = min(len(lines), i + 1)
+            elif k in (curses.KEY_LEFT, "h", curses.KEY_RIGHT, "l", "\t"):
+                col = 3 - col
+            elif k in ("t", "u") and i < len(lines):
+                lines[i][1 if k == "t" else 2] ^= True
+            elif k == " " and i < len(lines):
+                lines[i][col] ^= True
+            elif k == "a" or (k in (" ", *ENTER) and i == len(lines)):
+                text = self.prompt("Port to let in (1-65535)")
+                if text:
+                    if text.isdigit() and 1 <= int(text) <= 65535:
+                        port = int(text)
+                        if port not in [line[0] for line in lines]:
+                            lines.append([port, True, False])
+                            lines.sort()
+                        i = [line[0] for line in lines].index(port)
+                    else:
+                        note = f"✗ {text}: a port is a number from 1 to 65535"
+            elif k in ("x", "d", curses.KEY_DC) and i < len(lines):
+                del lines[i]
+            elif k in ENTER:
+                return [cfg.rule(p, t, u) for p, t, u in lines if t or u]  # neither ticked: closed
+            elif k in (ESC, "q"):
+                return None
+
     def prompt(self, label, text="", secret=False):
         """A field to type in, on the message line; returns the text or None (Esc)."""
         ui.cursor(True)
@@ -280,6 +342,11 @@ class App:
             except (c.Failed, c.UsageError, OSError) as e:
                 self.msg = f"✗ {e}"
             self.load()
+            return
+        if s.key == "security.firewall_ports":
+            value = self.ports_box(s.get() or [])
+            if value is not None:
+                self.apply(s, value)
             return
         if s.choices is cfg.onoff:
             text = "off" if cur == "on" else "on"

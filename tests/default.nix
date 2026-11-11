@@ -4,6 +4,7 @@
 #   nix build .#checks.x86_64-linux.install  -L   # install to a virtual disk, boot it with LUKS
 #   nix build .#checks.x86_64-linux.ventoy   -L   # boot the ISO file from a Ventoy stick
 #   nix build .#checks.x86_64-linux.fleet    -L   # the fleet: server, admin, a managed computer
+#   nix build .#checks.x86_64-linux.firewall    # mos-config's firewall settings (no VM)
 #   nix flake check -L                            # both
 #
 # Screenshots end up in ./result/ (desktop.png, command-bar.png, cheat-sheet.png).
@@ -113,6 +114,55 @@ in
 {
   # The fleet: server, admin, a managed computer (tests/fleet.nix).
   fleet = (import ./fleet.nix { inherit self nixpkgs system; }).test;
+
+  # security.firewall (modules/settings.nix), evaluated with the meccanicos.toml files in
+  # tests/firewall/: managed, exactly the ports listed (loopback trusted, the same on every
+  # card); no firewall key, managed with the system's own ports; not managed, the system's
+  # own rules, whatever the ports say.
+  firewall =
+    let
+      got =
+        name:
+        let
+          c = (self.lib.mkInstalled { root = ./firewall + "/${name}"; }).config;
+          fw = c.networking.firewall;
+        in
+        {
+          tcp = lib.sort lib.lessThan fw.allowedTCPPorts;
+          udp = lib.sort lib.lessThan fw.allowedUDPPorts;
+          ranges = fw.allowedTCPPortRanges ++ fw.allowedUDPPortRanges;
+          trusted = fw.trustedInterfaces;
+          seen = c.environment.etc."meccanicos/firewall.json".text or null;
+        };
+      want = {
+        managed = {
+          tcp = [ 8080 ];
+          udp = [ 5353 8080 ];
+          ranges = [ ];
+          trusted = [ "lo" ];
+          seen = null;
+        };
+        default = {
+          tcp = [ 22 8080 ];
+          udp = [ 5353 ];
+          ranges = [ ];
+          trusted = [ "lo" ];
+          seen = builtins.toJSON { tcp = [ 22 8080 ]; udp = [ 5353 ]; };
+        };
+        not-managed = {
+          tcp = [ 22 ];
+          udp = [ 5353 ];
+          ranges = [ ];
+          trusted = [ "lo" ];
+          seen = builtins.toJSON { tcp = [ 22 ]; udp = [ 5353 ]; };
+        };
+      };
+      wrong = lib.filter (n: got n != want.${n}) (lib.attrNames want);
+    in
+    assert lib.assertMsg (wrong == [ ]) (
+      lib.concatMapStrings (n: "firewall ${n}: ${builtins.toJSON (got n)}, not ${builtins.toJSON want.${n}}\n") wrong
+    );
+    pkgs.runCommand "firewall-settings" { } "touch $out";
 
   live = pkgs.testers.runNixOSTest {
     name = "mos-live";
@@ -356,9 +406,16 @@ in
           machine.succeed("su - tester -c 'ssh-keygen -l -f ~/.ssh/id_ed25519' | grep >/dev/null ED25519")
           machine.succeed("stat -c '%U %a' /home/tester/.ssh /home/tester/.ssh/id_ed25519 | tr '\\n' ' ' | grep >/dev/null -x 'tester 700 tester 600 '")
           # mos-config writes system settings to /etc/nixos/meccanicos.toml (applied by the next rebuild).
-          machine.succeed("su - tester -c 'mos-config set security.tcp_ports 8080,8443 --no-rebuild'")
+          # The firewall is managed by default, starting from what the system lets in (printer discovery).
+          machine.succeed("su - tester -c 'mos-config get security.firewall' | grep >/dev/null -x managed")
+          machine.succeed("su - tester -c 'mos-config get security.firewall_ports' | grep >/dev/null -x 5353/udp")
+          machine.succeed("su - tester -c 'mos-config set security.firewall_ports 8080/tcp,8443/tcp+udp --no-rebuild'")
+          machine.succeed("grep -qx 'firewall = \"managed\"' /etc/nixos/meccanicos.toml")
           machine.succeed("grep -qx 'tcp_ports = \\[8080, 8443\\]' /etc/nixos/meccanicos.toml")
-          machine.succeed("su - tester -c 'mos-config get security.tcp_ports' | grep >/dev/null -x 8080,8443")
+          machine.succeed("grep -qx 'udp_ports = \\[8443\\]' /etc/nixos/meccanicos.toml")
+          machine.succeed("su - tester -c 'mos-config get security.firewall_ports' | grep >/dev/null -x 8080/tcp,8443/tcp+udp")
+          machine.succeed("su - tester -c 'mos-config set security.firewall not-managed --no-rebuild'")
+          machine.succeed("grep -qx 'firewall = \"not-managed\"' /etc/nixos/meccanicos.toml")
           machine.succeed("su - tester -c 'mos-config set network.hostname newbox --no-rebuild'")
           machine.succeed("grep -qx 'hostname = \"newbox\"' /etc/nixos/meccanicos.toml")
           machine.fail("grep -q hostname /home/tester/.config/meccanicos/settings.toml")  # stays with this machine
@@ -368,6 +425,8 @@ in
           machine.fail("iptables -S nixos-fw | grep >/dev/null -- '17500'")
           machine.fail("iptables -S nixos-fw | grep >/dev/null -- '60000:61000'")
           machine.fail("iptables -S nixos-fw | grep >/dev/null -- 'icmp-type 8'")
+          machine.succeed("iptables -S nixos-fw | grep >/dev/null -x -- '-A nixos-fw -i lo -j nixos-fw-accept'")
+          machine.succeed("iptables -S OUTPUT | grep >/dev/null -x -- '-P OUTPUT ACCEPT'")  # all out
           machine.succeed("grep -q 'LC_TIME=it_IT.UTF-8' /etc/locale.conf")
           machine.succeed("readlink /etc/localtime | grep >/dev/null Europe/Rome")
           machine.succeed("test -f /etc/nixos/flake.nix -a -f /etc/nixos/local.nix -a -f /etc/nixos/hardware-configuration.nix")

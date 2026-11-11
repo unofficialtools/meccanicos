@@ -1,0 +1,4 @@
+# No firewall key (checks.firewall): managed, with the system's own ports (SSH opens 22) and
+# the ones an older mos-config added.
+ssh = true
+tcp_ports = [8080]

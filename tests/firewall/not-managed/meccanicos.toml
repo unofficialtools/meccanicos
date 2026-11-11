@@ -1,0 +1,4 @@
+# The firewall not managed (checks.firewall): the ports below are not used, SSH opens 22 itself.
+firewall = "not-managed"
+ssh = true
+tcp_ports = [8080]
