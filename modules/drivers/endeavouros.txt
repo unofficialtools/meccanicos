@@ -1,5 +1,5 @@
 #@ upstream: endeavouros-team/EndeavourOS-ISO packages.x86_64
-#@ commit: 4ea6e5dd7b8acc494ff6320b98116486c18e68ba (2026-09-27)
+#@ commit: 0bbb1280ccd373262561453d85201f2707483990 (2026-11-04)
 #@ MeccanicOS's answer to each package: map.toml. Refresh: ./start drivers-check --update
 # BASE
 
@@ -192,6 +192,7 @@ mkinitcpio-nfs-utils
 nbd
 pv
 syslinux
+python-toml
 
 ## Live iso tools
 clonezilla
@@ -227,7 +228,6 @@ kdeconnect
 kdegraphics-thumbnailers
 kdenetwork-filesharing
 kdeplasma-addons
-kgamma
 kimageformats
 kinfocenter
 kio-admin
@@ -237,7 +237,6 @@ konsole
 kscreen
 kwallet-pam
 kwayland-integration
-kwin-x11
 libappindicator
 okular
 plasma-browser-integration
@@ -247,11 +246,11 @@ plasma-keyboard
 plasma-login-manager
 plasma-nm
 plasma-pa
-plasma-x11-session
 plasma-systemmonitor
 plasma-workspace
 powerdevil
 print-manager
+tesseract-data-eng
 spectacle
 xdg-desktop-portal-kde
 xsettingsd
@@ -289,6 +288,6 @@ welcome
 yay
 
 ## Calamares EndeavourOS
-calamares
+#calamares --> not in repo anymore build yourself
 ckbcomp
 

@@ -365,6 +365,8 @@ skip = "Arch's ISO tooling (booting from NFS)"
 skip = "network block devices: not shipped"
 [syslinux]
 by = ["package:syslinux"]
+[python-toml]
+skip = "a Python library (EndeavourOS's ISO tooling): per project, with uv"
 
 [clonezilla]
 by = ["package:fsarchiver", "package:ddrescue"]
@@ -430,8 +432,6 @@ by = ["package:tumbler"]
 skip = "Samba sharing from the file manager: not shipped"
 [kdeplasma-addons]
 skip = "KDE Plasma: the desktop is Xfce"
-[kgamma]
-skip = "KDE Plasma: the desktop is Xfce"
 [kimageformats]
 skip = "KDE Plasma: the desktop is Xfce"
 [kinfocenter]
@@ -450,8 +450,6 @@ by = ["package:xfce4-settings"]
 by = ["package:gnome-keyring"]
 [kwayland-integration]
 skip = "KDE Plasma: the desktop is Xfce"
-[kwin-x11]
-by = ["package:xfwm4"]
 [libappindicator]
 skip = "a library: Nix brings libraries with what uses them"
 [okular]
@@ -474,14 +472,14 @@ by = ["package:xfce4-pulseaudio-plugin"]
 by = ["package:xfce4-taskmanager", "package:btop"]
 [plasma-workspace]
 by = ["package:xfce4-session"]
-[plasma-x11-session]
-by = ["package:xfce4-session"]
 [powerdevil]
 by = ["package:xfce4-power-manager"]
 [print-manager]
 by = ["package:system-config-printer"]
 [spectacle]
 by = ["package:xfce4-screenshooter"]
+[tesseract-data-eng]
+skip = "English text recognition (OCR) data for Spectacle (KDE Plasma): the desktop is Xfce"
 [xdg-desktop-portal-kde]
 by = ["package:xdg-desktop-portal-gtk"]
 [xsettingsd]
@@ -537,7 +535,5 @@ skip = "pacman's mirror ranking"
 by = ["package:mos-about"]
 [yay]
 skip = "the AUR: nixpkgs instead (mos-apps)"
-[calamares]
-by = ["package:mos-install"]
 [ckbcomp]
 skip = "keyboard maps for Calamares: mos-install's own"
