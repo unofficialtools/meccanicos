@@ -4,7 +4,8 @@
 
 <p align="center"><a href="https://meccanicos.com"><b>meccanicos.com</b></a> ·
 <a href="#1-make-a-usb-drive">Make a USB drive</a> ·
-<a href="https://github.com/unofficialtools/meccanicos/releases/tag/latest">Latest release</a></p>
+<a href="https://github.com/unofficialtools/meccanicos/releases/tag/latest">Latest release</a> ·
+<a href="https://mdipierro.github.io/">Author</a></p>
 
 <p align="center"><a href="https://github.com/unofficialtools/meccanicos/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/unofficialtools/meccanicos/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI on main: passing or failing"></a></p>
 
