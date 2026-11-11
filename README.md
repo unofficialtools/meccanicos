@@ -925,6 +925,8 @@ and [CONTRIBUTING.md](CONTRIBUTING.md) before sending a pull request.
 
 ## Credits
 
+MeccanicOS is created by [Massimo Di Pierro](https://mdipierro.github.io/).
+
 Built on [NixOS](https://nixos.org). Driver selection mirrors
 [EndeavourOS](https://endeavouros.com)'s live ISO. Local AI by
 [Ollama](https://ollama.com) and [aichat](https://github.com/sigoden/aichat).
