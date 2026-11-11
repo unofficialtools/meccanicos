@@ -11,12 +11,12 @@
 # read-only).
 { pkgs, ... }:
 let
-  version = "3.13.14";
-  release = "20260610";
+  version = "3.13.18";
+  release = "20261110";
   python = pkgs.runCommand "python-standalone-${version}" {
     src = pkgs.fetchurl {
       url = "https://github.com/astral-sh/python-build-standalone/releases/download/${release}/cpython-${version}%2B${release}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz";
-      hash = "sha256-1gfhjoMiegUnzz9UpIvpc6dTWKaIXkvmfUsDWbbxyIA=";
+      hash = "sha256-8tIZnrJYgOB4Y7ORz3Ek5/+hM4sNZWAN/OwRfEIjp/s=";
     };
   } ''
     # runCommand skips the fixup phase, so the binaries stay untouched
